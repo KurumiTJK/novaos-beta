@@ -1,152 +1,129 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// NOVAOS SERVER — Main Entry Point
-// Phase 1 Implementation
+// NOVAOS BACKEND — Server Entry Point
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import express from 'express';
-import { createPipeline } from './pipeline/execution-pipeline.js';
-import { createRoutes, errorHandler } from './api/routes.js';
-import { createNonceStore, getDefaultNonceStore } from './storage/nonce-store.js';
-import { createAuditLogger, getDefaultAuditLogger } from './audit/audit-adapter.js';
-import { InMemorySparkMetricsStore } from './helpers/spark-eligibility.js';
+import cors from 'cors';
+import { createRouter, errorHandler } from './api/routes.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CONFIGURATION
+// ENVIRONMENT CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
 
-interface ServerConfig {
-  port: number;
-  ackTokenSecret: string;
-  enableAuditLogging: boolean;
-  enableWebVerification: boolean;
-}
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
+const NODE_ENV = process.env.NODE_ENV ?? 'development';
 
-function loadConfig(): ServerConfig {
-  return {
-    port: parseInt(process.env.PORT || '3000', 10),
-    ackTokenSecret: process.env.ACK_TOKEN_SECRET || 'development-secret-change-in-production',
-    enableAuditLogging: process.env.ENABLE_AUDIT_LOGGING !== 'false',
-    enableWebVerification: process.env.ENABLE_WEB_VERIFICATION === 'true',
-  };
-}
+// Provider configuration
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const PREFERRED_PROVIDER = (process.env.PREFERRED_PROVIDER as 'openai' | 'gemini' | 'mock') ?? 'openai';
+const USE_MOCK = process.env.USE_MOCK_PROVIDER === 'true';
+
+// Auth configuration
+const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SERVER SETUP
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export async function createServer(): Promise<express.Application> {
-  const config = loadConfig();
-  const app = express();
+const app = express();
 
-  // Middleware
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: true }));
+// CORS
+app.use(cors({
+  origin: NODE_ENV === 'production'
+    ? process.env.ALLOWED_ORIGINS?.split(',') ?? []
+    : '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+}));
 
-  // CORS (configure properly in production)
-  app.use((_req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-User-Id');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    next();
-  });
+// Body parsing
+app.use(express.json({ limit: '1mb' }));
 
-  // Request logging
-  app.use((req, _res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.path}`);
-    next();
-  });
-
-  // Initialize stores
-  const nonceStore = getDefaultNonceStore();
-  const sparkMetricsStore = new InMemorySparkMetricsStore();
-  const auditLogger = config.enableAuditLogging ? getDefaultAuditLogger() : undefined;
-
-  // Web fetcher (placeholder - implement with actual HTTP client in production)
-  const webFetcher = config.enableWebVerification ? {
-    async search(query: string, options?: { limit?: number }) {
-      console.log(`[WEB] Search: ${query} (limit: ${options?.limit})`);
-      // Placeholder - return empty results
-      return [];
-    },
-    async fetch(url: string) {
-      console.log(`[WEB] Fetch: ${url}`);
-      // Placeholder - return mock result
-      return {
-        url,
-        content: '',
-        title: 'Mock Page',
-        fetchedAt: new Date(),
-        success: false,
-        error: 'Web fetcher not implemented',
-      };
-    },
-  } : null;
-
-  // Create pipeline
-  const pipeline = createPipeline({
-    nonceStore,
-    sparkMetricsStore,
-    auditLogger,
-    ackTokenSecret: config.ackTokenSecret,
-    webFetcher,
-  });
-
-  // Mount routes
-  const routes = createRoutes({ pipeline });
-  app.use('/api/v1', routes);
-
-  // Health check at root
-  app.get('/', (_req, res) => {
-    res.json({
-      name: 'NovaOS Backend',
-      version: '4.0.0',
-      status: 'running',
-    });
-  });
-
-  // Error handler
-  app.use(errorHandler);
-
-  return app;
-}
+// Request logging
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// MAIN
+// ROUTES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  try {
-    const config = loadConfig();
-    const app = await createServer();
+// Health check at root for load balancers
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', service: 'novaos-backend' });
+});
 
-    app.listen(config.port, () => {
-      console.log('═══════════════════════════════════════════════════════════════════');
-      console.log('  NovaOS Backend v4.0.0');
-      console.log('═══════════════════════════════════════════════════════════════════');
-      console.log(`  Server running on port ${config.port}`);
-      console.log(`  Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`  Audit logging: ${config.enableAuditLogging ? 'enabled' : 'disabled'}`);
-      console.log(`  Web verification: ${config.enableWebVerification ? 'enabled' : 'disabled'}`);
-      console.log('═══════════════════════════════════════════════════════════════════');
-      console.log('');
-      console.log('  Endpoints:');
-      console.log('    POST /api/v1/chat          - Main chat endpoint');
-      console.log('    POST /api/v1/parse-command - Command parser');
-      console.log('    GET  /api/v1/health        - Health check');
-      console.log('    GET  /api/v1/versions      - Policy versions');
-      console.log('');
-      console.log('═══════════════════════════════════════════════════════════════════');
-    });
+// API routes
+const router = createRouter({
+  openaiApiKey: OPENAI_API_KEY,
+  geminiApiKey: GEMINI_API_KEY,
+  preferredProvider: PREFERRED_PROVIDER,
+  useMockProvider: USE_MOCK,
+  requireAuth: REQUIRE_AUTH,
+});
 
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-}
+app.use('/api/v1', router);
 
-// Run if executed directly
-if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
-  main();
-}
+// Error handler (must be last)
+app.use(errorHandler);
 
-export { loadConfig };
+// ─────────────────────────────────────────────────────────────────────────────────
+// START SERVER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const server = app.listen(PORT, () => {
+  const providerStatus = USE_MOCK 
+    ? 'mock' 
+    : [OPENAI_API_KEY ? 'openai' : '', GEMINI_API_KEY ? 'gemini' : ''].filter(Boolean).join(', ') || 'none (mock fallback)';
+  
+  console.log(`
+╔═══════════════════════════════════════════════════════════════════╗
+║                     NOVAOS BACKEND v3.0.0                        ║
+╠═══════════════════════════════════════════════════════════════════╣
+║  Environment:  ${NODE_ENV.padEnd(49)}║
+║  Port:         ${String(PORT).padEnd(49)}║
+║  Providers:    ${providerStatus.padEnd(49)}║
+║  Preferred:    ${PREFERRED_PROVIDER.padEnd(49)}║
+║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(49)}║
+╚═══════════════════════════════════════════════════════════════════╝
+
+Endpoints:
+  GET  /                       Root health check
+  GET  /api/v1/health          Detailed health status
+  GET  /api/v1/version         Version and feature info
+  GET  /api/v1/providers       Available providers
+  
+  POST /api/v1/auth/register   Get token (dev mode)
+  GET  /api/v1/auth/verify     Verify token
+  GET  /api/v1/auth/status     User status
+  
+  POST /api/v1/chat            Main chat endpoint
+  POST /api/v1/parse-command   Explicit action parsing
+  
+  POST /api/v1/admin/block-user    Block a user
+  POST /api/v1/admin/unblock-user  Unblock a user
+
+Ready to enforce the Nova Constitution.
+  `);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[SERVER] SIGTERM received, shutting down...');
+  server.close(() => {
+    console.log('[SERVER] Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('[SERVER] SIGINT received, shutting down...');
+  server.close(() => {
+    console.log('[SERVER] Server closed');
+    process.exit(0);
+  });
+});
+
+export { app, server };

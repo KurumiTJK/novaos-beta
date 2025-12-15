@@ -4,14 +4,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      include: ['src/**/*.ts'],
+      exclude: ['src/tests/**', 'src/types/**'],
     },
     testTimeout: 10000,
-  },
-  resolve: {
-    extensions: ['.ts', '.js'],
   },
 });

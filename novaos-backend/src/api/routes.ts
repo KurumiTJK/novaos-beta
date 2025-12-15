@@ -1,360 +1,382 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// API ROUTES — NovaOS Backend API
-// Chat endpoint with explicit action support
+// API ROUTES — Express Endpoints for NovaOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
+import { z } from 'zod';
+import { ExecutionPipeline, type PipelineConfig } from '../pipeline/execution-pipeline.js';
+import type { PipelineContext, ActionSource } from '../types/index.js';
 import {
-  UserInput,
-  ChatRequest,
-  ChatResponse,
-  ActionType,
-} from '../helpers/types.js';
-import {
-  validateRequestedActions,
-  actionValidationMiddleware,
-  UserPermissions,
-} from '../helpers/action-validator.js';
-import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
+  auth,
+  type AuthenticatedRequest,
+  type UserPayload,
+  trackVeto,
+  getRecentVetoCount,
+  checkForAbuse,
+} from '../auth/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ROUTE FACTORY
+// REQUEST SCHEMAS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export interface RoutesConfig {
-  pipeline: ExecutionPipeline;
-  getUser?: (req: Request) => { id: string; permissions: UserPermissions } | null;
+const ChatRequestSchema = z.object({
+  message: z.string().min(1).max(100000),
+  conversationId: z.string().optional(),
+  ackToken: z.string().optional(),
+  context: z.object({
+    timezone: z.string().optional(),
+    locale: z.string().optional(),
+  }).optional(),
+});
+
+const ParseCommandRequestSchema = z.object({
+  command: z.string().min(1).max(10000),
+  source: z.enum(['ui_button', 'command_parser', 'api_field']),
+  conversationId: z.string().optional(),
+});
+
+const RegisterRequestSchema = z.object({
+  email: z.string().email(),
+  tier: z.enum(['free', 'pro', 'enterprise']).optional(),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// ERROR CLASS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export class ClientError extends Error {
+  statusCode: number;
+  constructor(message: string, statusCode: number = 400) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = 'ClientError';
+  }
 }
 
-export function createRoutes(config: RoutesConfig): Router {
+// ─────────────────────────────────────────────────────────────────────────────────
+// ROUTER CONFIG
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface RouterConfig extends PipelineConfig {
+  requireAuth?: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// ROUTER FACTORY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function createRouter(config: RouterConfig = {}): Router {
   const router = Router();
-  const { pipeline, getUser } = config;
+  const pipeline = new ExecutionPipeline(config);
+  const requireAuth = config.requireAuth ?? false;
+
+  // Pending ack tokens (simple in-memory store)
+  const pendingAckTokens = new Map<string, { createdAt: number; userId: string }>();
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // MIDDLEWARE
+  // PUBLIC ENDPOINTS (no auth)
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Extract user from request (placeholder - implement auth in production)
-  const extractUser = (req: Request): { id: string; permissions: UserPermissions } | null => {
-    if (getUser) {
-      return getUser(req);
-    }
+  router.get('/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'healthy',
+      version: '3.0.0',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+    });
+  });
 
-    // Default: extract from header or body
-    const userId = req.headers['x-user-id'] as string || req.body?.userId;
-    if (!userId) {
-      return null;
-    }
+  router.get('/version', (_req: Request, res: Response) => {
+    res.json({
+      api: '3.0.0',
+      constitution: '1.2',
+      gates: ['intent', 'shield', 'lens', 'stance', 'capability', 'model', 'personality', 'spark'],
+      features: ['auth', 'rate-limiting', 'abuse-detection'],
+    });
+  });
 
-    return {
-      id: userId,
-      permissions: {
+  router.get('/providers', (_req: Request, res: Response) => {
+    res.json({
+      available: pipeline.getAvailableProviders(),
+      preferred: config.preferredProvider ?? 'openai',
+      useMock: config.useMockProvider ?? false,
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // AUTH ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Register/get token (simplified - production would use proper auth)
+  router.post('/auth/register', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parseResult = RegisterRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        throw new ClientError(
+          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
+        );
+      }
+
+      const { email, tier = 'free' } = parseResult.data;
+      const userId = `user_${Buffer.from(email).toString('base64').slice(0, 16)}`;
+
+      const token = auth.generateToken({ userId, email, tier });
+      const apiKey = auth.generateApiKey(userId, tier);
+
+      res.json({
         userId,
-        allowedActions: [
-          'set_reminder',
-          'create_path',
-          'generate_spark',
-          'search_web',
-          'end_conversation',
-          'override_veto',
-        ],
-        isAdmin: false,
-      },
-    };
-  };
+        token,
+        apiKey,
+        tier,
+        expiresIn: '24h',
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  // Validate actions middleware
-  const validateActions = actionValidationMiddleware(
-    (req) => extractUser(req)?.permissions ?? null,
-    () => null // No existing state for new requests
-  );
+  // Verify token
+  router.get('/auth/verify', auth.middleware(true), (req: AuthenticatedRequest, res: Response) => {
+    res.json({
+      valid: true,
+      user: req.user,
+    });
+  });
+
+  // Get current user status
+  router.get('/auth/status', auth.middleware(false), (req: AuthenticatedRequest, res: Response) => {
+    const userId = req.userId ?? 'anonymous';
+    const blocked = auth.isUserBlocked(userId);
+    const recentVetos = getRecentVetoCount(userId);
+
+    res.json({
+      authenticated: !!req.user && req.userId !== 'anonymous',
+      userId,
+      tier: req.user?.tier ?? 'free',
+      blocked: blocked.blocked,
+      blockedReason: blocked.reason,
+      blockedUntil: blocked.until,
+      recentVetos,
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PROTECTED ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Apply auth, rate limiting, and abuse detection to chat endpoints
+  const protectedMiddleware = [
+    auth.middleware(requireAuth),
+    auth.rateLimit(),
+    auth.abuseDetection(),
+  ];
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CHAT ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/chat', validateActions, async (req: Request, res: Response) => {
+  router.post('/chat', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const user = extractUser(req);
-      const body = req.body as ChatRequest;
+      // Validate request
+      const parseResult = ChatRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        throw new ClientError(
+          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
+        );
+      }
 
-      // Build user input
-      const input: UserInput = {
-        userId: user?.id ?? `anon_${Date.now()}`,
-        sessionId: body.sessionId || `session_${Date.now()}`,
-        message: body.message,
-        
-        // EXPLICIT actions only - validated by middleware
-        requestedActions: body.requestedActions?.map(a => ({
-          ...a,
-          source: 'api_field' as const,
-        })),
-        
-        // Soft veto acknowledgment
-        ackToken: body.ackToken,
-        ackText: body.ackText,
-        
-        // Optional hints
-        intentHints: body.intentHints,
+      const { message, conversationId, ackToken, context: reqContext } = parseResult.data;
+      const userId = req.userId ?? 'anonymous';
+
+      // Get or create session
+      const convId = conversationId ?? crypto.randomUUID();
+      let session = auth.session.get(convId);
+      if (!session) {
+        session = auth.session.create(userId, convId);
+      }
+
+      // Build pipeline context
+      const pipelineContext: PipelineContext = {
+        userId,
+        conversationId: convId,
+        requestId: crypto.randomUUID(),
+        timestamp: Date.now(),
+        actionSources: [],
+        timezone: reqContext?.timezone,
+        locale: reqContext?.locale,
       };
+
+      // Validate ack token if provided
+      if (ackToken) {
+        const pending = pendingAckTokens.get(ackToken);
+        if (pending && pending.userId === userId) {
+          pipelineContext.ackTokenValid = true;
+          pendingAckTokens.delete(ackToken);
+        } else {
+          throw new ClientError('Invalid or expired acknowledgment token');
+        }
+      }
 
       // Execute pipeline
-      const result = await pipeline.execute(input);
+      const result = await pipeline.execute(message, pipelineContext);
 
-      // Handle await_ack response
-      if (result.pendingAck) {
-        const response: ChatResponse = {
-          type: 'await_ack',
-          message: result.message,
-          ackRequired: {
-            token: result.pendingAck.ackToken,
-            requiredText: result.pendingAck.requiredText,
-            expiresAt: result.pendingAck.expiresAt,
-          },
-          reason: result.stoppedReason,
-        };
-        return res.status(200).json(response);
+      // Track veto if shield stopped or awaited
+      if (result.status === 'stopped' || result.status === 'await_ack') {
+        trackVeto(userId);
       }
 
-      // Handle stop response
-      if (result.stopped) {
-        const response: ChatResponse = {
-          type: 'stopped',
-          message: result.message,
-          reason: result.stoppedReason,
-          userOptions: result.userOptions,
-        };
-        return res.status(200).json(response);
+      // Update session
+      auth.session.update(convId, {
+        messageCount: 1,
+        tokenCount: result.gateResults.model?.output?.tokensUsed ?? 0,
+      });
+
+      // Track token usage
+      if (result.gateResults.model?.output?.tokensUsed) {
+        auth.trackTokenUsage(userId, result.gateResults.model.output.tokensUsed);
       }
 
-      // Success response
-      const response: ChatResponse = {
-        type: 'success',
-        message: result.message,
-        stance: result.stance,
-        confidence: result.confidence,
-        verified: result.verified,
-        freshnessWarning: result.freshnessWarning,
-        spark: result.spark,
-        transparency: result.transparency,
-        debug: req.query.debug === 'true' ? result.debug : undefined,
+      // Store ack token if returned
+      if (result.ackToken) {
+        pendingAckTokens.set(result.ackToken, {
+          createdAt: Date.now(),
+          userId,
+        });
+        
+        // Clean old tokens (5 min expiry)
+        const now = Date.now();
+        for (const [token, data] of pendingAckTokens.entries()) {
+          if (now - data.createdAt > 300000) {
+            pendingAckTokens.delete(token);
+          }
+        }
+      }
+
+      // Include session info in response
+      res.json({
+        ...result,
+        session: {
+          conversationId: convId,
+          messageCount: session.messageCount + 1,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PARSE COMMAND ENDPOINT
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  router.post('/parse-command', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const parseResult = ParseCommandRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        throw new ClientError(
+          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
+        );
+      }
+
+      const { command, source, conversationId } = parseResult.data;
+
+      const actionSource: ActionSource = {
+        type: source,
+        action: command,
+        timestamp: Date.now(),
       };
 
-      return res.status(200).json(response);
+      const pipelineContext: PipelineContext = {
+        userId: req.userId ?? 'anonymous',
+        conversationId: conversationId ?? crypto.randomUUID(),
+        requestId: crypto.randomUUID(),
+        timestamp: Date.now(),
+        actionSources: [actionSource],
+      };
 
-    } catch (error) {
-      console.error('[API] Chat endpoint error:', error);
-      
-      return res.status(500).json({
-        type: 'error',
-        message: 'An unexpected error occurred',
-        error: process.env.NODE_ENV === 'development' 
-          ? (error as Error).message 
-          : undefined,
+      const result = await pipeline.execute(command, pipelineContext);
+
+      res.json({
+        ...result,
+        parsedAction: actionSource,
       });
+    } catch (error) {
+      next(error);
     }
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // COMMAND PARSER ENDPOINT
-  // Strict grammar for explicit commands
+  // ADMIN ENDPOINTS (would be more restricted in production)
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/parse-command', (req: Request, res: Response) => {
+  router.post('/admin/block-user', auth.middleware(true), (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { text } = req.body;
+      // In production, check for admin role
+      const { targetUserId, reason, durationMinutes } = req.body;
       
-      if (!text || typeof text !== 'string') {
-        return res.status(400).json({
-          error: 'INVALID_REQUEST',
-          message: 'Text is required',
-        });
+      if (!targetUserId || !reason) {
+        throw new ClientError('targetUserId and reason required');
       }
 
-      const commands = parseCommands(text);
+      const durationMs = (durationMinutes ?? 60) * 60 * 1000;
+      auth.blockUser(targetUserId, reason, durationMs);
 
-      return res.json({
-        commands: commands.map(c => ({
-          ...c,
-          source: 'command_parser' as const,
-        })),
+      res.json({
+        success: true,
+        blockedUntil: Date.now() + durationMs,
       });
-
     } catch (error) {
-      console.error('[API] Parse command error:', error);
-      
-      return res.status(500).json({
-        error: 'PARSE_ERROR',
-        message: 'Failed to parse command',
-      });
+      next(error);
     }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // HEALTH CHECK
-  // ─────────────────────────────────────────────────────────────────────────────
+  router.post('/admin/unblock-user', auth.middleware(true), (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { targetUserId } = req.body;
+      
+      if (!targetUserId) {
+        throw new ClientError('targetUserId required');
+      }
 
-  router.get('/health', (_req: Request, res: Response) => {
-    res.json({
-      status: 'ok',
-      version: '4.0.0',
-      timestamp: new Date().toISOString(),
-    });
-  });
+      const unblocked = auth.unblockUser(targetUserId);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // POLICY VERSIONS
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  router.get('/versions', (_req: Request, res: Response) => {
-    res.json({
-      policy: '4.0.0',
-      capability: '4.0.0',
-      constraints: '4.0.0',
-      verification: '4.0.0',
-      freshness: '4.0.0',
-    });
+      res.json({
+        success: unblocked,
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   return router;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// COMMAND PARSER
-// Strict grammar — only recognizes specific commands
-// ─────────────────────────────────────────────────────────────────────────────────
-
-interface ParsedCommand {
-  type: ActionType;
-  params: Record<string, unknown>;
-}
-
-const COMMAND_PATTERNS: Array<{
-  pattern: RegExp;
-  type: ActionType;
-  extract: (match: RegExpMatchArray) => Record<string, unknown>;
-}> = [
-  // /remind [time] [message]
-  {
-    pattern: /^\/remind\s+(?:me\s+)?(?:at\s+)?(.+?)\s+to\s+(.+)$/i,
-    type: 'set_reminder',
-    extract: (match) => ({
-      triggerAt: parseTime(match[1]),
-      title: match[2],
-    }),
-  },
-  
-  // /path [goal]
-  {
-    pattern: /^\/path\s+(.+)$/i,
-    type: 'create_path',
-    extract: (match) => ({
-      goal: match[1],
-    }),
-  },
-  
-  // /spark
-  {
-    pattern: /^\/spark$/i,
-    type: 'generate_spark',
-    extract: () => ({}),
-  },
-  
-  // /search [query]
-  {
-    pattern: /^\/search\s+(.+)$/i,
-    type: 'search_web',
-    extract: (match) => ({
-      query: match[1],
-    }),
-  },
-  
-  // /end
-  {
-    pattern: /^\/end$/i,
-    type: 'end_conversation',
-    extract: () => ({}),
-  },
-];
-
-function parseCommands(text: string): ParsedCommand[] {
-  const commands: ParsedCommand[] = [];
-
-  for (const { pattern, type, extract } of COMMAND_PATTERNS) {
-    const match = text.match(pattern);
-    if (match) {
-      commands.push({
-        type,
-        params: extract(match),
-      });
-    }
-  }
-
-  return commands;
-}
-
-/**
- * Parse time string to ISO datetime.
- * Simple implementation - production would be more robust.
- */
-function parseTime(timeStr: string): string {
-  const now = new Date();
-  
-  // Handle "in X minutes/hours"
-  const inMatch = timeStr.match(/in\s+(\d+)\s+(minute|hour|day)s?/i);
-  if (inMatch) {
-    const amount = parseInt(inMatch[1]);
-    const unit = inMatch[2].toLowerCase();
-    
-    switch (unit) {
-      case 'minute':
-        now.setMinutes(now.getMinutes() + amount);
-        break;
-      case 'hour':
-        now.setHours(now.getHours() + amount);
-        break;
-      case 'day':
-        now.setDate(now.getDate() + amount);
-        break;
-    }
-    return now.toISOString();
-  }
-  
-  // Handle "tomorrow at X"
-  const tomorrowMatch = timeStr.match(/tomorrow\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-  if (tomorrowMatch) {
-    let hours = parseInt(tomorrowMatch[1]);
-    const minutes = tomorrowMatch[2] ? parseInt(tomorrowMatch[2]) : 0;
-    const ampm = tomorrowMatch[3]?.toLowerCase();
-    
-    if (ampm === 'pm' && hours !== 12) hours += 12;
-    if (ampm === 'am' && hours === 12) hours = 0;
-    
-    now.setDate(now.getDate() + 1);
-    now.setHours(hours, minutes, 0, 0);
-    return now.toISOString();
-  }
-  
-  // Default: 1 hour from now
-  now.setHours(now.getHours() + 1);
-  return now.toISOString();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// ERROR HANDLER
+// ERROR HANDLER MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export function errorHandler(
-  err: Error,
+  error: Error,
   _req: Request,
   res: Response,
   _next: NextFunction
 ): void {
-  console.error('[API] Unhandled error:', err);
+  console.error('[API] Error:', error);
+
+  if (error instanceof ClientError) {
+    res.status(error.statusCode).json({
+      error: error.message,
+      code: 'CLIENT_ERROR',
+    });
+    return;
+  }
+
+  const message = process.env.NODE_ENV === 'production'
+    ? 'Internal server error'
+    : error.message;
 
   res.status(500).json({
-    type: 'error',
-    message: 'An unexpected error occurred',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    error: message,
+    code: 'INTERNAL_ERROR',
   });
 }
