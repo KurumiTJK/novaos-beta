@@ -219,6 +219,7 @@ export interface WebhookHeaders {
   [WEBHOOK_ID_HEADER]: string;
   'Content-Type': string;
   'User-Agent': string;
+  [key: string]: string;  // Index signature for additional headers
 }
 
 export function generateWebhookHeaders(

@@ -66,10 +66,10 @@ export const memoryDecayHandler: JobHandler = async (context: JobContext): Promi
             await memoryStore.deleteMemory(memory.id, userId);
             memoriesDeleted++;
           } else if (newScore !== memory.reinforcementScore) {
-            // Update score
+            // Update score - use type assertion for extended properties
             await memoryStore.updateMemory(memory.id, userId, {
               reinforcementScore: Math.round(newScore),
-            });
+            } as Parameters<typeof memoryStore.updateMemory>[2]);
             memoriesDecayed++;
           }
         }

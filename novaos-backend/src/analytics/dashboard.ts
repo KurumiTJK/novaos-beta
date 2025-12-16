@@ -256,12 +256,14 @@ export class DashboardService {
     const existingIndex = leaderboard.entries.findIndex(e => e.userId === userId);
     if (existingIndex >= 0) {
       const existing = leaderboard.entries[existingIndex];
-      leaderboard.entries[existingIndex] = {
-        ...existing,
-        change: score - existing.score,
-        score,
-        rank: 0, // Will be recalculated
-      };
+      if (existing) {
+        leaderboard.entries[existingIndex] = {
+          userId: existing.userId,
+          change: score - existing.score,
+          score,
+          rank: 0, // Will be recalculated
+        };
+      }
     } else {
       leaderboard.entries.push({
         rank: 0,
@@ -379,7 +381,10 @@ export class DashboardService {
     const metrics = await this.aggregator.getSystemMetrics(granularity, range);
     
     if (metrics.length > 0) {
-      return metrics[metrics.length - 1];
+      const lastMetric = metrics[metrics.length - 1];
+      if (lastMetric) {
+        return lastMetric;
+      }
     }
     
     // Return default metrics
@@ -464,11 +469,14 @@ export class DashboardService {
     const rows = [headers.join(',')];
     
     for (let i = 0; i < sessions.points.length; i++) {
+      const sessionPoint = sessions.points[i];
+      const goalPoint = goals.points[i];
+      const sparkPoint = sparks.points[i];
       const row = [
-        sessions.points[i].timestamp,
-        sessions.points[i]?.value ?? 0,
-        goals.points[i]?.value ?? 0,
-        sparks.points[i]?.value ?? 0,
+        sessionPoint?.timestamp ?? '',
+        sessionPoint?.value ?? 0,
+        goalPoint?.value ?? 0,
+        sparkPoint?.value ?? 0,
       ];
       rows.push(row.join(','));
     }

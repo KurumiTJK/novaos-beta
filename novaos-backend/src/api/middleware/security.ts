@@ -462,13 +462,18 @@ export function getClientIP(req: Request, trustProxy = true): string {
     const xff = req.headers['x-forwarded-for'];
     if (xff) {
       const ips = Array.isArray(xff) ? xff[0] : xff.split(',')[0];
-      return ips.trim();
+      if (ips) {
+        return ips.trim();
+      }
     }
     
     // Check X-Real-IP header
     const xri = req.headers['x-real-ip'];
     if (xri) {
-      return Array.isArray(xri) ? xri[0] : xri;
+      const ip = Array.isArray(xri) ? xri[0] : xri;
+      if (ip) {
+        return ip;
+      }
     }
   }
   
@@ -562,9 +567,9 @@ export function applySecurity(options: SecurityOptions = {}) {
   return (req: Request, res: Response, next: NextFunction): void => {
     let index = 0;
     
-    const runNext = (err?: Error): void => {
+    const runNext = (err?: unknown): void => {
       if (err) {
-        return next(err);
+        return next(err as Error);
       }
       
       if (index >= middlewares.length) {
@@ -572,8 +577,11 @@ export function applySecurity(options: SecurityOptions = {}) {
       }
       
       const middleware = middlewares[index++];
+      if (!middleware) {
+        return next();
+      }
       try {
-        middleware(req, res, runNext);
+        middleware(req, res, runNext as NextFunction);
       } catch (error) {
         next(error);
       }

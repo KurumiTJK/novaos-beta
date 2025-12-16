@@ -275,7 +275,9 @@ export class ModelGate {
              "Here's a concrete action to move forward.",
     };
 
-    const baseResponse = stanceResponses[stance as string] || stanceResponses.lens;
+    const baseResponse = stanceResponses[stance as string] 
+      ?? stanceResponses.lens 
+      ?? "Here's what I understand about your question. Let me break this down clearly.";
     
     return {
       text: baseResponse,

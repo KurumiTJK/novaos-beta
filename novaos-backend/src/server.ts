@@ -101,7 +101,7 @@ async function startServer() {
   const startTime = Date.now();
   
   // Initialize storage (Redis or memory fallback)
-  await storeManager.initialize(REDIS_URL);
+  await storeManager.initialize();
 
   const config = loadConfig();
   

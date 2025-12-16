@@ -207,8 +207,13 @@ export class NotificationService {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     
-    const [startHour, startMin] = preferences.quietHoursStart.split(':').map(Number);
-    const [endHour, endMin] = preferences.quietHoursEnd.split(':').map(Number);
+    const startParts = preferences.quietHoursStart.split(':').map(Number);
+    const endParts = preferences.quietHoursEnd.split(':').map(Number);
+    
+    const startHour = startParts[0] ?? 0;
+    const startMin = startParts[1] ?? 0;
+    const endHour = endParts[0] ?? 0;
+    const endMin = endParts[1] ?? 0;
     
     const startMinutes = startHour * 60 + startMin;
     const endMinutes = endHour * 60 + endMin;

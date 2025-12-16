@@ -156,7 +156,14 @@ export class PersonalityGate {
       default: (p) => text.replace(new RegExp(p, 'gi'), ''),
     };
 
-    const replacer = replacements[type] || replacements.default;
+    const replacer = replacements[type] ?? replacements.default;
+    if (!replacer) {
+      return {
+        text,
+        edited: false,
+        edit: { original: '', replacement: '', reason: '' },
+      };
+    }
     const newText = replacer(phrase);
 
     if (newText !== text) {

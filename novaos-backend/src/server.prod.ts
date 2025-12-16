@@ -136,7 +136,7 @@ const apiRouter = createRouter({
     openaiApiKey: OPENAI_API_KEY,
     geminiApiKey: GEMINI_API_KEY,
   },
-});
+} as Parameters<typeof createRouter>[0]);
 
 app.use('/api/v1', apiRouter);
 
@@ -222,7 +222,9 @@ async function startup() {
     getRedisCircuit();
     logger.info('Circuit breakers initialized');
   } catch (error) {
-    logger.warn('Storage initialization failed, using in-memory fallback:', error);
+    logger.warn('Storage initialization failed, using in-memory fallback:', { 
+      error: error instanceof Error ? error.message : String(error) 
+    });
   }
   
   // Determine verification capability
@@ -273,7 +275,7 @@ async function startup() {
   });
   
   process.on('unhandledRejection', (reason) => {
-    logger.error('Unhandled rejection:', reason);
+    logger.error('Unhandled rejection:', reason instanceof Error ? reason : new Error(String(reason)));
   });
 }
 
