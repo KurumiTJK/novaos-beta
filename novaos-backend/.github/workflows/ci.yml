@@ -1,0 +1,432 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# GITHUB ACTIONS CI/CD — NovaOS Testing Pipeline
+# ═══════════════════════════════════════════════════════════════════════════════
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_e2e:
+        description: 'Run E2E tests'
+        required: false
+        default: 'true'
+      run_load:
+        description: 'Run Load tests'
+        required: false
+        default: 'false'
+      run_chaos:
+        description: 'Run Chaos tests'
+        required: false
+        default: 'false'
+
+env:
+  NODE_VERSION: '20'
+  REDIS_URL: redis://localhost:6379
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # LINT & TYPE CHECK
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run ESLint
+        run: npm run lint
+      
+      - name: Run TypeScript check
+        run: npm run typecheck
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # UNIT TESTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run unit tests
+        run: npm test -- --run --reporter=verbose
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # INTEGRATION TESTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Run integration tests
+        run: npm test -- --run src/tests/integration/
+        env:
+          REDIS_URL: ${{ env.REDIS_URL }}
+          USE_MOCK_PROVIDER: 'true'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # E2E TESTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    if: ${{ github.event.inputs.run_e2e != 'false' }}
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Start server
+        run: |
+          npm start &
+          sleep 5
+        env:
+          PORT: 3000
+          REDIS_URL: ${{ env.REDIS_URL }}
+          USE_MOCK_PROVIDER: 'true'
+          NODE_ENV: test
+      
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:3000/health > /dev/null; then
+              echo "Server is ready"
+              exit 0
+            fi
+            echo "Waiting for server... ($i)"
+            sleep 1
+          done
+          echo "Server failed to start"
+          exit 1
+      
+      - name: Run E2E tests
+        run: npm test -- --run src/tests/e2e/
+        env:
+          E2E_BASE_URL: http://localhost:3000
+      
+      - name: Upload E2E results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-results
+          path: test-results/
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # LOAD TESTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  load-tests:
+    name: Load Tests
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: ${{ github.event.inputs.run_load == 'true' || github.ref == 'refs/heads/main' }}
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Start server
+        run: |
+          npm start &
+          sleep 5
+        env:
+          PORT: 3000
+          REDIS_URL: ${{ env.REDIS_URL }}
+          USE_MOCK_PROVIDER: 'true'
+      
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            curl -s http://localhost:3000/health && exit 0
+            sleep 1
+          done
+          exit 1
+      
+      - name: Run load test (smoke only in CI)
+        run: |
+          k6 run --out json=k6-results.json \
+            --env K6_BASE_URL=http://localhost:3000 \
+            -e SCENARIO=smoke \
+            src/tests/load/k6-load-test.js
+      
+      - name: Upload load test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: load-test-results
+          path: k6-results.json
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # CHAOS TESTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  chaos-tests:
+    name: Chaos Tests
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: ${{ github.event.inputs.run_chaos == 'true' }}
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Start server
+        run: |
+          npm start &
+          sleep 5
+        env:
+          PORT: 3000
+          REDIS_URL: ${{ env.REDIS_URL }}
+          USE_MOCK_PROVIDER: 'true'
+      
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            curl -s http://localhost:3000/health && exit 0
+            sleep 1
+          done
+          exit 1
+      
+      - name: Run chaos tests
+        run: npm test -- --run src/tests/load/chaos.test.ts
+        env:
+          CHAOS_BASE_URL: http://localhost:3000
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # BENCHMARK TESTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  benchmark-tests:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: ${{ github.ref == 'refs/heads/main' }}
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Start server
+        run: |
+          npm start &
+          sleep 5
+        env:
+          PORT: 3000
+          REDIS_URL: ${{ env.REDIS_URL }}
+          USE_MOCK_PROVIDER: 'true'
+      
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            curl -s http://localhost:3000/health && exit 0
+            sleep 1
+          done
+          exit 1
+      
+      - name: Run benchmarks
+        run: npm test -- --run src/tests/load/benchmarks.test.ts
+        env:
+          BENCHMARK_BASE_URL: http://localhost:3000
+      
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmark-results/
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # BUILD & PUSH DOCKER IMAGE
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            latest
+      
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
