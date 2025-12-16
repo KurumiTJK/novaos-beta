@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MemoryStore } from '../storage/memory.js';
+import type { KeyValueStore } from '../storage/index.js';
 import {
   ExportService,
   JsonFormatter,
@@ -454,7 +455,8 @@ describe('ExportService', () => {
   
   beforeEach(async () => {
     memoryStore = new MemoryStore();
-    service = new ExportService(memoryStore);
+    // Cast to KeyValueStore - MemoryStore implements all needed methods
+    service = new ExportService(memoryStore as unknown as KeyValueStore);
     
     // Set up test data in store
     await setupTestData(memoryStore);
@@ -512,7 +514,7 @@ describe('ExportService', () => {
       
       expect(result.filename).toContain('nova-export');
       expect(result.filename).toContain(userId);
-      expect(result.filename).toEndWith('.json');
+      expect(result.filename.endsWith('.json')).toBe(true);
     });
   });
   
