@@ -538,7 +538,15 @@ export class SearchIndexStore {
   }
   
   private async incrementDocCount(userId: string, type: SearchableType): Promise<void> {
-    const stats = await this.getStats(userId);
+    // Get raw stats from cache only (don't recalculate to avoid double-counting)
+    const data = await this.store.get(statsKey(userId));
+    const stats: IndexStats = data 
+      ? JSON.parse(data)
+      : {
+          totalDocuments: 0,
+          byType: { conversation: 0, message: 0, memory: 0 },
+        };
+    
     stats.totalDocuments++;
     stats.byType[type]++;
     stats.lastIndexed = new Date().toISOString();
@@ -546,7 +554,11 @@ export class SearchIndexStore {
   }
   
   private async decrementDocCount(userId: string, type: SearchableType): Promise<void> {
-    const stats = await this.getStats(userId);
+    // Get raw stats from cache only
+    const data = await this.store.get(statsKey(userId));
+    if (!data) return; // Nothing to decrement
+    
+    const stats: IndexStats = JSON.parse(data);
     stats.totalDocuments = Math.max(0, stats.totalDocuments - 1);
     stats.byType[type] = Math.max(0, stats.byType[type] - 1);
     await this.store.set(statsKey(userId), JSON.stringify(stats), INDEX_TTL);
