@@ -117,8 +117,8 @@ export class ExecutionPipeline {
     state.gateResults.intent = executeIntentGate(state, context);
     state.intent = state.gateResults.intent.output;
 
-    // ─── STAGE 2: SHIELD ───
-    state.gateResults.shield = executeShieldGate(state, context);
+    // ─── STAGE 2: SHIELD (ASYNC - LLM POWERED) ───
+    state.gateResults.shield = await executeShieldGate(state, context);
     state.shieldResult = state.gateResults.shield.output;
 
     // Check for hard veto (stop immediately)
