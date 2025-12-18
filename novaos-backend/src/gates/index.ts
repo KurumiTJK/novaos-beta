@@ -234,7 +234,7 @@ async function classifyWithLLM(message: string): Promise<ShieldClassification> {
 
   try {
     const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.1-mini',
       messages: [
         { role: 'system', content: SHIELD_SYSTEM_PROMPT },
         { role: 'user', content: message },
@@ -580,7 +580,7 @@ export function executeCapabilityGate(
     status: 'pass',
     output: {
       allowedCapabilities: capabilities[stance] ?? [],
-      blockedCapabilities: [],
+      deniedCapabilities: [],
     },
     action: 'continue',
     executionTimeMs: Date.now() - start,
