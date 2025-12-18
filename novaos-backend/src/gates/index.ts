@@ -234,7 +234,7 @@ async function classifyWithLLM(message: string): Promise<ShieldClassification> {
 
   try {
     const response = await client.chat.completions.create({
-      model: 'gpt-5.1-mini',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: SHIELD_SYSTEM_PROMPT },
         { role: 'user', content: message },
