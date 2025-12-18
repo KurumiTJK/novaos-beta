@@ -42,14 +42,23 @@ const logger = getLogger({ component: 'server' });
 
 const app = express();
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERMISSIVE CSP FOR DEVELOPMENT (must be first middleware)
+// ═══════════════════════════════════════════════════════════════════════════════
+app.use((_req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src * 'self';"
+  );
+  next();
+});
+
 // Trust proxy (for correct IP detection behind load balancer)
 app.set('trust proxy', 1);
 
 // CORS
 app.use(cors({
-  origin: NODE_ENV === 'production'
-    ? process.env.ALLOWED_ORIGINS?.split(',') ?? []
-    : '*',
+  origin: '*',
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Request-Id'],
   exposedHeaders: ['X-Request-Id'],
@@ -57,6 +66,9 @@ app.use(cors({
 
 // Body parsing
 app.use(express.json({ limit: '1mb' }));
+
+// Serve frontend
+app.use(express.static('public'));
 
 // Request ID and logging middleware
 app.use(requestMiddleware);
