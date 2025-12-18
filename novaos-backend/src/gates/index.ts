@@ -25,8 +25,18 @@ import type {
   GenerationConstraints,
 } from '../types/index.js';
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// LLM-POWERED INTENT GATE (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  executeIntentGateAsync,
+  getFailOpenDefault,
+  type IntentGateResult,
+} from './intent-gate.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// INTENT GATE
+// INTENT GATE (LEGACY - SYNC)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const INTENT_PATTERNS: Array<{ pattern: RegExp; type: IntentType }> = [

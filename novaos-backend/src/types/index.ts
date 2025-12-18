@@ -337,3 +337,9 @@ export interface AuditStorage {
   getByRequestId(requestId: string): Promise<AuditEntry[]>;
   getChain(startId: string, limit?: number): Promise<AuditEntry[]>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LLM-POWERED INTENT TYPES (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export * from './intent-types.js';

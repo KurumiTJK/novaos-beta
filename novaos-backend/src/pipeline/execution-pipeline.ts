@@ -14,6 +14,7 @@ import type {
 
 import {
   executeIntentGate,
+  executeIntentGateAsync,
   executeShieldGate,
   executeLensGate,
   executeStanceGate,
@@ -113,8 +114,8 @@ export class ExecutionPipeline {
   ): Promise<PipelineResult> {
     const pipelineStart = state.timestamps.pipelineStart;
 
-    // ─── STAGE 1: INTENT ───
-    state.gateResults.intent = executeIntentGate(state, context);
+    // ─── STAGE 1: INTENT (ASYNC - LLM POWERED) ───
+    state.gateResults.intent = await executeIntentGateAsync(state, context);
     state.intent = state.gateResults.intent.output;
 
     // ─── STAGE 2: SHIELD (ASYNC - LLM POWERED) ───

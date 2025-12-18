@@ -4,7 +4,102 @@
 
 import { vi } from 'vitest';
 
-// Mock classification responses based on message patterns
+// ─────────────────────────────────────────────────────────────────────────────────
+// MOCK INTENT CLASSIFICATION (for executeIntentGateAsync)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+function getMockIntentClassification(message: string) {
+  const text = message.toLowerCase();
+
+  // Default values
+  let type = 'question';
+  let primaryDomain = 'general';
+  let domains = ['general'];
+  let complexity = 'medium';
+  let urgency = 'low';
+  let safetySignal = 'none';
+  let reasoningCode = 'INFO_SEEKING';
+
+  // Detect intent type
+  if (/^(hey|hi|hello|what'?s up|howdy)/i.test(text)) {
+    type = 'greeting';
+    complexity = 'simple';
+    reasoningCode = 'SOCIAL_GREETING';
+  } else if (/\b(help me|can you|please|create|make|generate|write|build)\b/i.test(text)) {
+    type = 'action';
+    reasoningCode = 'ACTION_INTENT';
+  } else if (/\b(plan|schedule|organize|prepare|strategy)\b/i.test(text)) {
+    type = 'planning';
+    complexity = 'medium';
+    reasoningCode = 'PLANNING_REQUEST';
+  } else if (/^(what|who|where|when|why|how|is|are|do|does|can|could|would|will)\b/i.test(text)) {
+    type = 'question';
+    reasoningCode = 'INFO_SEEKING';
+  }
+
+  // Detect domains
+  if (/\b(stock|invest|trading|portfolio|market|finance|budget|money|401k|savings)\b/i.test(text)) {
+    primaryDomain = 'finance';
+    domains = ['finance'];
+  } else if (/\b(health|medical|doctor|symptoms?|disease|treatment)\b/i.test(text)) {
+    primaryDomain = 'health';
+    domains = ['health'];
+  } else if (/\b(legal|law|court|attorney|rights|contract)\b/i.test(text)) {
+    primaryDomain = 'legal';
+    domains = ['legal'];
+  } else if (/\b(job|career|resume|interview|salary|promotion|work|boss|quit|quitting)\b/i.test(text)) {
+    primaryDomain = 'career';
+    domains = ['career'];
+  } else if (/\b(code|programming|software|bug|function|api)\b/i.test(text)) {
+    primaryDomain = 'technical';
+    domains = ['technical'];
+  }
+
+  // Crisis detection (highest priority)
+  if (
+    text.includes('kill myself') ||
+    text.includes('end my life') ||
+    text.includes('want to die') ||
+    text.includes('hurt myself') ||
+    /myself\s+(hurt|kill)/i.test(text) ||
+    /(hurt|harm)\s+myself/i.test(text)
+  ) {
+    primaryDomain = 'mental_health';
+    domains = ['mental_health'];
+    safetySignal = 'high';
+    urgency = 'high';
+    type = 'action';
+    reasoningCode = 'ACTION_INTENT';
+  }
+
+  // Mental health watch signals
+  if (/\b(stress(ed)?|anxi(ety|ous)|depress(ed|ion)?|overwhelm(ed)?|panic)\b/i.test(text)) {
+    if (safetySignal !== 'high') {
+      primaryDomain = 'mental_health';
+      domains = ['mental_health'];
+      safetySignal = 'watch';
+      urgency = 'medium';
+      type = 'venting';
+      reasoningCode = 'EMOTIONAL_EXPRESSION';
+    }
+  }
+
+  return {
+    type,
+    primaryDomain,
+    domains,
+    complexity,
+    urgency,
+    safetySignal,
+    confidence: 0.85,
+    reasoningCode,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// MOCK SHIELD CLASSIFICATION (for executeShieldGate)
+// ─────────────────────────────────────────────────────────────────────────────────
+
 function getMockClassification(message: string) {
   const text = message.toLowerCase();
 
@@ -31,6 +126,8 @@ function getMockClassification(message: string) {
     text.includes('make a bomb') ||
     text.includes('build explosive') ||
     text.includes('create weapon') ||
+    text.includes('build a weapon') ||
+    text.includes('build weapon') ||
     text.includes('hack into') ||
     text.includes('steal password') ||
     text.includes('groom a child') ||
@@ -88,12 +185,62 @@ function generateSimpleAckToken(): string {
   return `ack_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 }
 
-// Mock the gates module
+// ─────────────────────────────────────────────────────────────────────────────────
+// MOCK THE GATES MODULE
+// ─────────────────────────────────────────────────────────────────────────────────
+
 vi.mock('../gates/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../gates/index.js')>();
   
   return {
     ...original,
+
+    // ─── MOCK: executeIntentGateAsync ───
+    executeIntentGateAsync: async (state: any, _context: any) => {
+      const start = Date.now();
+      const text = state.normalizedInput;
+      const classification = getMockIntentClassification(text);
+
+      // Map to legacy Intent format
+      const typeMap: Record<string, string> = {
+        question: 'question',
+        decision: 'question',
+        action: 'action',
+        planning: 'planning',
+        venting: 'conversation',
+        greeting: 'conversation',
+        followup: 'conversation',
+        clarification: 'conversation',
+      };
+
+      const complexityMap: Record<string, string> = {
+        simple: 'low',
+        medium: 'medium',
+        complex: 'high',
+      };
+
+      return {
+        gateId: 'intent',
+        status: 'pass',
+        output: {
+          // Legacy fields
+          type: typeMap[classification.type] ?? 'conversation',
+          complexity: complexityMap[classification.complexity] ?? 'medium',
+          isHypothetical: false,
+          domains: classification.domains,
+          confidence: classification.confidence,
+          // Extended fields
+          primaryDomain: classification.primaryDomain,
+          urgency: classification.urgency,
+          safetySignal: classification.safetySignal,
+          reasoningCode: classification.reasoningCode,
+        },
+        action: 'continue',
+        executionTimeMs: Date.now() - start,
+      };
+    },
+
+    // ─── MOCK: executeShieldGate ───
     executeShieldGate: async (state: any, _context: any) => {
       const start = Date.now();
       const text = state.normalizedInput;
