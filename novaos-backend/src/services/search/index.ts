@@ -1,279 +1,126 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SEARCH PROVIDER MANAGER — Orchestrates Search Providers
-// Handles fallback, parallel fetching, and result aggregation
+// SEARCH SERVICE — Barrel Export
+// Phase 4: Entity System
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { SearchProvider, SearchResponse, SearchOptions, SearchResult } from './types.js';
-import { TavilySearchProvider, getTavilyProvider } from './tavily.js';
-import { GoogleCSEProvider, getGoogleCSEProvider } from './google-cse.js';
-import type { SearchTier, EvidencePack, EvidenceItem } from '../../gates/lens/types.js';
-import { getReliabilityTier, isOfficialSource } from './types.js';
-
-// Re-export types
-export * from './types.js';
-export { TavilySearchProvider, getTavilyProvider } from './tavily.js';
-export { GoogleCSEProvider, getGoogleCSEProvider } from './google-cse.js';
-
 // ─────────────────────────────────────────────────────────────────────────────────
-// SEARCH MANAGER CONFIG
+// TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export interface SearchManagerConfig {
-  tavilyApiKey?: string;
-  googleCSEApiKey?: string;
-  googleCSEId?: string;
-}
+export type {
+  // Source tier classification
+  SourceTier,
+  
+  // Search result with metadata
+  SearchResultWithMeta,
+  ExtractedValue,
+  
+  // Search query and filters
+  SearchQuery,
+  SearchFilters,
+  DateRange,
+  SearchContext,
+  
+  // Conflict detection
+  ConflictType,
+  ConflictInfo,
+  ConflictSource,
+  ConflictDetectionResult,
+  ConflictRecommendation,
+  
+  // Authoritative policy
+  AuthoritativePolicy,
+  DisagreementHandling,
+  ValidationRule,
+  PolicyValidationResult,
+  PolicyRecommendation,
+  
+  // Filtered results
+  FilteredResults,
+  FilterStats,
+  
+  // Domain info
+  DomainInfo,
+} from './types.js';
+
+export {
+  // Tier utilities
+  VALID_SOURCE_TIERS,
+  TIER_PRIORITY,
+  getTierPriority,
+  compareTiers,
+  
+  // Type guards
+  isAuthoritativeTier,
+  isIncludedTier,
+  hasConflicts,
+  isPolicyValid,
+  
+  // Helper functions
+  getHighestTier,
+  filterAuthoritative,
+  sortByTier,
+  groupByTier,
+} from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SEARCH MANAGER
+// DOMAIN FILTER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export class SearchManager {
-  private tavily: TavilySearchProvider;
-  private googleCSE: GoogleCSEProvider;
+export type {
+  TierAssignmentOptions,
+} from './domain-filter.js';
 
-  constructor(config?: SearchManagerConfig) {
-    this.tavily = config?.tavilyApiKey
-      ? new TavilySearchProvider(config.tavilyApiKey)
-      : getTavilyProvider();
-
-    this.googleCSE = config?.googleCSEApiKey
-      ? new GoogleCSEProvider(config.googleCSEApiKey, config.googleCSEId)
-      : getGoogleCSEProvider();
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // MEDIUM TIER SEARCH
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  async searchMedium(query: string, options?: SearchOptions): Promise<SearchResponse> {
-    const searchOptions: SearchOptions = {
-      maxResults: 5,
-      timeoutMs: 3000,
-      ...options,
-    };
-
-    // Try Tavily first
-    if (this.tavily.isAvailable()) {
-      const result = await this.tavily.search(query, searchOptions);
-      if (result.success && result.results.length > 0) {
-        return result;
-      }
-      console.warn('[SEARCH] Tavily failed, falling back to Google CSE');
-    }
-
-    // Fallback to Google CSE
-    if (this.googleCSE.isAvailable()) {
-      return this.googleCSE.search(query, searchOptions);
-    }
-
-    return {
-      query,
-      results: [],
-      retrievedAt: new Date().toISOString(),
-      provider: 'none',
-      success: false,
-      error: 'No search providers available',
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // HIGH TIER SEARCH (Multiple Sources)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  async searchHigh(
-    query: string,
-    options?: SearchOptions & { requireOfficial?: boolean }
-  ): Promise<SearchResponse> {
-    const searchOptions: SearchOptions = {
-      maxResults: 10,
-      timeoutMs: 5000,
-      ...options,
-    };
-
-    const responses: SearchResponse[] = [];
-
-    // Parallel search from all available providers
-    const promises: Promise<SearchResponse>[] = [];
-
-    const tavilyAvailable = this.tavily.isAvailable();
-    const googleAvailable = this.googleCSE.isAvailable();
-    
-    console.log(`[SEARCH] Providers available: tavily=${tavilyAvailable}, google=${googleAvailable}`);
-
-    if (tavilyAvailable) {
-      // Use advanced depth for HIGH tier queries
-      promises.push(this.tavily.search(query, {
-        ...searchOptions,
-        searchDepth: 'advanced',
-        includeAnswer: true,
-      }));
-    }
-
-    if (googleAvailable) {
-      promises.push(this.googleCSE.search(query, searchOptions));
-    }
-
-    // If official sources required, also search with restricted domains
-    if (options?.requireOfficial && googleAvailable) {
-      promises.push(
-        this.googleCSE.search(query, {
-          ...searchOptions,
-          includeDomains: ['.gov', '.edu', 'reuters.com', 'apnews.com', 'bloomberg.com'],
-        })
-      );
-    }
-
-    if (promises.length === 0) {
-      console.warn('[SEARCH] No search providers available!');
-      return {
-        query,
-        results: [],
-        retrievedAt: new Date().toISOString(),
-        provider: 'none',
-        success: false,
-        error: 'No search providers available',
-      };
-    }
-
-    const results = await Promise.allSettled(promises);
-
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.success) {
-        responses.push(result.value);
-      } else if (result.status === 'rejected') {
-        console.error('[SEARCH] Provider error:', result.reason);
-      }
-    }
-
-    // Merge and dedupe results
-    const mergedResults = this.mergeAndDedupeResults(
-      responses.flatMap(r => r.results)
-    );
-
-    return {
-      query,
-      results: mergedResults,
-      totalResults: mergedResults.length,
-      retrievedAt: new Date().toISOString(),
-      provider: 'multi',
-      success: mergedResults.length > 0,
-      error: mergedResults.length === 0 ? 'No results from any provider' : undefined,
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // BUILD EVIDENCE PACK
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  buildEvidencePack(
-    response: SearchResponse,
-    tier: SearchTier
-  ): EvidencePack {
-    const originalCount = response.results.length;
-    const deduped = this.mergeAndDedupeResults(response.results);
-
-    const items: EvidenceItem[] = deduped.map(r => ({
-      title: r.title || 'Untitled',
-      url: r.url,
-      excerpt: r.snippet || r.title || 'No content available',
-      reliability: getReliabilityTier(r.url),
-      publishedAt: r.publishedAt,
-      retrievedAt: response.retrievedAt,
-      isOfficial: isOfficialSource(r.url),
-    }));
-
-    // Calculate total reliability weight
-    const reliabilityWeights: Record<string, number> = {
-      'tier1_official': 1.0,
-      'tier2_news': 0.8,
-      'tier3_established': 0.6,
-      'tier4_general': 0.4,
-      'tier5_unverified': 0.2,
-    };
-    
-    const totalWeight = items.reduce((sum, item) => {
-      return sum + (reliabilityWeights[item.reliability] ?? 0.3);
-    }, 0);
-
-    return {
-      query: response.query,
-      retrievedAt: response.retrievedAt,
-      tier,
-      items,
-      deduped: originalCount !== deduped.length,
-      duplicatesRemoved: originalCount - deduped.length,
-      totalWeight,
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // MERGE AND DEDUPE
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  private mergeAndDedupeResults(results: SearchResult[]): SearchResult[] {
-    const seen = new Map<string, SearchResult>();
-
-    for (const result of results) {
-      // Normalize URL for deduplication
-      const normalizedUrl = this.normalizeUrl(result.url);
-
-      if (!seen.has(normalizedUrl)) {
-        seen.set(normalizedUrl, result);
-      } else {
-        // Keep the one with more complete data
-        const existing = seen.get(normalizedUrl)!;
-        const existingSnippetLength = existing.snippet?.length ?? 0;
-        const resultSnippetLength = result.snippet?.length ?? 0;
-        
-        if (
-          resultSnippetLength > existingSnippetLength ||
-          (result.publishedAt && !existing.publishedAt)
-        ) {
-          seen.set(normalizedUrl, result);
-        }
-      }
-    }
-
-    return Array.from(seen.values());
-  }
-
-  private normalizeUrl(url: string): string {
-    try {
-      const parsed = new URL(url);
-      // Remove trailing slash, www prefix, and common tracking params
-      let normalized = parsed.hostname.replace(/^www\./, '') + parsed.pathname.replace(/\/$/, '');
-      return normalized.toLowerCase();
-    } catch {
-      return url.toLowerCase();
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // AVAILABILITY CHECK
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  getAvailableProviders(): string[] {
-    const available: string[] = [];
-    if (this.tavily.isAvailable()) available.push('tavily');
-    if (this.googleCSE.isAvailable()) available.push('google_cse');
-    return available;
-  }
-
-  hasAnyProvider(): boolean {
-    return this.tavily.isAvailable() || this.googleCSE.isAvailable();
-  }
-}
+export {
+  // Domain classification lists
+  OFFICIAL_DOMAINS,
+  DISALLOWED_DOMAINS,
+  CONTEXT_DOMAINS,
+  
+  // Domain parsing
+  parseDomain,
+  normalizeDomain,
+  domainMatches,
+  isInDomainList,
+  
+  // Tier assignment
+  assignTier,
+  
+  // Value extraction
+  extractValues,
+  
+  // Result processing
+  processResult,
+  processResults,
+  
+  // Filtering
+  filterByDomains,
+  filterToAuthoritative,
+  filterToOfficial,
+} from './domain-filter.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SINGLETON
+// AUTHORITATIVE POLICY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-let searchManager: SearchManager | null = null;
-
-export function getSearchManager(): SearchManager {
-  if (!searchManager) {
-    searchManager = new SearchManager();
-  }
-  return searchManager;
-}
+export {
+  // Policy definitions
+  LEADERSHIP_POLICY,
+  REGULATORY_POLICY,
+  SOFTWARE_POLICY,
+  SERVICE_STATUS_POLICY,
+  POLICIES,
+  
+  // Policy access
+  getPolicy,
+  
+  // Conflict detection
+  detectConflicts,
+  
+  // Policy validation
+  validateAgainstPolicy,
+  validateForCategory,
+  passesPolicy,
+  getSourcesToCite,
+  quickConflictCheck,
+} from './authoritative-policy.js';
