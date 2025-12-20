@@ -98,6 +98,8 @@ export interface DataNeedClassification {
   readonly requiresNumericPrecision?: boolean;
   readonly entitiesComplete?: boolean;
   readonly entitiesNeedingClarification?: readonly string[];
+  readonly maxDataAgeMs?: number | null;
+  readonly allowsActionRecommendations?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

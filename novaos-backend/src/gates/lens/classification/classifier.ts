@@ -363,6 +363,7 @@ function buildEntitiesFromPatterns(
         startIndex: 0, // We don't track positions in pattern matching
         endIndex: entity.length,
         confidence: match.confidence,
+        type: match.category as any,
       };
       
       // Check if already resolved (dedup)
@@ -370,7 +371,7 @@ function buildEntitiesFromPatterns(
       if (existing) continue;
       
       resolved.push({
-        raw: rawMention,
+        raw: rawMention as any,
         canonicalForm,
         category: isLiveCategory(match.category) ? match.category : 'time', // Default for entities
       });
@@ -407,6 +408,7 @@ function buildEntitiesFromLLM(
       startIndex: 0,
       endIndex: entity.text.length,
       confidence: 0.8, // LLM entities have reasonable confidence
+      type: entity.category === 'general' ? undefined : entity.category as any,
     };
     
     // Check if already resolved (dedup)
@@ -414,7 +416,7 @@ function buildEntitiesFromLLM(
     if (existing) continue;
     
     resolved.push({
-      raw: rawMention,
+      raw: rawMention as any,
       canonicalForm,
       category: entity.category === 'general' ? 'time' : entity.category, // Default
     });

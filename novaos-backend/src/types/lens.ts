@@ -86,10 +86,11 @@ export interface RetrievalOutcome {
   readonly successfulData: readonly CategoryResult[];
   readonly failedCategories: readonly LiveCategory[];
   readonly totalLatencyMs: number;
-  readonly allSucceeded: boolean;
-  readonly anySucceeded: boolean;
+  readonly allSucceeded?: boolean;
+  readonly anySucceeded?: boolean;
   readonly status?: RetrievalStatus;
   readonly categoryResults?: ReadonlyMap<LiveCategory, CategoryResult>;
+  readonly usedStaleData?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ export interface RetrievalOutcome {
 export type VerificationStatus =
   | 'verified'
   | 'unverified'
+  | 'partial'
   | 'degraded'
   | 'failed';
 
@@ -170,13 +172,24 @@ export interface LensGateResult {
   readonly message?: string;
   readonly entities?: ResolvedEntities;
   
-  // Additional properties used in code
+  // Constraints (both names for compatibility)
   readonly constraints?: ResponseConstraints;
+  readonly responseConstraints?: ResponseConstraints;
+  
+  // Risk and verification
   readonly riskAssessment?: RiskAssessment | null;
   readonly forceHigh?: boolean;
   readonly degradationReason?: string;
   readonly blockReason?: string;
   readonly numericPrecisionAllowed?: boolean;
+  readonly actionRecommendationsAllowed?: boolean;
+  readonly userMessage?: string | null;
+  readonly fallbackMode?: string;
+  readonly freshnessWarning?: string;
+  readonly requiresFreshnessDisclaimer?: boolean;
+  readonly verificationStatus?: VerificationStatus;
+  readonly sources?: readonly string[];
+  readonly truthMode?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -214,11 +227,24 @@ export function createEmptyEvidencePack(): EvidencePack {
 
 export function createPassthroughResult(
   classification: DataNeedClassification,
-  message?: string
+  entitiesOrMessage?: ResolvedEntities | string,
+  constraintsOrUndefined?: ResponseConstraints | string
 ): LensGateResult {
+  // Handle both old (classification, message) and new (classification, entities, constraints) signatures
+  let entities: ResolvedEntities | undefined;
+  let message: string | undefined;
+  
+  if (typeof entitiesOrMessage === 'string') {
+    message = entitiesOrMessage;
+  } else if (entitiesOrMessage) {
+    entities = entitiesOrMessage;
+    message = typeof constraintsOrUndefined === 'string' ? constraintsOrUndefined : undefined;
+  }
+  
   return {
     mode: 'passthrough',
     classification,
+    entities,
     retrieval: null,
     evidence: createEmptyEvidencePack(),
     userOptions: [],
@@ -228,15 +254,33 @@ export function createPassthroughResult(
 
 export function createBlockedResult(
   classification: DataNeedClassification,
-  reason: string,
-  userOptions: readonly LensUserOption[] = []
+  entitiesOrReason: ResolvedEntities | string,
+  reasonOrOptions?: string | readonly LensUserOption[],
+  userOptions?: readonly LensUserOption[]
 ): LensGateResult {
+  // Handle both old (classification, reason, options) and new (classification, entities, reason, options) signatures
+  let entities: ResolvedEntities | undefined;
+  let reason: string;
+  let options: readonly LensUserOption[];
+  
+  if (typeof entitiesOrReason === 'string') {
+    // Old signature: (classification, reason, userOptions?)
+    reason = entitiesOrReason;
+    options = (reasonOrOptions as readonly LensUserOption[] | undefined) ?? [];
+  } else {
+    // New signature: (classification, entities, reason, userOptions?)
+    entities = entitiesOrReason;
+    reason = (reasonOrOptions as string) ?? 'Blocked';
+    options = userOptions ?? [];
+  }
+  
   return {
     mode: 'blocked',
     classification,
+    entities,
     retrieval: null,
     evidence: createEmptyEvidencePack(),
-    userOptions,
+    userOptions: options,
     message: reason,
     blockReason: reason,
   };

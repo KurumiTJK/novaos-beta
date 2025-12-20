@@ -57,7 +57,7 @@ export interface RawEntity {
   readonly text?: string;
   readonly start?: number;
   readonly end?: number;
-  readonly type: EntityType;
+  readonly type?: EntityType;
   readonly confidence?: number;
 }
 
@@ -93,12 +93,16 @@ export interface EntityMetadata {
 
 export interface EntityResolutionTrace {
   readonly method: 'exact' | 'fuzzy' | 'alias' | 'llm' | 'fallback' | 'regex';
-  readonly confidence: number;
+  readonly confidence?: number;
   readonly source?: string;
   readonly alternatives?: readonly string[];
   readonly latencyMs?: number;
   readonly originalQuery?: string;
   readonly extractionTimeMs?: number;
+  readonly resolutionTimeMs?: number;
+  readonly extractedCount?: number;
+  readonly resolvedCount?: number;
+  readonly resolverVersion?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -172,6 +176,7 @@ export interface ResolvedEntities {
   readonly byType?: ReadonlyMap<EntityType, readonly ResolvedEntity[]>;
   readonly complete?: boolean;
   readonly resolutionTimeMs?: number;
+  readonly trace?: EntityResolutionTrace;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

@@ -179,7 +179,7 @@ export async function executeLensGate(
     // Validate invariants
     if (lensResult.classification.truthMode === 'live_feed' || 
         lensResult.classification.truthMode === 'mixed') {
-      validateForceHighInvariant(lensResult.classification.truthMode, lensResult.forceHigh);
+      validateForceHighInvariant(lensResult.classification.truthMode, lensResult.forceHigh ?? false);
     }
     
     // Build trace if enabled
@@ -362,26 +362,28 @@ function recordTraceFromResult(
   result: LensGateResult
 ): void {
   // Record classification trace
+  const method = result.classification.method === 'pattern' ? 'rule_based' : result.classification.method;
   builder.recordClassification(createClassificationTrace(
     0, // Duration not tracked in result
-    result.classification.method,
+    method as 'llm' | 'rule_based' | 'hybrid',
     result.classification.truthMode,
     result.classification.liveCategories,
     result.classification.authoritativeCategories,
     result.classification.entities?.resolved?.length ?? 0,
-    result.classification.confidenceScore,
+    result.classification.confidenceScore ?? 0,
     null, // Pattern confidence not separately tracked
     result.classification.method !== 'rule_based',
     false
   ));
   
   // Record risk assessment trace
+  const forceHigh = result.forceHigh ?? false;
   builder.recordRiskAssessment(createRiskTrace(
     0,
-    result.forceHigh,
-    result.forceHigh ? 'invariant' : 'not_forced',
+    forceHigh,
+    forceHigh ? 'invariant' : 'not_forced',
     result.riskAssessment?.score ?? 0,
-    result.riskAssessment?.factors ?? [],
+    (result.riskAssessment?.factors ?? []) as any,
     result.riskAssessment?.stakes ?? 'low'
   ));
   
@@ -447,7 +449,7 @@ export {
   hasQualitativeFallback,
   isVolatileCategory,
   type RiskAssessment,
-  type RiskFactor,
+  // Note: RiskFactor is exported from types/lens.js
   type StakesLevel,
   type ForceHighReason,
 } from './risk/index.js';

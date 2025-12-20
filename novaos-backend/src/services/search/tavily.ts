@@ -117,7 +117,8 @@ export class TavilySearchProvider implements SearchProvider {
         console.log(`[TAVILY] Synthesized answer: ${data.answer.substring(0, 100)}...`);
       }
       if (data.results.length > 0) {
-        console.log(`[TAVILY] Sample result: title="${data.results[0].title}", content length=${data.results[0].content?.length ?? 0}`);
+        const firstResult = data.results[0];
+        console.log(`[TAVILY] Sample result: title="${firstResult?.title ?? ''}", content length=${firstResult?.content?.length ?? 0}`);
       }
 
       const results: SearchResult[] = [];

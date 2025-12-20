@@ -61,6 +61,7 @@ export type IntentType =
 export type Domain =
   | 'general'
   | 'technical'
+  | 'technology'
   | 'financial'
   | 'finance'
   | 'medical'
@@ -80,10 +81,11 @@ export interface Intent {
   readonly primaryDomain?: Domain;
   readonly domains?: readonly Domain[];
   readonly confidence: number;
-  readonly keywords: readonly string[];
+  readonly keywords?: readonly string[];
   readonly entities?: readonly string[];
   readonly urgency?: 'low' | 'medium' | 'high';
   readonly complexity?: 'simple' | 'moderate' | 'complex' | 'low' | 'medium' | 'high';
+  readonly isHypothetical?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

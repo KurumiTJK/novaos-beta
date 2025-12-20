@@ -119,7 +119,8 @@ export class GoogleCSEProvider implements SearchProvider {
       
       console.log(`[GOOGLE_CSE] Raw response: ${data.items?.length ?? 0} items`);
       if (data.items && data.items.length > 0) {
-        console.log(`[GOOGLE_CSE] Sample item: title="${data.items[0].title}", snippet length=${data.items[0].snippet?.length ?? 0}`);
+        const firstItem = data.items[0];
+        console.log(`[GOOGLE_CSE] Sample item: title="${firstItem?.title ?? ''}", snippet length=${firstItem?.snippet?.length ?? 0}`);
       }
 
       const results: SearchResult[] = (data.items ?? []).map(item => ({

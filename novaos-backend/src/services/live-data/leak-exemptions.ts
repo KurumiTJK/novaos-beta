@@ -348,11 +348,11 @@ export function isExempted(
   }
   
   // Small integer check
+  const smallIntMax = exemptions.smallIntegerMax ?? 10;
   if (exemptions.allowSmallIntegers) {
-    const maxSmallInt = exemptions.smallIntegerMax ?? 10;
     if (Number.isInteger(numericValue) && 
         numericValue >= 0 && 
-        numericValue <= maxSmallInt) {
+        numericValue <= smallIntMax) {
       // Exclude if it looks like a price or percentage
       const looksLikePrice = /[$€£¥]/.test(context) || 
                             /\.\d{2}\b/.test(match) ||
@@ -363,7 +363,7 @@ export function isExempted(
         return {
           exempted: true,
           reason: 'small_integer',
-          description: `Small integer (≤${maxSmallInt}): ${match}`,
+          description: `Small integer (≤${smallIntMax}): ${match}`,
         };
       }
     }
@@ -432,7 +432,7 @@ export function isExempted(
   // CUSTOM PATTERN EXEMPTIONS
   // ═══════════════════════════════════════════════════════════════════════════════
   
-  for (const pattern of exemptions.customPatterns) {
+  for (const pattern of exemptions.customPatterns ?? []) {
     try {
       const regex = new RegExp(pattern, 'i');
       if (regex.test(context)) {
@@ -591,7 +591,7 @@ export function withCustomPatterns(
 ): NumericExemptions {
   return {
     ...base,
-    customPatterns: [...base.customPatterns, ...additionalPatterns],
+    customPatterns: [...(base.customPatterns ?? []), ...additionalPatterns],
   };
 }
 

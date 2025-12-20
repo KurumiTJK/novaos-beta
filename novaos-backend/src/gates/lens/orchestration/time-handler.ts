@@ -341,9 +341,9 @@ export function buildTimeResponse(
 ): string {
   const { timeFormat = '12h' } = options;
   
-  // Parse local time
-  const localTime = timeData.localTime;
-  const formattedTime = timeFormat === '12h'
+  // Parse local time (with fallback)
+  const localTime = timeData.localTime ?? timeData.time ?? timeData.datetime ?? '';
+  const formattedTime = timeFormat === '12h' && localTime
     ? formatTo12Hour(localTime)
     : localTime;
   

@@ -504,8 +504,180 @@ export const ACADEMIC_POLICY: AuthoritativePolicy = {
 };
 
 /**
+ * Policy for financial information.
+ */
+export const FINANCIAL_POLICY: AuthoritativePolicy = {
+  category: 'financial',
+  description: 'Policy for financial data and SEC filings',
+  
+  officialDomains: [
+    'sec.gov',
+    'investor.gov',
+    'finra.org',
+    'fdic.gov',
+    'treasury.gov',
+  ],
+  
+  verifiedDomains: [
+    'bloomberg.com',
+    'reuters.com',
+    'wsj.com',
+    'ft.com',
+    'morningstar.com',
+    'yahoo.com/finance',
+  ],
+  
+  contextDomains: [
+    'investopedia.com',
+    'marketwatch.com',
+    'cnbc.com',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'prefer_official',
+  minSources: 2,
+  requireConsensus: false,
+  maxDataAgeDays: 1,
+};
+
+/**
+ * Policy for scientific information.
+ */
+export const SCIENTIFIC_POLICY: AuthoritativePolicy = {
+  category: 'scientific',
+  description: 'Policy for scientific research and studies',
+  
+  officialDomains: [
+    'pubmed.gov',
+    'nih.gov',
+    'nature.com',
+    'science.org',
+    'arxiv.org',
+    'ncbi.nlm.nih.gov',
+  ],
+  
+  verifiedDomains: [
+    'sciencedirect.com',
+    'springer.com',
+    'wiley.com',
+    'cell.com',
+    'pnas.org',
+  ],
+  
+  contextDomains: [
+    'wikipedia.org',
+    'sciencenews.org',
+    'newscientist.com',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'require_consensus',
+  minSources: 2,
+  requireConsensus: true,
+  maxDataAgeDays: 365,
+};
+
+/**
+ * Policy for news information.
+ */
+export const NEWS_POLICY: AuthoritativePolicy = {
+  category: 'news',
+  description: 'Policy for current events and breaking news',
+  
+  officialDomains: [
+    'apnews.com',
+    'reuters.com',
+    'bbc.com',
+    'npr.org',
+    'pbs.org',
+  ],
+  
+  verifiedDomains: [
+    'nytimes.com',
+    'washingtonpost.com',
+    'theguardian.com',
+    'wsj.com',
+    'ft.com',
+    'economist.com',
+  ],
+  
+  contextDomains: [
+    'cnn.com',
+    'nbcnews.com',
+    'abcnews.com',
+    'cbsnews.com',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'show_disagreement',
+  minSources: 2,
+  requireConsensus: false,
+  maxDataAgeDays: 1,
+};
+
+/**
+ * Policy for sports information.
+ */
+export const SPORTS_POLICY: AuthoritativePolicy = {
+  category: 'sports',
+  description: 'Policy for sports scores, standings, and statistics',
+  
+  officialDomains: [
+    'nba.com',
+    'nfl.com',
+    'mlb.com',
+    'nhl.com',
+    'fifa.com',
+    'olympics.com',
+  ],
+  
+  verifiedDomains: [
+    'espn.com',
+    'sports-reference.com',
+    'basketball-reference.com',
+    'pro-football-reference.com',
+  ],
+  
+  contextDomains: [
+    'bleacherreport.com',
+    'theathletic.com',
+    'cbssports.com',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'prefer_official',
+  minSources: 1,
+  requireConsensus: false,
+  maxDataAgeDays: 1,
+};
+
+/**
  * All policies by category.
- * PATCHED: Added legal, medical, government, academic
+ * PATCHED: Added all authoritative categories
  */
 export const POLICIES: Readonly<Record<AuthoritativeCategory, AuthoritativePolicy>> = {
   leadership: LEADERSHIP_POLICY,
@@ -516,6 +688,10 @@ export const POLICIES: Readonly<Record<AuthoritativeCategory, AuthoritativePolic
   medical: MEDICAL_POLICY,
   government: GOVERNMENT_POLICY,
   academic: ACADEMIC_POLICY,
+  financial: FINANCIAL_POLICY,
+  scientific: SCIENTIFIC_POLICY,
+  news: NEWS_POLICY,
+  sports: SPORTS_POLICY,
 };
 
 /**

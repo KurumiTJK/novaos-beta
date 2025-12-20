@@ -157,18 +157,18 @@ export interface WeatherData {
   readonly location: string;
   readonly latitude?: number;
   readonly longitude?: number;
-  readonly temperature: number;
-  readonly temperatureC: number;
+  readonly temperature?: number;
+  readonly temperatureC?: number;
   readonly temperatureF?: number;
   readonly temperatureCelsius?: number;
   readonly temperatureFahrenheit?: number;
-  readonly temperatureUnit: 'C' | 'F';
+  readonly temperatureUnit?: 'C' | 'F';
   readonly feelsLike?: number;
   readonly feelsLikeC?: number;
   readonly feelsLikeF?: number;
   readonly feelsLikeCelsius?: number;
   readonly feelsLikeFahrenheit?: number;
-  readonly condition: string;
+  readonly condition?: string;
   readonly conditionCode?: string;
   readonly humidity?: number;
   readonly pressure?: number;
@@ -184,7 +184,7 @@ export interface WeatherData {
   readonly sunrise?: string;
   readonly sunset?: string;
   readonly isDay?: boolean;
-  readonly timestamp: number;
+  readonly timestamp?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

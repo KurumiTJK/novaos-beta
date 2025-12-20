@@ -26,6 +26,7 @@ import type {
   RetrievalOutcome,
   RetrievalStatus,
   ContextItem,
+  CategoryResult,
 } from '../../../types/lens.js';
 import type {
   ProviderResult,
@@ -211,7 +212,7 @@ export async function orchestrate(
     // ─── STEP 4: FETCH PROVIDER DATA ───
     const fetchResults = await fetchAllCategories(
       classification.liveCategories,
-      classification.entities,
+      classification.entities ?? createEmptyEntities(),
       options
     );
     
@@ -600,7 +601,7 @@ function buildResult(
     userOptions,
     userMessage: semantics.userMessage,
     fallbackMode: classification.fallbackMode,
-    freshnessWarning: semantics.systemMessage,
+    freshnessWarning: semantics.systemMessage ?? undefined,
     requiresFreshnessDisclaimer: !semantics.numericPrecisionAllowed,
     verificationStatus: failedCategories.length === 0 ? 'verified' : 
                         failedCategories.length === classification.liveCategories.length ? 'unverified' : 'partial',
@@ -674,7 +675,12 @@ function buildRetrievalOutcome(state: OrchestrationState): RetrievalOutcome {
   return {
     status,
     categoryResults: categoryResults as any, // Type assertion needed due to complex generic
-    successfulData,
+    successfulData: successfulData.map((data): CategoryResult => ({
+      category: data.type as LiveCategory,
+      type: data.type as LiveCategory,
+      status: 'success' as const,
+      latencyMs: 0,
+    })),
     failedCategories,
     totalLatencyMs: Date.now() - startTime,
     usedStaleData: false,

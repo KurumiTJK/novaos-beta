@@ -156,6 +156,12 @@ const CONTEXT_KEYWORDS: Readonly<Record<NumericContextKey, readonly string[]>> =
   high: ['high', 'highest', 'peak', 'maximum', 'max'],
   low: ['low', 'lowest', 'bottom', 'minimum', 'min'],
   previous_close: ['previous', 'yesterday', 'prior', 'last close'],
+  pe_ratio: ['pe', 'p/e', 'ratio', 'earnings', 'multiple'],
+  eps: ['eps', 'earnings', 'per share', 'profit'],
+  dividend_yield: ['dividend', 'yield', 'payout', 'distribution'],
+  bid: ['bid', 'buy', 'buying'],
+  ask: ['ask', 'sell', 'selling', 'offer'],
+  spread: ['spread', 'difference', 'gap'],
   
   // Change contexts
   change: ['change', 'changed', 'movement', 'move', 'moved', 'gain', 'loss'],
@@ -168,15 +174,14 @@ const CONTEXT_KEYWORDS: Readonly<Record<NumericContextKey, readonly string[]>> =
   // Rate contexts
   rate: ['rate', 'rates', 'exchange', 'conversion', 'convert'],
   exchange_rate: ['exchange', 'rate', 'fx', 'forex', 'conversion', 'convert', 'equals'],
-  bid: ['bid', 'buy', 'buying'],
-  ask: ['ask', 'sell', 'selling', 'offer'],
-  spread: ['spread', 'difference', 'gap'],
   
   // Weather contexts
   temperature: ['temperature', 'temp', 'degrees', '°', 'warm', 'cold', 'hot'],
   temperature_c: ['celsius', '°c', 'c', 'degrees'],
   temperature_f: ['fahrenheit', '°f', 'f', 'degrees'],
   feels_like: ['feels like', 'feels', 'apparent', 'real feel'],
+  feels_like_c: ['feels like', 'celsius', '°c', 'apparent'],
+  feels_like_f: ['feels like', 'fahrenheit', '°f', 'apparent'],
   humidity: ['humidity', 'humid', 'moisture', '%'],
   wind_speed: ['wind', 'winds', 'speed', 'gust', 'gusting'],
   wind_speed_kph: ['wind', 'km/h', 'kph', 'kilometers'],
@@ -184,8 +189,12 @@ const CONTEXT_KEYWORDS: Readonly<Record<NumericContextKey, readonly string[]>> =
   pressure: ['pressure', 'barometric', 'mb', 'hpa', 'mbar'],
   uv_index: ['uv', 'ultraviolet', 'index', 'sun'],
   visibility: ['visibility', 'visible', 'visibility'],
+  precipitation: ['precipitation', 'rain', 'rainfall', 'snow'],
   
   // Time contexts
+  hour: ['hour', 'hours', 'o\'clock', 'am', 'pm'],
+  minute: ['minute', 'minutes', 'min'],
+  second: ['second', 'seconds', 'sec'],
   timestamp: ['time', 'timestamp', 'at', 'as of'],
   unix_timestamp: ['unix', 'epoch', 'timestamp'],
   utc_offset: ['utc', 'offset', 'timezone', 'gmt'],
@@ -198,8 +207,14 @@ const CONTEXT_KEYWORDS: Readonly<Record<NumericContextKey, readonly string[]>> =
   
   // Generic contexts
   count: ['count', 'number', 'total', 'amount'],
+  total: ['total', 'sum', 'all', 'combined'],
   quantity: ['quantity', 'qty', 'amount', 'number'],
+  average: ['average', 'avg', 'mean'],
+  percentage: ['percent', 'percentage', '%'],
   index: ['index', 'position', 'rank'],
+  index_value: ['index', 'value', 'level'],
+  position: ['position', 'place', 'spot'],
+  score: ['score', 'points', 'rating'],
   rank: ['rank', 'ranking', 'position', '#'],
 };
 

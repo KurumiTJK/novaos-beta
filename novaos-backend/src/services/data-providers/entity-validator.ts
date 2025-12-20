@@ -126,9 +126,9 @@ class ValidationCache {
    * Generate cache key for an entity.
    */
   private getKey(entity: ResolvedEntity): string {
-    const entityType = entity.raw?.type ?? 'unknown';
-    const entityId = entity.canonicalId?.toLowerCase() ?? (entity.raw?.rawText ?? '').toLowerCase();
-    return `${entityType}:${entityId}`;
+    const type = entity.raw?.type ?? 'unknown';
+    const id = entity.canonicalId?.toLowerCase() ?? (entity.raw?.rawText ?? '').toLowerCase();
+    return `${type}:${id}`;
   }
   
   /**
@@ -322,7 +322,7 @@ export class EntityValidator {
     // Skip if high confidence and configured to skip
     if (
       this.config.skipHighConfidence &&
-      entity.resolutionConfidence >= this.config.skipConfidenceThreshold
+      (entity.resolutionConfidence ?? 0) >= this.config.skipConfidenceThreshold
     ) {
       return {
         entity,
@@ -462,7 +462,7 @@ export class EntityValidator {
     // Normalize input
     const entityList = Array.isArray(entities) 
       ? entities 
-      : entities.resolved;
+      : 'resolved' in entities ? entities.resolved : entities;
     
     // Validate
     let results: EntityValidationResult[];

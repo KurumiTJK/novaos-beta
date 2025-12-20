@@ -324,7 +324,8 @@ export type DisagreementHandling =
   | 'require_consensus'
   | 'flag_conflict'
   | 'use_most_recent'
-  | 'fail_safe';
+  | 'fail_safe'
+  | 'show_disagreement';
 
 /**
  * Custom validation rule.

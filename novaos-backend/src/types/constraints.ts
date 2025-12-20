@@ -80,6 +80,8 @@ export type NumericContextKey =
   | 'average'
   | 'percentage'
   | 'index_value'
+  | 'index'
+  | 'position'
   | 'score'
   | 'rank';
 
@@ -128,7 +130,7 @@ export interface NumericExemptions {
   readonly allowOrdinals?: boolean;
   readonly allowInCodeBlocks?: boolean;
   readonly allowInQuotes?: boolean;
-  readonly customPatterns?: readonly RegExp[];
+  readonly customPatterns?: readonly (string | RegExp)[];
   readonly alwaysExempt?: readonly (string | RegExp)[];
   readonly allowExplanatoryPercentages?: boolean;
   readonly contextExemptions?: ReadonlyMap<string, readonly string[]>;

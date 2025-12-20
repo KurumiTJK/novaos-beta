@@ -120,7 +120,7 @@ export const INVALID_STATE_CONDITIONS: readonly InvalidStateCondition[] = [
       const requiresForceHigh = truthMode === 'live_feed' || truthMode === 'mixed';
       // Check if forceHigh is false when it should be true
       // We use numericPrecisionAllowed as proxy - if true in degraded mode, that's wrong
-      return requiresForceHigh && result.mode === 'degraded' && result.numericPrecisionAllowed;
+      return requiresForceHigh && result.mode === 'degraded' && (result.numericPrecisionAllowed ?? false);
     },
   },
   {

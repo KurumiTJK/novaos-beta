@@ -252,7 +252,7 @@ export class ExecutionPipeline {
           context,
           (prompt, systemPrompt, constraints) => 
             this.providerManager!.generate(augmentedMessage, systemPrompt, constraints, {
-              conversationHistory: context.conversationHistory,
+              conversationHistory: context.conversationHistory ? [...context.conversationHistory] : undefined,
             }),
           this.systemPrompt
         );

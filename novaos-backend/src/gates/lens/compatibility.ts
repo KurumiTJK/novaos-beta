@@ -83,7 +83,7 @@ export function toLegacyLensResult(result: LensGateResult): ExtendedLensResult {
   // Convert classification to legacy format
   const legacyClassification = {
     truthMode: result.classification.truthMode,
-    categories: result.classification.categories,
+    categories: result.classification.categories ?? [],
     confidence: result.classification.confidence,
   };
   
@@ -123,6 +123,15 @@ export function toLegacyLensResult(result: LensGateResult): ExtendedLensResult {
   const stakes: StakesLevel = result.riskAssessment?.stakes ?? 
     (result.forceHigh ? 'high' : 'low');
   
+  // Get constraints with fallback
+  const constraints: LensConstraints = result.constraints ?? result.responseConstraints ?? {
+    level: 'standard',
+    numericPrecisionAllowed: true,
+    actionRecommendationsAllowed: true,
+    bannedPhrases: [],
+    mustIncludeWarnings: [],
+  };
+  
   return {
     // Legacy fields
     classification: legacyClassification,
@@ -132,11 +141,7 @@ export function toLegacyLensResult(result: LensGateResult): ExtendedLensResult {
     
     // Extended fields
     fullClassification: result.classification,
-    constraints: result.responseConstraints ?? {
-      level: 'standard',
-      requireEvidence: false,
-      allowSpeculation: true,
-    },
+    constraints,
     riskAssessment: result.riskAssessment,
     forceHigh: result.forceHigh ?? false,
     lensMode: result.mode,
@@ -204,5 +209,9 @@ export function getConstraints(result: LegacyLensResult | ExtendedLensResult): L
     level: isHighStakes ? 'strict' : 'standard',
     requireEvidence: isHighStakes,
     allowSpeculation: !isHighStakes,
+    numericPrecisionAllowed: !isHighStakes,
+    actionRecommendationsAllowed: !isHighStakes,
+    bannedPhrases: [],
+    mustIncludeWarnings: [],
   };
 }

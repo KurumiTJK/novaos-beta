@@ -191,7 +191,8 @@ function createContextItem(
   providerResult: ProviderOkResult,
   id: string
 ): ContextItem {
-  const isStale = Date.now() - providerResult.fetchedAt > providerResult.freshnessPolicy.maxAgeMs;
+  const maxAgeMs = providerResult.freshnessPolicy?.maxAgeMs ?? 60000; // Default 1 minute
+  const isStale = Date.now() - providerResult.fetchedAt > maxAgeMs;
   
   return {
     id,
@@ -382,9 +383,10 @@ export function buildEvidenceXml(
   }
   
   // Freshness warnings
-  if (evidencePack.freshnessWarnings.length > 0) {
+  const freshnessWarnings = evidencePack.freshnessWarnings ?? [];
+  if (freshnessWarnings.length > 0) {
     lines.push('<freshness_warnings>');
-    for (const warning of evidencePack.freshnessWarnings) {
+    for (const warning of freshnessWarnings) {
       lines.push(`- ${warning}`);
     }
     lines.push('</freshness_warnings>');
@@ -502,7 +504,7 @@ export function buildAugmentedMessage(
     augmentedMessage,
     evidencePack,
     systemPromptAdditions: evidencePack.systemPromptAdditions,
-    isComplete: evidencePack.isComplete,
+    isComplete: evidencePack.isComplete ?? true,
     incompleteReason: evidencePack.incompleteReason,
   };
 }
@@ -666,7 +668,7 @@ export function buildPartialDataMessage(
     augmentedMessage,
     evidencePack: {
       ...evidencePack,
-      freshnessWarnings: [...evidencePack.freshnessWarnings, ...failedWarnings],
+      freshnessWarnings: [...(evidencePack.freshnessWarnings ?? []), ...failedWarnings],
       isComplete: false,
       incompleteReason: `Failed categories: ${failedCategories.join(', ')}`,
     },
