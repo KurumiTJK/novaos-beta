@@ -190,6 +190,18 @@ export interface LensGateResult {
   readonly verificationStatus?: VerificationStatus;
   readonly sources?: readonly string[];
   readonly truthMode?: string;
+  
+  // Provider fetch results for pipeline evidence injection
+  readonly fetchResults?: readonly LensFetchResult[];
+}
+
+/**
+ * Result of a single category fetch (for pipeline evidence injection).
+ */
+export interface LensFetchResult {
+  readonly category: LiveCategory;
+  readonly result: ProviderResult | null;
+  readonly latencyMs: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

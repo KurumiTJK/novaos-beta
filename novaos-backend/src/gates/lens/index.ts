@@ -568,6 +568,13 @@ export async function executeLensGateAsync(
   // Convert to legacy-compatible format
   const legacyResult = toLegacyLensResult(result.output);
   
+  // CRITICAL: Pass through fetchResults for pipeline evidence injection
+  // The legacyResult conversion doesn't include fetchResults, so add it manually
+  const extendedResult = {
+    ...legacyResult,
+    fetchResults: result.output.fetchResults,
+  } as ExtendedLensResult;
+  
   // Map action from Phase 7 to pipeline GateAction
   let action: 'continue' | 'regenerate' | 'stop' | 'await_ack' | 'degrade';
   switch (result.action) {
@@ -581,7 +588,7 @@ export async function executeLensGateAsync(
   return {
     gateId: 'lens',
     status: result.status,
-    output: legacyResult,
+    output: extendedResult,
     action,
     executionTimeMs: result.executionTimeMs,
     failureReason: result.failureReason,

@@ -11,6 +11,9 @@ import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify } from './config/index.js';
 import { getLogger } from './logging/index.js';
 
+// Debug imports for live data providers
+import { getAvailableProviders, getFinnhubProvider, getWeatherProvider, getCryptoProvider, getFxProvider } from './services/data-providers/providers/index.js';
+
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENVIRONMENT CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -112,6 +115,28 @@ app.use(errorHandler);
 async function startServer() {
   const startTime = Date.now();
   
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // LIVE DATA PROVIDER DEBUG
+  // ═══════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== LIVE DATA PROVIDER DEBUG ===');
+  console.log('Environment variables:');
+  console.log('  FINNHUB_API_KEY:', process.env.FINNHUB_API_KEY ? `set (${process.env.FINNHUB_API_KEY.slice(0, 8)}...)` : 'NOT SET');
+  console.log('  OPENWEATHERMAP_API_KEY:', process.env.OPENWEATHERMAP_API_KEY ? `set (${process.env.OPENWEATHERMAP_API_KEY.slice(0, 8)}...)` : 'NOT SET');
+  
+  console.log('\nProvider availability:');
+  const finnhub = getFinnhubProvider();
+  const weather = getWeatherProvider();
+  const crypto = getCryptoProvider();
+  const fx = getFxProvider();
+  console.log('  Finnhub (stocks):', finnhub.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗');
+  console.log('  OpenWeatherMap:', weather.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗');
+  console.log('  CoinGecko (crypto):', crypto.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗ (no key needed - check rate limit)');
+  console.log('  Frankfurter (FX):', fx.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗ (no key needed)');
+  
+  const available = getAvailableProviders();
+  console.log('\nAll available providers:', available.map(p => p.name).join(', ') || 'NONE');
+  console.log('================================\n');
+
   // Initialize storage (Redis or memory fallback)
   await storeManager.initialize();
 

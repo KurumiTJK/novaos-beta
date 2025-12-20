@@ -217,14 +217,71 @@ export class ExecutionPipeline {
     let regenerationCount = 0;
 
     // ─── INJECT LENS EVIDENCE INTO PROMPT ───
-    // If we have verified evidence, prepend it to the user message for the LLM
+    // If we have verified evidence from live data providers, inject it into the prompt
     let augmentedMessage = state.userMessage;
     const lensResult = state.lensResult as any;
     
-    if (lensResult?.evidencePack?.items?.length > 0) {
+    // DEBUG: Log what we have in lensResult
+    console.log(`[PIPELINE] lensResult keys:`, lensResult ? Object.keys(lensResult) : 'null');
+    console.log(`[PIPELINE] lensResult.fetchResults:`, lensResult?.fetchResults ? `${lensResult.fetchResults.length} items` : 'undefined');
+    console.log(`[PIPELINE] lensResult.evidence:`, lensResult?.evidence ? 'present' : 'undefined');
+    console.log(`[PIPELINE] lensResult.retrieval:`, lensResult?.retrieval ? JSON.stringify(lensResult.retrieval).slice(0, 200) : 'undefined');
+    
+    // Check multiple possible evidence structures from Lens gate
+    let evidenceContext = '';
+    
+    // Structure 1: Direct fetchResults from orchestrator
+    if (lensResult?.fetchResults?.length > 0) {
+      const successfulFetches = lensResult.fetchResults.filter((f: any) => f.result?.ok);
+      if (successfulFetches.length > 0) {
+        const evidenceLines = successfulFetches.map((fetch: any) => {
+          const data = fetch.result.data;
+          if (!data) return null;
+          
+          // Format based on data type
+          if (data.type === 'stock') {
+            return `LIVE STOCK DATA for ${data.symbol}:\n` +
+                   `• Current Price: $${data.price.toFixed(2)} ${data.currency}\n` +
+                   `• Change: ${data.change >= 0 ? '+' : ''}${data.change.toFixed(2)} (${data.changePercent >= 0 ? '+' : ''}${data.changePercent.toFixed(2)}%)\n` +
+                   `• Day Range: $${data.dayLow.toFixed(2)} - $${data.dayHigh.toFixed(2)}\n` +
+                   `• Previous Close: $${data.previousClose.toFixed(2)}\n` +
+                   `• Exchange: ${data.exchange}\n` +
+                   `• Data Source: ${fetch.result.provider} (fetched just now)`;
+          } else if (data.type === 'weather') {
+            return `LIVE WEATHER DATA for ${data.location}:\n` +
+                   `• Temperature: ${data.temperature}°${data.unit}\n` +
+                   `• Conditions: ${data.conditions}\n` +
+                   `• Humidity: ${data.humidity}%\n` +
+                   `• Data Source: ${fetch.result.provider}`;
+          } else if (data.type === 'crypto') {
+            return `LIVE CRYPTO DATA for ${data.symbol}:\n` +
+                   `• Current Price: $${data.price.toFixed(2)}\n` +
+                   `• 24h Change: ${data.changePercent24h >= 0 ? '+' : ''}${data.changePercent24h.toFixed(2)}%\n` +
+                   `• Market Cap: $${(data.marketCap / 1e9).toFixed(2)}B\n` +
+                   `• Data Source: ${fetch.result.provider}`;
+          } else if (data.type === 'fx') {
+            return `LIVE EXCHANGE RATE:\n` +
+                   `• ${data.from}/${data.to}: ${data.rate.toFixed(4)}\n` +
+                   `• Data Source: ${fetch.result.provider}`;
+          } else if (data.type === 'time') {
+            return `CURRENT TIME in ${data.timezone}:\n` +
+                   `• ${data.formatted}\n` +
+                   `• Data Source: system clock`;
+          }
+          
+          // Generic fallback
+          return `LIVE DATA:\n${JSON.stringify(data, null, 2)}`;
+        }).filter(Boolean);
+        
+        if (evidenceLines.length > 0) {
+          evidenceContext = evidenceLines.join('\n\n');
+        }
+      }
+    }
+    
+    // Structure 2: evidencePack.items (legacy format)
+    else if (lensResult?.evidencePack?.items?.length > 0) {
       const evidenceItems = lensResult.evidencePack.items;
-      
-      // Build evidence context - limit to top 5 most relevant sources
       const evidenceLines = evidenceItems
         .slice(0, 5)
         .map((item: any, i: number) => {
@@ -235,11 +292,28 @@ export class ExecutionPipeline {
         .filter(Boolean);
       
       if (evidenceLines.length > 0) {
-        const evidenceContext = evidenceLines.join('\n\n');
-        augmentedMessage = `IMPORTANT: Use the following verified real-time information to answer the user's question. Do NOT say you cannot provide real-time data - the data below was just retrieved:\n\n${evidenceContext}\n\n---\nUSER QUESTION: ${state.userMessage}`;
-        
-        console.log(`[PIPELINE] Injected ${evidenceLines.length} evidence sources into prompt`);
+        evidenceContext = evidenceLines.join('\n\n');
       }
+    }
+    
+    // Structure 3: evidence.formattedContext (alternative format)
+    else if (lensResult?.evidence?.formattedContext) {
+      evidenceContext = lensResult.evidence.formattedContext;
+    }
+    
+    // Inject evidence into the prompt if we have any
+    if (evidenceContext) {
+      augmentedMessage = `IMPORTANT INSTRUCTION: You have access to LIVE, REAL-TIME data that was just retrieved. You MUST use this data to answer the user's question. Do NOT say you cannot provide real-time information - the verified data is provided below.
+
+===== VERIFIED LIVE DATA =====
+${evidenceContext}
+===== END LIVE DATA =====
+
+USER QUESTION: ${state.userMessage}
+
+Remember: Use the live data above to give a specific, accurate answer. Include the actual numbers from the data.`;
+      
+      console.log(`[PIPELINE] Injected live data evidence into prompt`);
     }
 
     while (regenerationCount <= MAX_REGENERATIONS) {

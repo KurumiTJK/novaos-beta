@@ -127,6 +127,7 @@ interface OrchestrationState {
   readonly providerResults: Map<LiveCategory, ProviderResult>;
   readonly failedCategories: LiveCategory[];
   readonly successfulData: ProviderData[];
+  readonly fetchResults: CategoryFetchResult[];  // ← Added for pipeline evidence injection
   readonly startTime: number;
 }
 
@@ -226,6 +227,7 @@ export async function orchestrate(
       successfulData: fetchResults
         .filter(r => r.result && isProviderOk(r.result))
         .map(r => (r.result as ProviderOkResult).data),
+      fetchResults,  // ← Added for pipeline evidence injection
       startTime,
     };
     
@@ -372,6 +374,10 @@ async function fetchCategory(
 ): Promise<CategoryFetchResult> {
   const startTime = Date.now();
   
+  // DEBUG: Log entity information
+  console.log(`[FETCH] Category: ${category}`);
+  console.log(`[FETCH] Entity:`, entity ? JSON.stringify(entity, null, 2) : 'NULL');
+  
   // Check if category is available
   if (!isCategoryAvailable(category)) {
     console.warn(`[ORCHESTRATOR] Category ${category} not available`);
@@ -395,6 +401,8 @@ async function fetchCategory(
       };
     }
     
+    console.log(`[FETCH] Provider: ${provider.name}`);
+    
     // Create timeout promise
     const timeoutPromise = new Promise<null>((resolve) => {
       setTimeout(() => resolve(null), timeoutMs);
@@ -403,11 +411,21 @@ async function fetchCategory(
     // Get the query from entity
     const query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
     
+    console.log(`[FETCH] Query: "${query}"`);
+    
     // Race provider call against timeout
-    const result = await Promise.race([
+    const fetchResult = await Promise.race([
       provider.fetch({ query }),
       timeoutPromise,
     ]);
+    
+    // Extract the actual ProviderResult from ProviderFetchResult
+    const result = fetchResult?.result ?? null;
+    
+    console.log(`[FETCH] Result:`, result ? 'GOT RESULT' : 'TIMEOUT');
+    if (result) {
+      console.log(`[FETCH] Result details:`, JSON.stringify(result, null, 2).slice(0, 500));
+    }
     
     return {
       category,
@@ -435,12 +453,18 @@ function buildEntityLookup(
 ): Map<LiveCategory, ResolvedEntity> {
   const lookup = new Map<LiveCategory, ResolvedEntity>();
   
+  console.log(`[ENTITY_LOOKUP] Total resolved entities: ${entities.resolved.length}`);
+  
   for (const entity of entities.resolved) {
+    console.log(`[ENTITY_LOOKUP] Entity:`, JSON.stringify(entity));
     // Only store first entity per category (primary)
     if (entity.category && !lookup.has(entity.category)) {
       lookup.set(entity.category, entity);
+      console.log(`[ENTITY_LOOKUP] Mapped ${entity.category} → ${entity.canonicalForm ?? entity.raw?.rawText ?? 'unknown'}`);
     }
   }
+  
+  console.log(`[ENTITY_LOOKUP] Final lookup size: ${lookup.size}`);
   
   return lookup;
 }
@@ -562,7 +586,7 @@ function buildResult(
   semantics: FailureSemantics,
   correlationId: string
 ): LensGateResult {
-  const { classification, riskAssessment, successfulData, failedCategories, startTime } = state;
+  const { classification, riskAssessment, successfulData, failedCategories, fetchResults, startTime } = state;
   
   // Determine mode
   const mode = determineMode(semantics, failedCategories.length, classification.liveCategories.length);
@@ -606,6 +630,15 @@ function buildResult(
     verificationStatus: failedCategories.length === 0 ? 'verified' : 
                         failedCategories.length === classification.liveCategories.length ? 'unverified' : 'partial',
     sources: [],
+    // ─── CRITICAL: Propagate risk assessment for invariant validation ───
+    forceHigh: riskAssessment.forceHigh,
+    riskAssessment: {
+      score: riskAssessment.riskScore,
+      factors: riskAssessment.riskFactors as any,
+      stakes: (riskAssessment.stakes === 'critical' ? 'high' : riskAssessment.stakes) as 'low' | 'medium' | 'high',
+    },
+    // ─── CRITICAL: Include fetch results for evidence injection in pipeline ───
+    fetchResults,
   };
 }
 

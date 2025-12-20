@@ -19,6 +19,28 @@ import type { LiveCategory, AuthoritativeCategory, DataCategory } from '../../..
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Common English words that should NOT be treated as stock tickers.
+ * These can match the [A-Z]{1,5} pattern but aren't valid symbols.
+ */
+const COMMON_WORDS_NOT_TICKERS = new Set([
+  'THE', 'A', 'AN', 'IS', 'IT', 'OF', 'TO', 'IN', 'ON', 'AT', 'BY', 'FOR',
+  'AND', 'OR', 'BUT', 'NOT', 'AS', 'IF', 'SO', 'BE', 'DO', 'GO', 'UP', 'NO',
+  'YES', 'HAS', 'HAD', 'WAS', 'ARE', 'CAN', 'MAY', 'NOW', 'HOW', 'WHY', 'WHAT',
+  'WHO', 'WHEN', 'WHERE', 'WHICH', 'MUCH', 'MANY', 'ANY', 'ALL', 'SOME', 'MOST',
+  'OUT', 'OVER', 'INTO', 'FROM', 'WITH', 'ABOUT', 'THAN', 'THEN', 'JUST', 'ALSO',
+  'WELL', 'BACK', 'GOOD', 'NEW', 'FIRST', 'LAST', 'LONG', 'GREAT', 'LITTLE',
+  'OWN', 'OTHER', 'OLD', 'RIGHT', 'BIG', 'HIGH', 'LOW', 'PRICE', 'STOCK', 'SHARE',
+]);
+
+/**
+ * Check if a string is likely a valid ticker (not a common word).
+ */
+function isLikelyTicker(text: string): boolean {
+  const upper = text.toUpperCase().trim();
+  return !COMMON_WORDS_NOT_TICKERS.has(upper);
+}
+
+/**
  * Result of pattern matching for a single category.
  */
 export interface PatternMatch {
@@ -64,13 +86,19 @@ const MARKET_PATTERNS: readonly CategoryPattern[] = [
   {
     pattern: /\b([A-Z]{1,5})\s+(?:stock|share|price|quote|trading)/i,
     confidence: 0.95,
-    entityExtractor: (match) => [match[1]?.toUpperCase() ?? ''],
+    entityExtractor: (match) => {
+      const ticker = match[1]?.toUpperCase() ?? '';
+      return isLikelyTicker(ticker) ? [ticker] : [];
+    },
     description: 'Ticker with stock/share/price keyword',
   },
   {
     pattern: /\b(?:stock|share|price|quote)\s+(?:of|for)\s+([A-Z]{1,5})\b/i,
     confidence: 0.95,
-    entityExtractor: (match) => [match[1]?.toUpperCase() ?? ''],
+    entityExtractor: (match) => {
+      const ticker = match[1]?.toUpperCase() ?? '';
+      return isLikelyTicker(ticker) ? [ticker] : [];
+    },
     description: 'Stock/share/price of ticker',
   },
   // Well-known tickers (high confidence)
@@ -722,6 +750,13 @@ export function classifyWithPatterns(message: string): PatternClassificationResu
       if (match) {
         const entities = pattern.entityExtractor?.(match, message) ?? [];
         
+        // Skip this pattern if it has an entity extractor but returned no entities
+        // (likely filtered out as a common word like "THE")
+        if (pattern.entityExtractor && entities.length === 0 && pattern.confidence >= 0.9) {
+          // Try next pattern instead
+          continue;
+        }
+        
         matches.push({
           category,
           confidence: pattern.confidence,
@@ -839,6 +874,8 @@ export {
   normalizeIndex,
   normalizeLocation,
   normalizeTimezone,
+  isLikelyTicker,
+  COMMON_WORDS_NOT_TICKERS,
   COMPANY_TO_TICKER,
   CRYPTO_NAME_TO_SYMBOL,
   CURRENCY_NAME_TO_CODE,
