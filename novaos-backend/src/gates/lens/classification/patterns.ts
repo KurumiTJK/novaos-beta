@@ -245,6 +245,20 @@ const WEATHER_PATTERNS: readonly CategoryPattern[] = [
     entityExtractor: (match) => [normalizeLocation(match[1] ?? '')],
     description: 'Weather in location question',
   },
+  // "weather in [location]" format
+  {
+    pattern: /\bweather\s+(?:in|at|for)\s+([A-Za-z][A-Za-z\s,]+)/i,
+    confidence: 0.93,
+    entityExtractor: (match) => [normalizeLocation(match[1] ?? '')],
+    description: 'Weather in location',
+  },
+  // "[location] weather" format (e.g., "new york weather")
+  {
+    pattern: /^([A-Za-z][A-Za-z\s,]+?)\s+weather\b/i,
+    confidence: 0.90,
+    entityExtractor: (match) => [normalizeLocation(match[1] ?? '')],
+    description: 'Location weather format',
+  },
   // Temperature questions
   {
     pattern: /(?:what(?:'s| is)|how)\s+(?:the\s+)?(?:current\s+)?(?:temperature|temp)\s+(?:in|at|for)\s+([A-Za-z][A-Za-z\s,]+)/i,

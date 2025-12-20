@@ -39,18 +39,126 @@ const WEATHER_CONDITIONS: Readonly<Record<number, string>> = {
 // CITY NORMALIZATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * US state abbreviations - these should be converted to ",US" for OpenWeatherMap
+ */
+const US_STATES = new Set([
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+  'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+  'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+  'DC', // District of Columbia
+]);
+
+/**
+ * Full state names → abbreviations
+ */
+const STATE_NAMES: Readonly<Record<string, string>> = {
+  'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR',
+  'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE',
+  'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID',
+  'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS',
+  'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
+  'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS',
+  'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV',
+  'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY',
+  'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK',
+  'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
+  'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT',
+  'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV',
+  'WISCONSIN': 'WI', 'WYOMING': 'WY', 'DISTRICT OF COLUMBIA': 'DC',
+};
+
+/**
+ * Check if a string is a US state name and return its abbreviation
+ */
+function getStateAbbreviation(stateName: string): string | null {
+  const upper = stateName.trim().toUpperCase();
+  // Check if it's already an abbreviation
+  if (US_STATES.has(upper)) {
+    return upper;
+  }
+  // Check if it's a full state name
+  return STATE_NAMES[upper] ?? null;
+}
+
 function normalizeCity(query: string): string {
   if (!query || typeof query !== 'string') return '';
   
   const trimmed = query.trim();
   const upper = trimmed.toUpperCase();
   
+  // Check direct aliases first (NYC, LA, SF, etc.)
   const aliased = CITY_ALIASES[upper];
   if (aliased) return aliased;
   
   const normalized = upper.replace(/\s+/g, ' ');
   const aliasedNormalized = CITY_ALIASES[normalized];
   if (aliasedNormalized) return aliasedNormalized;
+  
+  // Handle "City, STATE" or "City, State Name" format
+  const commaMatch = trimmed.match(/^(.+?),\s*(.+)$/);
+  if (commaMatch && commaMatch[1] && commaMatch[2]) {
+    const city = commaMatch[1].trim();
+    const stateOrCountry = commaMatch[2].trim();
+    
+    // Check if second part is a US state (abbrev or full name)
+    const stateAbbr = getStateAbbreviation(stateOrCountry);
+    if (stateAbbr) {
+      return `${city},US`;
+    }
+    
+    // If 2-3 letter code, assume country code
+    if (/^[A-Za-z]{2,3}$/.test(stateOrCountry)) {
+      return `${city},${stateOrCountry.toUpperCase()}`;
+    }
+    
+    // Otherwise pass through as-is (might be "City, Country Name")
+    return trimmed;
+  }
+  
+  // Handle "City State" or "City StateName" format without comma
+  // Try to find a state name at the end
+  const upperTrimmed = trimmed.toUpperCase();
+  
+  // Check for full state names at END first (e.g., "Irvine California")
+  for (const [stateName, abbr] of Object.entries(STATE_NAMES)) {
+    if (upperTrimmed.endsWith(` ${stateName}`)) {
+      const city = trimmed.slice(0, -(stateName.length + 1)).trim();
+      return `${city},US`;
+    }
+  }
+  
+  // Check for full state names at START (e.g., "California Irvine")
+  for (const [stateName, abbr] of Object.entries(STATE_NAMES)) {
+    if (upperTrimmed.startsWith(`${stateName} `)) {
+      const city = trimmed.slice(stateName.length + 1).trim();
+      return `${city},US`;
+    }
+  }
+  
+  // Check for state abbreviations at end (e.g., "Irvine CA")
+  const stateAbbrEndMatch = trimmed.match(/^(.+?)\s+([A-Za-z]{2})$/);
+  if (stateAbbrEndMatch && stateAbbrEndMatch[1] && stateAbbrEndMatch[2]) {
+    const city = stateAbbrEndMatch[1].trim();
+    const state = stateAbbrEndMatch[2].toUpperCase();
+    
+    if (US_STATES.has(state)) {
+      return `${city},US`;
+    }
+  }
+  
+  // Check for state abbreviations at start (e.g., "CA Irvine")
+  const stateAbbrStartMatch = trimmed.match(/^([A-Za-z]{2})\s+(.+)$/);
+  if (stateAbbrStartMatch && stateAbbrStartMatch[1] && stateAbbrStartMatch[2]) {
+    const state = stateAbbrStartMatch[1].toUpperCase();
+    const city = stateAbbrStartMatch[2].trim();
+    
+    if (US_STATES.has(state)) {
+      return `${city},US`;
+    }
+  }
   
   return trimmed;
 }

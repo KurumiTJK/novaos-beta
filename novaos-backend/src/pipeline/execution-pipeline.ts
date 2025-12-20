@@ -244,24 +244,42 @@ export class ExecutionPipeline {
           
           // Format based on data type
           if (data.type === 'stock') {
+            const price = data.price ?? 0;
+            const change = data.change ?? 0;
+            const changePercent = data.changePercent ?? 0;
+            const dayLow = data.dayLow ?? 0;
+            const dayHigh = data.dayHigh ?? 0;
+            const prevClose = data.previousClose ?? 0;
             return `LIVE STOCK DATA for ${data.symbol}:\n` +
-                   `• Current Price: $${data.price.toFixed(2)} ${data.currency}\n` +
-                   `• Change: ${data.change >= 0 ? '+' : ''}${data.change.toFixed(2)} (${data.changePercent >= 0 ? '+' : ''}${data.changePercent.toFixed(2)}%)\n` +
-                   `• Day Range: $${data.dayLow.toFixed(2)} - $${data.dayHigh.toFixed(2)}\n` +
-                   `• Previous Close: $${data.previousClose.toFixed(2)}\n` +
-                   `• Exchange: ${data.exchange}\n` +
+                   `• Current Price: $${price.toFixed(2)} ${data.currency || 'USD'}\n` +
+                   `• Change: ${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)\n` +
+                   `• Day Range: $${dayLow.toFixed(2)} - $${dayHigh.toFixed(2)}\n` +
+                   `• Previous Close: $${prevClose.toFixed(2)}\n` +
+                   `• Exchange: ${data.exchange || 'Unknown'}\n` +
                    `• Data Source: ${fetch.result.provider} (fetched just now)`;
           } else if (data.type === 'weather') {
+            const tempF = data.temperatureFahrenheit ?? data.temperature ?? 0;
+            const tempC = data.temperatureCelsius ?? 0;
+            const feelsLikeF = data.feelsLikeFahrenheit ?? 0;
+            const condition = data.condition ?? data.conditions ?? 'Unknown';
+            const humidity = data.humidity ?? 0;
+            const windMph = data.windSpeedMph ?? 0;
+            const windDir = data.windDirection ?? '';
             return `LIVE WEATHER DATA for ${data.location}:\n` +
-                   `• Temperature: ${data.temperature}°${data.unit}\n` +
-                   `• Conditions: ${data.conditions}\n` +
-                   `• Humidity: ${data.humidity}%\n` +
+                   `• Temperature: ${tempF}°F (${tempC}°C)\n` +
+                   `• Feels Like: ${feelsLikeF}°F\n` +
+                   `• Conditions: ${condition}\n` +
+                   `• Humidity: ${humidity}%\n` +
+                   `• Wind: ${windMph} mph ${windDir}\n` +
                    `• Data Source: ${fetch.result.provider}`;
           } else if (data.type === 'crypto') {
-            return `LIVE CRYPTO DATA for ${data.symbol}:\n` +
-                   `• Current Price: $${data.price.toFixed(2)}\n` +
-                   `• 24h Change: ${data.changePercent24h >= 0 ? '+' : ''}${data.changePercent24h.toFixed(2)}%\n` +
-                   `• Market Cap: $${(data.marketCap / 1e9).toFixed(2)}B\n` +
+            const price = data.priceUsd ?? data.price ?? 0;
+            const change = data.change24h ?? data.changePercent24h ?? 0;
+            const marketCap = data.marketCapUsd ?? data.marketCap ?? 0;
+            return `LIVE CRYPTO DATA for ${data.symbol} (${data.name || data.symbol}):\n` +
+                   `• Current Price: $${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n` +
+                   `• 24h Change: ${change >= 0 ? '+' : ''}${change.toFixed(2)}%\n` +
+                   `• Market Cap: $${(marketCap / 1e9).toFixed(2)}B\n` +
                    `• Data Source: ${fetch.result.provider}`;
           } else if (data.type === 'fx') {
             return `LIVE EXCHANGE RATE:\n` +
