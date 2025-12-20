@@ -282,12 +282,18 @@ export class ExecutionPipeline {
                    `• Market Cap: $${(marketCap / 1e9).toFixed(2)}B\n` +
                    `• Data Source: ${fetch.result.provider}`;
           } else if (data.type === 'fx') {
+            const fromCurrency = data.baseCurrency ?? data.from ?? '???';
+            const toCurrency = data.quoteCurrency ?? data.to ?? '???';
+            const rate = data.rate ?? 0;
             return `LIVE EXCHANGE RATE:\n` +
-                   `• ${data.from}/${data.to}: ${data.rate.toFixed(4)}\n` +
+                   `• ${fromCurrency}/${toCurrency}: ${rate.toFixed(4)}\n` +
+                   `• 1 ${fromCurrency} = ${rate.toFixed(4)} ${toCurrency}\n` +
                    `• Data Source: ${fetch.result.provider}`;
           } else if (data.type === 'time') {
-            return `CURRENT TIME in ${data.timezone}:\n` +
-                   `• ${data.formatted}\n` +
+            const timezone = data.timezone ?? data.location ?? 'Unknown';
+            const formatted = data.formatted ?? data.time ?? data.localTime ?? 'Unknown';
+            return `CURRENT TIME in ${timezone}:\n` +
+                   `• ${formatted}\n` +
                    `• Data Source: system clock`;
           }
           
