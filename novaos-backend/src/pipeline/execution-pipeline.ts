@@ -229,10 +229,14 @@ export class ExecutionPipeline {
     
     // Check multiple possible evidence structures from Lens gate
     let evidenceContext = '';
+    let errorContext = '';
     
     // Structure 1: Direct fetchResults from orchestrator
     if (lensResult?.fetchResults?.length > 0) {
       const successfulFetches = lensResult.fetchResults.filter((f: any) => f.result?.ok);
+      const failedFetches = lensResult.fetchResults.filter((f: any) => f.result && !f.result.ok);
+      
+      // Handle successful fetches - inject live data
       if (successfulFetches.length > 0) {
         const evidenceLines = successfulFetches.map((fetch: any) => {
           const data = fetch.result.data;
@@ -277,6 +281,18 @@ export class ExecutionPipeline {
           evidenceContext = evidenceLines.join('\n\n');
         }
       }
+      
+      // Handle failed fetches - check for helpful error messages (like typo suggestions)
+      if (failedFetches.length > 0) {
+        const errorMessages = failedFetches
+          .filter((f: any) => f.result?.error?.message)
+          .map((f: any) => f.result.error.message);
+        
+        if (errorMessages.length > 0) {
+          errorContext = errorMessages.join('\n');
+          console.log(`[PIPELINE] Error context from failed fetches:`, errorContext);
+        }
+      }
     }
     
     // Structure 2: evidencePack.items (legacy format)
@@ -314,6 +330,20 @@ USER QUESTION: ${state.userMessage}
 Remember: Use the live data above to give a specific, accurate answer. Include the actual numbers from the data.`;
       
       console.log(`[PIPELINE] Injected live data evidence into prompt`);
+    }
+    // If no evidence but we have error context (like typo suggestions), inject that
+    else if (errorContext) {
+      augmentedMessage = `IMPORTANT: The data lookup encountered an issue. Please relay this message to the user:
+
+===== DATA LOOKUP ERROR =====
+${errorContext}
+===== END ERROR =====
+
+USER QUESTION: ${state.userMessage}
+
+Relay the error message above to help the user. If there's a suggestion (like "Did you mean..."), include that in your response.`;
+      
+      console.log(`[PIPELINE] Injected error context into prompt`);
     }
 
     while (regenerationCount <= MAX_REGENERATIONS) {

@@ -20,6 +20,7 @@ import type {
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 
 const SYMBOL_ALIASES: Readonly<Record<string, string>> = {
+  // Company names → tickers (these should silently resolve)
   'APPLE': 'AAPL', 'MICROSOFT': 'MSFT', 'GOOGLE': 'GOOGL', 'ALPHABET': 'GOOGL',
   'AMAZON': 'AMZN', 'META': 'META', 'FACEBOOK': 'META', 'TESLA': 'TSLA',
   'NVIDIA': 'NVDA', 'NETFLIX': 'NFLX', 'PAYPAL': 'PYPL', 'UBER': 'UBER',
@@ -27,7 +28,44 @@ const SYMBOL_ALIASES: Readonly<Record<string, string>> = {
   'JPMORGAN': 'JPM', 'GOLDMAN': 'GS', 'VISA': 'V', 'MASTERCARD': 'MA',
   'WALMART': 'WMT', 'DISNEY': 'DIS', 'NIKE': 'NKE', 'STARBUCKS': 'SBUX',
   'SP500': 'SPY', 'S&P': 'SPY', 'S&P500': 'SPY', 'DOW': 'DIA', 'NASDAQ': 'QQQ',
+  // Alternate ticker classes (silent resolve)
+  'GOOG': 'GOOGL',
 };
+
+/**
+ * Common typos/misspellings → suggested correction + company name
+ * These should NOT silently resolve - instead show a suggestion to the user
+ */
+const TYPO_SUGGESTIONS: Readonly<Record<string, { ticker: string; company: string }>> = {
+  'APPL': { ticker: 'AAPL', company: 'Apple' },
+  'APLE': { ticker: 'AAPL', company: 'Apple' },
+  'GOGL': { ticker: 'GOOGL', company: 'Google/Alphabet' },
+  'GOGGLE': { ticker: 'GOOGL', company: 'Google/Alphabet' },
+  'AMAZ': { ticker: 'AMZN', company: 'Amazon' },
+  'AMAZN': { ticker: 'AMZN', company: 'Amazon' },
+  'TELA': { ticker: 'TSLA', company: 'Tesla' },
+  'TELSA': { ticker: 'TSLA', company: 'Tesla' },
+  'TESLE': { ticker: 'TSLA', company: 'Tesla' },
+  'NVID': { ticker: 'NVDA', company: 'NVIDIA' },
+  'NVIIDA': { ticker: 'NVDA', company: 'NVIDIA' },
+  'MIRCOSOFT': { ticker: 'MSFT', company: 'Microsoft' },
+  'MICROSFOT': { ticker: 'MSFT', company: 'Microsoft' },
+  'NETFLEX': { ticker: 'NFLX', company: 'Netflix' },
+  'NETFLX': { ticker: 'NFLX', company: 'Netflix' },
+  'FACEBOK': { ticker: 'META', company: 'Meta/Facebook' },
+  'FACBOOK': { ticker: 'META', company: 'Meta/Facebook' },
+  'STARBUKS': { ticker: 'SBUX', company: 'Starbucks' },
+  'WALMAT': { ticker: 'WMT', company: 'Walmart' },
+  'DISNY': { ticker: 'DIS', company: 'Disney' },
+};
+
+/**
+ * Check if input is a typo and get suggestion
+ */
+function getTypoSuggestion(query: string): { ticker: string; company: string } | null {
+  const upper = query.trim().toUpperCase();
+  return TYPO_SUGGESTIONS[upper] ?? null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SYMBOL NORMALIZATION
@@ -91,6 +129,16 @@ export class FinnhubProvider extends BaseProvider {
       return this.createFailResult(
         'API_KEY_MISSING',
         'Finnhub API key not configured. Set FINNHUB_API_KEY environment variable.',
+        false
+      );
+    }
+    
+    // Check for typos BEFORE normalizing - return helpful suggestion
+    const typoSuggestion = getTypoSuggestion(query);
+    if (typoSuggestion) {
+      return this.createFailResult(
+        'SYMBOL_TYPO',
+        `Symbol "${query.toUpperCase()}" not found. Did you mean "${typoSuggestion.ticker}" (${typoSuggestion.company})?`,
         false
       );
     }
@@ -196,4 +244,4 @@ export class FinnhubProvider extends BaseProvider {
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export { normalizeSymbol, getSuggestedSymbols, SYMBOL_ALIASES };
+export { normalizeSymbol, getSuggestedSymbols, getTypoSuggestion, SYMBOL_ALIASES, TYPO_SUGGESTIONS };

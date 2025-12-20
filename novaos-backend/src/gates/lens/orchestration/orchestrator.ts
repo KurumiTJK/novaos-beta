@@ -403,19 +403,30 @@ async function fetchCategory(
     
     console.log(`[FETCH] Provider: ${provider.name}`);
     
-    // Create timeout promise
-    const timeoutPromise = new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), timeoutMs);
-    });
-    
     // Get the query from entity
     const query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
     
     console.log(`[FETCH] Query: "${query}"`);
+    console.log(`[FETCH] Starting fetch with timeout: ${timeoutMs}ms`);
+    
+    // Create timeout promise
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        console.log(`[FETCH] TIMEOUT triggered after ${timeoutMs}ms`);
+        resolve(null);
+      }, timeoutMs);
+    });
     
     // Race provider call against timeout
+    const fetchStart = Date.now();
     const fetchResult = await Promise.race([
-      provider.fetch({ query }),
+      provider.fetch({ query, bypassCache: true }).then(r => {
+        console.log(`[FETCH] Provider returned in ${Date.now() - fetchStart}ms`);
+        return r;
+      }).catch(err => {
+        console.error(`[FETCH] Provider error:`, err);
+        return null;
+      }),
       timeoutPromise,
     ]);
     
