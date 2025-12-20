@@ -104,7 +104,7 @@ const DEFAULT_CONFIG: Required<LensGateConfig> = {
   skipLLMClassification: false,
   providerTimeoutMs: 5000,
   parallelFetch: true,
-  userTimezone: 'UTC',
+  userTimezone: 'America/Los_Angeles',  // Default to PST for Irvine, CA
   userLocation: '',
   enableTracing: true,
   logTrace: false,

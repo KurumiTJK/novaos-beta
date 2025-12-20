@@ -341,14 +341,14 @@ async function fetchAllCategories(
   entities: ResolvedEntities,
   options: OrchestrationOptions
 ): Promise<CategoryFetchResult[]> {
-  const { parallelFetch = true, providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS } = options;
+  const { parallelFetch = true, providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS, userTimezone } = options;
   
   // Build entity lookup
   const entityByCategory = buildEntityLookup(entities);
   
   // Create fetch promises
   const fetchPromises = categories.map(category => 
-    fetchCategory(category, entityByCategory.get(category) ?? null, providerTimeoutMs)
+    fetchCategory(category, entityByCategory.get(category) ?? null, providerTimeoutMs, userTimezone)
   );
   
   // Execute fetches
@@ -370,7 +370,8 @@ async function fetchAllCategories(
 async function fetchCategory(
   category: LiveCategory,
   entity: ResolvedEntity | null,
-  timeoutMs: number
+  timeoutMs: number,
+  userTimezone?: string
 ): Promise<CategoryFetchResult> {
   const startTime = Date.now();
   
@@ -402,9 +403,17 @@ async function fetchCategory(
     }
     
     console.log(`[FETCH] Provider: ${provider.name}`);
+    console.log(`[FETCH] userTimezone param: "${userTimezone}"`);
     
-    // Get the query from entity
-    const query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
+    // Get the query from entity, with special handling for time queries
+    let query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
+    
+    // For time queries with no entity, use userTimezone as fallback (default to PST/Irvine)
+    if (category === 'time' && !query) {
+      const fallbackTimezone = userTimezone || 'America/Los_Angeles';
+      query = fallbackTimezone;
+      console.log(`[FETCH] Using timezone fallback: "${fallbackTimezone}"`);
+    }
     
     console.log(`[FETCH] Query: "${query}"`);
     console.log(`[FETCH] Starting fetch with timeout: ${timeoutMs}ms`);

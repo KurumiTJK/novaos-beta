@@ -192,6 +192,7 @@ export class ExecutionPipeline {
       try {
         state.gateResults.lens = await executeLensGateAsync(state, context, {
           enableSearch: this.enableLensSearch,
+          userTimezone: context.timezone,  // Pass user's timezone from request context
         });
         state.lensResult = state.gateResults.lens.output;
       } catch (lensError) {
@@ -291,10 +292,43 @@ export class ExecutionPipeline {
                    `• Data Source: ${fetch.result.provider}`;
           } else if (data.type === 'time') {
             const timezone = data.timezone ?? data.location ?? 'Unknown';
-            const formatted = data.formatted ?? data.time ?? data.localTime ?? 'Unknown';
-            return `CURRENT TIME in ${timezone}:\n` +
-                   `• ${formatted}\n` +
-                   `• Data Source: system clock`;
+            const localTime = data.localTime ?? data.time ?? data.formatted ?? 'Unknown';
+            const abbr = data.abbreviation ?? '';
+            
+            // Format time more naturally (e.g., "5:10 AM" instead of "05:10:28")
+            let formattedTime = localTime;
+            let datePart = '';
+            try {
+              // Try to extract just the time portion and format nicely
+              const parts = localTime.split(' ');
+              datePart = parts[0] || '';
+              const timePart = parts[1] || localTime;
+              const [hours, minutes] = timePart.split(':').map(Number);
+              const period = hours >= 12 ? 'PM' : 'AM';
+              const hour12 = hours % 12 || 12;
+              formattedTime = `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+            } catch {
+              // Keep original if parsing fails
+            }
+            
+            // Determine if this is the user's local timezone
+            const isLocalTime = timezone === 'America/Los_Angeles' || abbr === 'PST' || abbr === 'PDT';
+            const locationName = timezone.split('/')[1]?.replace('_', ' ') || timezone;
+            
+            if (isLocalTime) {
+              return `===== ANSWER THIS QUESTION ONLY =====\n` +
+                     `The user asked for the CURRENT TIME (their local time).\n` +
+                     `ANSWER: The current time is ${formattedTime}.\n` +
+                     `DO NOT mention any other timezone from earlier in the conversation.\n` +
+                     `DO NOT calculate or convert times. Just state the current local time.\n` +
+                     `===================================`;
+            } else {
+              return `===== ANSWER THIS QUESTION ONLY =====\n` +
+                     `The user asked for the time in ${locationName}.\n` +
+                     `ANSWER: The current time in ${locationName} is ${formattedTime}.\n` +
+                     `DO NOT reference any other timezones or previous questions.\n` +
+                     `===================================`;
+            }
           }
           
           // Generic fallback
