@@ -222,12 +222,6 @@ export class ExecutionPipeline {
     let augmentedMessage = state.userMessage;
     const lensResult = state.lensResult as any;
     
-    // DEBUG: Log what we have in lensResult
-    console.log(`[PIPELINE] lensResult keys:`, lensResult ? Object.keys(lensResult) : 'null');
-    console.log(`[PIPELINE] lensResult.fetchResults:`, lensResult?.fetchResults ? `${lensResult.fetchResults.length} items` : 'undefined');
-    console.log(`[PIPELINE] lensResult.evidence:`, lensResult?.evidence ? 'present' : 'undefined');
-    console.log(`[PIPELINE] lensResult.retrieval:`, lensResult?.retrieval ? JSON.stringify(lensResult.retrieval).slice(0, 200) : 'undefined');
-    
     // Check multiple possible evidence structures from Lens gate
     let evidenceContext = '';
     let errorContext = '';
@@ -348,7 +342,6 @@ export class ExecutionPipeline {
         
         if (errorMessages.length > 0) {
           errorContext = errorMessages.join('\n');
-          console.log(`[PIPELINE] Error context from failed fetches:`, errorContext);
         }
       }
     }
@@ -386,8 +379,6 @@ ${evidenceContext}
 USER QUESTION: ${state.userMessage}
 
 Remember: Use the live data above to give a specific, accurate answer. Include the actual numbers from the data.`;
-      
-      console.log(`[PIPELINE] Injected live data evidence into prompt`);
     }
     // If no evidence but we have error context (like typo suggestions), inject that
     else if (errorContext) {
@@ -400,8 +391,6 @@ ${errorContext}
 USER QUESTION: ${state.userMessage}
 
 Relay the error message above to help the user. If there's a suggestion (like "Did you mean..."), include that in your response.`;
-      
-      console.log(`[PIPELINE] Injected error context into prompt`);
     }
 
     while (regenerationCount <= MAX_REGENERATIONS) {

@@ -148,8 +148,6 @@ export async function executeLensGate(
   
   const correlationId = traceBuilder?.getCorrelationId() ?? generateCorrelationId();
   
-  console.log(`[LENS] Starting gate execution (correlationId: ${correlationId})`);
-  
   try {
     // Build orchestration options
     const orchestrationOptions: OrchestrationOptions = {
@@ -190,16 +188,11 @@ export async function executeLensGate(
       if (mergedConfig.logTrace) {
         console.log(formatTrace(trace));
       }
-      
-      const metrics = extractMetrics(trace);
-      console.log(`[LENS] Complete: ${formatMetrics(metrics)}`);
     }
     
     // Determine gate status based on lens mode
     const gateStatus = determineGateStatus(lensResult.mode);
     const executionTimeMs = Date.now() - startTime;
-    
-    console.log(`[LENS] Gate ${gateStatus}: mode=${lensResult.mode}, time=${executionTimeMs}ms`);
     
     return {
       gateId: LENS_GATE_ID,

@@ -182,18 +182,12 @@ export async function orchestrate(
   const startTime = Date.now();
   const correlationId = options.correlationId ?? generateCorrelationId();
   
-  console.log(`[ORCHESTRATOR] Starting orchestration (correlationId: ${correlationId})`);
-  
   try {
     // ─── STEP 1: CLASSIFICATION ───
     const classification = await getClassification(message, options);
     
-    console.log(`[ORCHESTRATOR] Classification: truthMode=${classification.truthMode}, ` +
-      `categories=[${classification.liveCategories.join(', ')}]`);
-    
     // ─── STEP 2: CHECK IF LIVE DATA NEEDED ───
     if (!requiresLiveData(classification)) {
-      console.log('[ORCHESTRATOR] No live data needed - passthrough');
       return createPassthroughResult(
         classification,
         classification.entities ?? createEmptyEntities(),
@@ -206,9 +200,6 @@ export async function orchestrate(
     
     // Validate forceHigh invariant
     validateForceHighInvariant(classification.truthMode, riskAssessment.forceHigh);
-    
-    console.log(`[ORCHESTRATOR] Risk: forceHigh=${riskAssessment.forceHigh}, ` +
-      `score=${riskAssessment.riskScore}, stakes=${riskAssessment.stakes}`);
     
     // ─── STEP 4: FETCH PROVIDER DATA ───
     const fetchResults = await fetchAllCategories(
@@ -242,14 +233,8 @@ export async function orchestrate(
     // ─── STEP 7: DETERMINE FAILURE SEMANTICS ───
     const semantics = determineSemantics(state);
     
-    console.log(`[ORCHESTRATOR] Semantics: proceed=${semantics.proceed}, ` +
-      `constraints=${semantics.constraintLevel}`);
-    
     // ─── STEP 8: BUILD RESULT ───
     const result = buildResult(state, semantics, correlationId);
-    
-    const elapsed = Date.now() - startTime;
-    console.log(`[ORCHESTRATOR] Complete in ${elapsed}ms: mode=${result.mode}`);
     
     return result;
     
@@ -375,13 +360,8 @@ async function fetchCategory(
 ): Promise<CategoryFetchResult> {
   const startTime = Date.now();
   
-  // DEBUG: Log entity information
-  console.log(`[FETCH] Category: ${category}`);
-  console.log(`[FETCH] Entity:`, entity ? JSON.stringify(entity, null, 2) : 'NULL');
-  
   // Check if category is available
   if (!isCategoryAvailable(category)) {
-    console.warn(`[ORCHESTRATOR] Category ${category} not available`);
     return {
       category,
       result: null,
@@ -393,7 +373,6 @@ async function fetchCategory(
   try {
     const provider = getProviderForCategory(category);
     if (!provider) {
-      console.warn(`[ORCHESTRATOR] No provider for category ${category}`);
       return {
         category,
         result: null,
@@ -402,9 +381,6 @@ async function fetchCategory(
       };
     }
     
-    console.log(`[FETCH] Provider: ${provider.name}`);
-    console.log(`[FETCH] userTimezone param: "${userTimezone}"`);
-    
     // Get the query from entity, with special handling for time queries
     let query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
     
@@ -412,43 +388,23 @@ async function fetchCategory(
     if (category === 'time') {
       const lowerQuery = query.toLowerCase();
       if (!query || lowerQuery === 'local' || lowerQuery === 'here' || lowerQuery === 'now') {
-        const fallbackTimezone = userTimezone || 'America/Los_Angeles';
-        query = fallbackTimezone;
-        console.log(`[FETCH] Using timezone fallback: "${fallbackTimezone}"`);
+        query = userTimezone || 'America/Los_Angeles';
       }
     }
     
-    console.log(`[FETCH] Query: "${query}"`);
-    console.log(`[FETCH] Starting fetch with timeout: ${timeoutMs}ms`);
-    
     // Create timeout promise
     const timeoutPromise = new Promise<null>((resolve) => {
-      setTimeout(() => {
-        console.log(`[FETCH] TIMEOUT triggered after ${timeoutMs}ms`);
-        resolve(null);
-      }, timeoutMs);
+      setTimeout(() => resolve(null), timeoutMs);
     });
     
     // Race provider call against timeout
-    const fetchStart = Date.now();
     const fetchResult = await Promise.race([
-      provider.fetch({ query, bypassCache: true }).then(r => {
-        console.log(`[FETCH] Provider returned in ${Date.now() - fetchStart}ms`);
-        return r;
-      }).catch(err => {
-        console.error(`[FETCH] Provider error:`, err);
-        return null;
-      }),
+      provider.fetch({ query, bypassCache: true }).catch(() => null),
       timeoutPromise,
     ]);
     
     // Extract the actual ProviderResult from ProviderFetchResult
     const result = fetchResult?.result ?? null;
-    
-    console.log(`[FETCH] Result:`, result ? 'GOT RESULT' : 'TIMEOUT');
-    if (result) {
-      console.log(`[FETCH] Result details:`, JSON.stringify(result, null, 2).slice(0, 500));
-    }
     
     return {
       category,
@@ -476,18 +432,12 @@ function buildEntityLookup(
 ): Map<LiveCategory, ResolvedEntity> {
   const lookup = new Map<LiveCategory, ResolvedEntity>();
   
-  console.log(`[ENTITY_LOOKUP] Total resolved entities: ${entities.resolved.length}`);
-  
   for (const entity of entities.resolved) {
-    console.log(`[ENTITY_LOOKUP] Entity:`, JSON.stringify(entity));
     // Only store first entity per category (primary)
     if (entity.category && !lookup.has(entity.category)) {
       lookup.set(entity.category, entity);
-      console.log(`[ENTITY_LOOKUP] Mapped ${entity.category} → ${entity.canonicalForm ?? entity.raw?.rawText ?? 'unknown'}`);
     }
   }
-  
-  console.log(`[ENTITY_LOOKUP] Final lookup size: ${lookup.size}`);
   
   return lookup;
 }
