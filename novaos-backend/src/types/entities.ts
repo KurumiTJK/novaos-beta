@@ -1,6 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// ENTITIES — Resolved Entity Types
-// FIXED: Added all types expected by entity-resolver.ts and entity-validator.ts
+// ENTITIES — Entity Types and Resolution Results (CORRECTED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { LiveCategory } from './categories.js';
@@ -9,282 +8,353 @@ import type { LiveCategory } from './categories.js';
 // ENTITY TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Types of entities that can be extracted from queries.
- */
 export type EntityType =
-  | 'stock'          // Stock ticker (AAPL, GOOGL)
-  | 'cryptocurrency' // Crypto (BTC, ETH)
-  | 'currency'       // Fiat currency (USD, EUR)
-  | 'location'       // City/location for weather
-  | 'timezone'       // Timezone identifier
-  | 'index'          // Market index (S&P 500, DJIA)
-  | 'company'        // Company name
-  | 'commodity'      // Commodities (gold, oil)
-  | 'unknown';       // Unresolved entity type
+  | 'ticker'
+  | 'crypto'
+  | 'currency_pair'
+  | 'currency'
+  | 'city'
+  | 'location'
+  | 'timezone'
+  | 'company'
+  | 'index'
+  | 'commodity'
+  | 'unknown';
 
-/**
- * Resolution status for an entity.
- */
+export const ENTITY_TYPES: ReadonlySet<EntityType> = new Set([
+  'ticker',
+  'crypto',
+  'currency_pair',
+  'currency',
+  'city',
+  'location',
+  'timezone',
+  'company',
+  'index',
+  'commodity',
+  'unknown',
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RESOLUTION STATUS
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export type ResolutionStatus =
-  | 'resolved'     // Successfully resolved to canonical form
-  | 'ambiguous'    // Multiple possible matches
-  | 'not_found'    // No match found
-  | 'unsupported'  // Entity type not supported
-  | 'invalid';     // Invalid entity
+  | 'resolved'
+  | 'ambiguous'
+  | 'failed'
+  | 'pending'
+  | 'not_found'
+  | 'unsupported'
+  | 'invalid';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RAW ENTITY TYPES
+// RAW ENTITY (original mention from text)
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Raw entity mention extracted from query (basic).
- */
-export interface RawEntityMention {
-  readonly rawText: string;
-  readonly startIndex: number;
-  readonly endIndex: number;
-  readonly confidence: number;
+export interface RawEntity {
+  readonly rawText?: string;
+  readonly text?: string;
+  readonly start?: number;
+  readonly end?: number;
+  readonly type: EntityType;
+  readonly confidence?: number;
 }
 
-/**
- * Raw entity with type information (used by entity resolver).
- */
-export interface RawEntity {
-  readonly rawText: string;
-  readonly type: EntityType;
-  readonly confidence: number;
-  readonly span?: {
-    readonly start: number;
-    readonly end: number;
-  };
+// For backward compatibility
+export interface RawEntityMention {
+  readonly text?: string;
+  readonly rawText?: string;
+  readonly start?: number;
+  readonly end?: number;
+  readonly startIndex?: number;
+  readonly endIndex?: number;
+  readonly type?: EntityType;
+  readonly confidence?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENTITY METADATA
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Metadata about a resolved entity.
- */
 export interface EntityMetadata {
-  readonly exchange?: string;       // Stock exchange (NYSE, NASDAQ)
-  readonly country?: string;        // Country code
-  readonly fullName?: string;       // Full company/entity name
-  readonly sector?: string;         // Industry sector
-  readonly marketCap?: string;      // Market cap tier
-  readonly aliases?: readonly string[]; // Alternative names
-  readonly [key: string]: unknown;  // Allow additional fields
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// RESOLVED ENTITY TYPES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Resolved entity with canonical form.
- * FIXED: Added all fields expected by entity-resolver.ts
- */
-export interface ResolvedEntity {
-  /** Raw entity information */
-  readonly raw: RawEntity;
-  
-  /** Resolution status */
-  readonly status: ResolutionStatus;
-  
-  /** Canonical identifier (ticker, currency code, etc.) */
-  readonly canonicalId: string | null;
-  
-  /** Display name for the entity */
-  readonly displayName: string | null;
-  
-  /** Category this entity belongs to */
-  readonly category: LiveCategory | null;
-  
-  /** Confidence in resolution (0-1) */
-  readonly resolutionConfidence: number;
-  
-  /** Optional metadata */
-  readonly metadata?: EntityMetadata;
-  
-  /** Alternative candidates if ambiguous */
-  readonly alternatives?: readonly ResolvedEntityAlternative[];
-  
-  // Legacy compatibility fields
-  /** @deprecated Use canonicalId instead */
-  readonly canonicalForm?: string;
-  
-  /** Provider that resolved this entity */
-  readonly provider?: string;
-}
-
-/**
- * Alternative candidate for ambiguous entity resolution.
- */
-export interface ResolvedEntityAlternative {
-  readonly canonicalId: string;
-  readonly displayName: string;
-  readonly confidence: number;
-  readonly metadata?: EntityMetadata;
-}
-
-/**
- * Ambiguous entity requiring clarification.
- */
-export interface AmbiguousEntity {
-  readonly raw: RawEntity;
-  readonly candidates: readonly ResolvedEntity[];
-  readonly clarificationPrompt: string;
-}
-
-/**
- * Failed entity resolution.
- */
-export interface FailedEntity {
-  readonly raw: RawEntity;
-  readonly reason: string;
-}
-
-/**
- * Complete entity resolution result.
- */
-export interface ResolvedEntities {
-  /** All entities (resolved, failed, ambiguous) */
-  readonly entities?: readonly ResolvedEntity[];
-  
-  /** Successfully resolved entities */
-  readonly resolved: readonly ResolvedEntity[];
-  
-  /** Ambiguous entities needing clarification */
-  readonly ambiguous: readonly AmbiguousEntity[];
-  
-  /** Failed entity resolutions */
-  readonly failed: readonly FailedEntity[];
-  
-  /** Resolution trace for telemetry */
-  readonly trace?: EntityResolutionTrace;
+  readonly exchange?: string;
+  readonly sector?: string;
+  readonly industry?: string;
+  readonly country?: string;
+  readonly region?: string;
+  readonly timezone?: string;
+  readonly [key: string]: unknown;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENTITY RESOLUTION TRACE
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Trace information for entity resolution (telemetry).
- */
 export interface EntityResolutionTrace {
-  readonly originalQuery?: string;
-  readonly entityText?: string;
-  readonly entityType?: EntityType;
-  readonly status?: ResolutionStatus;
-  readonly resolvedTo?: string;
-  readonly candidates?: readonly string[];
-  readonly confidence?: number;
+  readonly method: 'exact' | 'fuzzy' | 'alias' | 'llm' | 'fallback' | 'regex';
+  readonly confidence: number;
+  readonly source?: string;
+  readonly alternatives?: readonly string[];
   readonly latencyMs?: number;
-  readonly source?: 'cache' | 'lookup' | 'inference';
+  readonly originalQuery?: string;
   readonly extractionTimeMs?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RESOLVED ENTITY ALTERNATIVE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ResolvedEntityAlternative {
+  readonly normalizedId: string;
+  readonly displayName: string;
+  readonly confidence: number;
+  readonly type: EntityType;
+  readonly category: LiveCategory;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RESOLVED ENTITY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ResolvedEntity {
+  // Original interface properties - made optional to match actual code patterns
+  readonly originalText?: string;
+  readonly normalizedId?: string;
+  readonly type?: EntityType;
+  readonly category?: LiveCategory | null;
+  readonly confidence?: number;
+  readonly displayName?: string | null;
+  readonly metadata?: EntityMetadata;
+  readonly aliases?: readonly string[];
+  
+  // Additional properties used in code
+  readonly raw?: RawEntity;
+  readonly canonicalForm?: string;
+  readonly canonicalId?: string | null;
+  readonly status?: ResolutionStatus;
+  readonly resolutionConfidence?: number;
+  readonly trace?: EntityResolutionTrace;
+  readonly alternatives?: readonly ResolvedEntityAlternative[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// AMBIGUOUS ENTITY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface AmbiguousEntity {
+  readonly raw: RawEntity;
+  readonly candidates: readonly ResolvedEntityAlternative[];
+  readonly clarificationPrompt: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// FAILED ENTITY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface FailedEntity {
+  readonly raw: RawEntity;
+  readonly reason: string;
+  readonly errorCode?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RESOLVED ENTITIES COLLECTION
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ResolvedEntities {
+  readonly resolved: readonly ResolvedEntity[];
+  readonly unresolved?: readonly RawEntityMention[];
+  readonly ambiguous?: readonly AmbiguousEntity[];
+  readonly failed?: readonly FailedEntity[];
+  readonly entities?: readonly ResolvedEntity[];
+  readonly byCategory?: ReadonlyMap<LiveCategory, readonly ResolvedEntity[]>;
+  readonly byType?: ReadonlyMap<EntityType, readonly ResolvedEntity[]>;
+  readonly complete?: boolean;
   readonly resolutionTimeMs?: number;
-  readonly extractedCount?: number;
-  readonly resolvedCount?: number;
-  readonly method?: string;
-  readonly resolverVersion?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CATEGORY MAPPING
+// ENTITY TO CATEGORY MAPPING
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Mapping from entity types to their corresponding live categories.
- */
-export const ENTITY_TO_CATEGORY: ReadonlyMap<EntityType, LiveCategory> = new Map([
-  ['stock', 'market'],
-  ['index', 'market'],
-  ['company', 'market'],
-  ['cryptocurrency', 'crypto'],
-  ['currency', 'fx'],
-  ['location', 'weather'],
-  ['timezone', 'time'],
-]);
-
-/**
- * Get the live category for an entity type.
- */
-export function getCategoryForEntityType(type: EntityType): LiveCategory | null {
-  return ENTITY_TO_CATEGORY.get(type) ?? null;
-}
+export const ENTITY_TO_CATEGORY: Readonly<Record<EntityType, LiveCategory>> = {
+  ticker: 'market',
+  crypto: 'crypto',
+  currency_pair: 'fx',
+  currency: 'fx',
+  city: 'weather',
+  location: 'weather',
+  timezone: 'time',
+  company: 'market',
+  index: 'market',
+  commodity: 'market',
+  unknown: 'market',
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// HELPERS
+// FACTORY FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Create empty resolved entities.
- */
 export function createEmptyEntities(): ResolvedEntities {
   return {
-    entities: [],
     resolved: [],
+    unresolved: [],
     ambiguous: [],
     failed: [],
+    complete: true,
   };
 }
 
-/**
- * Check if entity resolution has any successful results.
- */
+export function createResolvedEntities(
+  entities: readonly ResolvedEntity[],
+  unresolved: readonly RawEntityMention[] = [],
+  resolutionTimeMs?: number
+): ResolvedEntities {
+  const byCategory = new Map<LiveCategory, ResolvedEntity[]>();
+  const byType = new Map<EntityType, ResolvedEntity[]>();
+  
+  for (const entity of entities) {
+    if (entity.category) {
+      const cat = entity.category as LiveCategory;
+      const catList = byCategory.get(cat) ?? [];
+      catList.push(entity);
+      byCategory.set(cat, catList);
+    }
+    
+    if (entity.type) {
+      const entityType = entity.type as EntityType;
+      const typeList = byType.get(entityType) ?? [];
+      typeList.push(entity);
+      byType.set(entityType, typeList);
+    }
+  }
+  
+  return {
+    resolved: entities,
+    unresolved,
+    ambiguous: [],
+    failed: [],
+    byCategory,
+    byType,
+    complete: unresolved.length === 0,
+    resolutionTimeMs,
+  };
+}
+
+export function createResolvedEntity(
+  originalText: string,
+  normalizedId: string,
+  type: EntityType,
+  confidence: number = 1.0,
+  displayName?: string,
+  metadata?: EntityMetadata
+): ResolvedEntity {
+  return {
+    originalText,
+    normalizedId,
+    type,
+    category: ENTITY_TO_CATEGORY[type],
+    confidence,
+    displayName: displayName ?? normalizedId,
+    metadata,
+    canonicalForm: normalizedId,
+    canonicalId: normalizedId,
+    status: 'resolved',
+  };
+}
+
+export function createRawEntityMention(
+  text: string,
+  start: number,
+  end: number,
+  type?: EntityType,
+  confidence?: number
+): RawEntityMention {
+  return {
+    text,
+    rawText: text,
+    start,
+    end,
+    type,
+    confidence,
+  };
+}
+
+export function toRawEntity(mention: RawEntityMention, type: EntityType): RawEntityMention {
+  return {
+    ...mention,
+    type,
+  };
+}
+
+export function normalizeEntityType(typeStr: string): EntityType {
+  const normalized = typeStr.toLowerCase().trim();
+  if (ENTITY_TYPES.has(normalized as EntityType)) {
+    return normalized as EntityType;
+  }
+  return 'unknown';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// TYPE GUARDS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function isValidEntityType(value: string): value is EntityType {
+  return ENTITY_TYPES.has(value as EntityType);
+}
+
 export function hasResolvedEntities(entities: ResolvedEntities): boolean {
   return entities.resolved.length > 0;
 }
 
-/**
- * Check if entity resolution has any failures.
- */
-export function hasFailedEntities(entities: ResolvedEntities): boolean {
-  return entities.failed.length > 0 || entities.ambiguous.length > 0;
+export function hasUnresolvedEntities(entities: ResolvedEntities): boolean {
+  return (entities.unresolved?.length ?? 0) > 0;
 }
 
-/**
- * Get all entity types present in resolved entities.
- */
-export function getEntityTypes(entities: ResolvedEntities): Set<EntityType> {
-  const types = new Set<EntityType>();
-  for (const entity of entities.resolved) {
-    if (entity.raw.type) {
-      types.add(entity.raw.type);
+export function hasEntitiesForCategory(entities: ResolvedEntities, category: LiveCategory): boolean {
+  return (entities.byCategory?.get(category)?.length ?? 0) > 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function getEntitiesForCategory(
+  entities: ResolvedEntities,
+  category: LiveCategory
+): readonly ResolvedEntity[] {
+  return entities.byCategory?.get(category) ?? [];
+}
+
+export function getEntitiesOfType(
+  entities: ResolvedEntities,
+  type: EntityType
+): readonly ResolvedEntity[] {
+  return entities.byType?.get(type) ?? [];
+}
+
+export function getFirstEntityForCategory(
+  entities: ResolvedEntities,
+  category: LiveCategory
+): ResolvedEntity | undefined {
+  return entities.byCategory?.get(category)?.[0];
+}
+
+export function getCategories(entities: ResolvedEntities): readonly LiveCategory[] {
+  return entities.byCategory ? Array.from(entities.byCategory.keys()) : [];
+}
+
+export function mergeEntities(...collections: ResolvedEntities[]): ResolvedEntities {
+  const allResolved: ResolvedEntity[] = [];
+  const allUnresolved: RawEntityMention[] = [];
+  
+  for (const collection of collections) {
+    allResolved.push(...collection.resolved);
+    if (collection.unresolved) {
+      allUnresolved.push(...collection.unresolved);
     }
   }
-  return types;
-}
-
-/**
- * Check if an entity is resolved.
- */
-export function isResolved(entity: ResolvedEntity): boolean {
-  return entity.status === 'resolved' && entity.canonicalId !== null;
-}
-
-/**
- * Convert ResolvedEntity to FailedEntity.
- */
-export function toFailedEntity(entity: ResolvedEntity, reason: string): FailedEntity {
-  return {
-    raw: entity.raw,
-    reason,
-  };
-}
-
-/**
- * Convert ResolvedEntity to AmbiguousEntity.
- */
-export function toAmbiguousEntity(
-  entity: ResolvedEntity, 
-  candidates: readonly ResolvedEntity[],
-  clarificationPrompt: string
-): AmbiguousEntity {
-  return {
-    raw: entity.raw,
-    candidates,
-    clarificationPrompt,
-  };
+  
+  return createResolvedEntities(allResolved, allUnresolved);
 }

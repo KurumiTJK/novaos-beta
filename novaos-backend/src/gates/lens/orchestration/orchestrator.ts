@@ -400,7 +400,7 @@ async function fetchCategory(
     });
     
     // Get the query from entity
-    const query = entity?.canonicalForm ?? entity?.raw.rawText ?? '';
+    const query = entity?.canonicalForm ?? entity?.raw?.rawText ?? '';
     
     // Race provider call against timeout
     const result = await Promise.race([
@@ -436,7 +436,7 @@ function buildEntityLookup(
   
   for (const entity of entities.resolved) {
     // Only store first entity per category (primary)
-    if (!lookup.has(entity.category)) {
+    if (entity.category && !lookup.has(entity.category)) {
       lookup.set(entity.category, entity);
     }
   }
@@ -462,7 +462,7 @@ async function handleTimeCategory(
   state: OrchestrationState,
   options: OrchestrationOptions
 ): Promise<LensGateResult | null> {
-  const timeEntities = extractTimeEntities(state.classification.entities.resolved);
+  const timeEntities = extractTimeEntities(state.classification.entities?.resolved ?? []);
   
   if (timeEntities.length === 0) {
     return null;

@@ -126,7 +126,9 @@ class ValidationCache {
    * Generate cache key for an entity.
    */
   private getKey(entity: ResolvedEntity): string {
-    return `${entity.raw.type}:${entity.canonicalId?.toLowerCase() ?? entity.raw.rawText.toLowerCase()}`;
+    const entityType = entity.raw?.type ?? 'unknown';
+    const entityId = entity.canonicalId?.toLowerCase() ?? (entity.raw?.rawText ?? '').toLowerCase();
+    return `${entityType}:${entityId}`;
   }
   
   /**

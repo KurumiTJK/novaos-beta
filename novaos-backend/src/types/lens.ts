@@ -1,468 +1,320 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// LENS TYPES — Live Data Router Lens Gate Results
-// Complete output types for the enhanced Lens gate with live data routing
+// LENS — Lens Gate Types (CORRECTED to match actual code)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { LiveCategory, DataCategory } from './categories.js';
-import type { ProviderResult, ProviderData } from './provider-results.js';
-import type { ResponseConstraints, NumericTokenSet } from './constraints.js';
+import type { DataNeedClassification } from './data-need.js';
+import type { NumericToken, NumericTokenSet, ResponseConstraints, ContentConstraints } from './constraints.js';
+import type { ProviderResult, ProviderData, ProviderOkResult } from './provider-results.js';
 import type { ResolvedEntities } from './entities.js';
-import type { DataNeedClassification, TruthMode, FallbackMode } from './data-need.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CONTEXT ITEM — Individual piece of retrieved context
+// LENS MODE
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Source type for context items.
- */
+export type LensMode =
+  | 'passthrough'
+  | 'live_fetch'
+  | 'degraded'
+  | 'blocked'
+  | 'verification';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONTEXT SOURCE
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export type ContextSource =
-  | 'provider'      // Live data provider (market, weather, etc.)
-  | 'web_search'    // Web search result
-  | 'authoritative' // Verified authoritative source
-  | 'cache'         // Cached data (with staleness info)
-  | 'user'          // User-provided context
-  | 'conversation'; // Previous conversation context
+  | 'provider'
+  | 'cache'
+  | 'fallback'
+  | 'user'
+  | 'system';
 
-/**
- * Individual piece of context for the model.
- */
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONTEXT ITEM
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export interface ContextItem {
-  /** Unique identifier for this context item */
-  readonly id: string;
-  
-  /** Source of this context */
-  readonly source: ContextSource;
-  
-  /** The actual content (text representation) */
-  readonly content: string;
-  
-  /** Category this context relates to */
-  readonly category: DataCategory;
-  
-  /** Relevance score (0-1) */
-  readonly relevance: number;
-  
-  /** When this data was fetched/created */
-  readonly fetchedAt: number;
-  
-  /** Whether this data is considered stale */
-  readonly isStale: boolean;
-  
-  /** Staleness warning if applicable */
-  readonly stalenessWarning?: string;
-  
-  /** Citation/attribution for this context */
-  readonly citation?: string;
-  
-  /** URL source if applicable */
-  readonly sourceUrl?: string;
-  
-  /** Associated entity (ticker, city, etc.) */
-  readonly entity?: string;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// RETRIEVAL OUTCOME — Result of data retrieval attempt
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Status of retrieval attempt.
- */
-export type RetrievalStatus =
-  | 'success'           // All data retrieved successfully
-  | 'partial'           // Some data retrieved, some failed
-  | 'stale'             // Using stale cached data
-  | 'degraded'          // Proceeding without live data
-  | 'failed'            // Complete failure
-  | 'skipped';          // Retrieval not needed (local mode)
-
-/**
- * All valid retrieval statuses as a Set.
- */
-export const VALID_RETRIEVAL_STATUSES: ReadonlySet<RetrievalStatus> = new Set([
-  'success',
-  'partial',
-  'stale',
-  'degraded',
-  'failed',
-  'skipped',
-]);
-
-/**
- * Result of attempting to retrieve data for a category.
- */
-export interface CategoryRetrievalResult {
-  /** The category this result is for */
+  readonly id?: string;
   readonly category: LiveCategory;
-  
-  /** Provider result (success or error) */
-  readonly providerResult: ProviderResult;
-  
-  /** Entity that was queried */
-  readonly entity: string;
-  
-  /** Time taken for this retrieval */
-  readonly latencyMs: number;
-  
-  /** Whether fallback was used */
-  readonly usedFallback: boolean;
-  
-  /** Fallback provider if used */
-  readonly fallbackProvider?: string;
+  readonly source: ContextSource;
+  readonly content: string;
+  readonly title?: string;
+  readonly fetchedAt: number;
+  readonly freshnessMs?: number;
+  readonly confidence?: number;
+  readonly relevance?: number;
+  readonly tokens?: readonly NumericToken[];
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly isStale?: boolean;
+  readonly stalenessWarning?: string;
+  readonly entity?: string;
+  readonly citation?: string;
 }
 
-/**
- * Complete outcome of all retrieval attempts.
- */
-export interface RetrievalOutcome {
-  /** Overall retrieval status */
+// ─────────────────────────────────────────────────────────────────────────────────
+// RETRIEVAL STATUS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type RetrievalStatus =
+  | 'success'
+  | 'partial'
+  | 'failed'
+  | 'skipped'
+  | 'cached';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CATEGORY RESULT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface CategoryResult {
+  readonly category: LiveCategory;
+  readonly type?: LiveCategory;
   readonly status: RetrievalStatus;
-  
-  /** Results per category */
-  readonly categoryResults: ReadonlyMap<LiveCategory, CategoryRetrievalResult>;
-  
-  /** Successfully retrieved data */
-  readonly successfulData: readonly ProviderData[];
-  
-  /** Categories that failed retrieval */
-  readonly failedCategories: readonly LiveCategory[];
-  
-  /** Total retrieval time */
-  readonly totalLatencyMs: number;
-  
-  /** Whether any stale data was used */
-  readonly usedStaleData: boolean;
-  
-  /** Degradation reason if status is 'degraded' */
-  readonly degradationReason?: string;
+  readonly providerResult?: ProviderResult;
+  readonly tokens?: readonly NumericToken[];
+  readonly latencyMs: number;
+  readonly error?: string;
+  readonly cached?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// EVIDENCE PACK — Bundled data for model consumption
+// RETRIEVAL OUTCOME
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Complete evidence package for the model.
- * Contains all retrieved data, context, and constraints.
- */
+export interface RetrievalOutcome {
+  readonly successfulData: readonly CategoryResult[];
+  readonly failedCategories: readonly LiveCategory[];
+  readonly totalLatencyMs: number;
+  readonly allSucceeded: boolean;
+  readonly anySucceeded: boolean;
+  readonly status?: RetrievalStatus;
+  readonly categoryResults?: ReadonlyMap<LiveCategory, CategoryResult>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// VERIFICATION STATUS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type VerificationStatus =
+  | 'verified'
+  | 'unverified'
+  | 'degraded'
+  | 'failed';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LENS USER OPTION
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface LensUserOption {
+  readonly id: string;
+  readonly label: string;
+  readonly action: 'retry' | 'continue' | 'cancel' | 'verify' | 'proceed_degraded';
+  readonly requiresAck?: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RISK FACTOR
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface RiskFactor {
+  readonly type: string;
+  readonly severity: 'low' | 'medium' | 'high';
+  readonly description: string;
+  readonly weight: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RISK ASSESSMENT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface RiskAssessment {
+  readonly score: number;
+  readonly stakes: 'low' | 'medium' | 'high';
+  readonly factors: readonly RiskFactor[];
+  readonly recommendation?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// EVIDENCE PACK
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export interface EvidencePack {
-  /** All context items for the model */
-  readonly contextItems: readonly ContextItem[];
-  
-  /** Allowed numeric tokens for response */
   readonly numericTokens: NumericTokenSet;
-  
-  /** Response constraints derived from evidence */
   readonly constraints: ResponseConstraints;
-  
-  /** Formatted context string for model injection */
   readonly formattedContext: string;
-  
-  /** System prompt additions based on evidence */
   readonly systemPromptAdditions: readonly string[];
-  
-  /** Citations to include in response */
   readonly requiredCitations: readonly string[];
-  
-  /** Freshness warnings to include */
-  readonly freshnessWarnings: readonly string[];
-  
-  /** Whether evidence is complete for the query */
-  readonly isComplete: boolean;
-  
-  /** Reason if evidence is incomplete */
+  readonly sources?: readonly string[];
+  readonly freshnessInfo?: {
+    readonly allFresh: boolean;
+    readonly stalestAgeMs?: number;
+  };
+  readonly freshnessWarnings?: readonly string[];
+  readonly mustIncludeWarnings?: readonly string[];
+  readonly contextItems?: readonly ContextItem[];
+  readonly isComplete?: boolean;
   readonly incompleteReason?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LENS GATE RESULT — Complete output of enhanced Lens gate
+// LENS GATE RESULT
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Lens gate operating mode after classification.
- */
-export type LensMode =
-  | 'passthrough'   // No live data needed, pass through
-  | 'live_fetch'    // Fetching from live providers
-  | 'verification'  // Verifying against authoritative sources
-  | 'degraded'      // Operating in degraded mode (no precise numbers)
-  | 'blocked';      // Blocked pending user action
-
-/**
- * All valid lens modes as a Set.
- */
-export const VALID_LENS_MODES: ReadonlySet<LensMode> = new Set([
-  'passthrough',
-  'live_fetch',
-  'verification',
-  'degraded',
-  'blocked',
-]);
-
-/**
- * User option for blocked/await states.
- */
-export interface LensUserOption {
-  /** Unique identifier for this option */
-  readonly id: string;
-  
-  /** Display label for the option */
-  readonly label: string;
-  
-  /** Whether this option requires explicit acknowledgment */
-  readonly requiresAck: boolean;
-  
-  /** Action to take if selected */
-  readonly action: 'retry' | 'proceed_degraded' | 'provide_source' | 'cancel';
-}
-
-/**
- * Complete result from the enhanced Lens gate.
- * This is the primary output type for the Live Data Router.
- */
 export interface LensGateResult {
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Classification
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Data need classification that drove routing */
-  readonly classification: DataNeedClassification;
-  
-  /** Resolved entities from the query */
-  readonly entities: ResolvedEntities;
-  
-  /** Operating mode */
   readonly mode: LensMode;
+  readonly classification: DataNeedClassification;
+  readonly retrieval?: RetrievalOutcome | null;
+  readonly evidence?: EvidencePack | null;
+  readonly userOptions?: readonly LensUserOption[] | null;
+  readonly message?: string;
+  readonly entities?: ResolvedEntities;
   
-  /** Truth mode used */
-  readonly truthMode: TruthMode;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Retrieval results
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Outcome of data retrieval */
-  readonly retrieval: RetrievalOutcome | null;
-  
-  /** Evidence pack for the model (null if passthrough/blocked) */
-  readonly evidence: EvidencePack | null;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Constraints for downstream gates
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Response constraints for Model gate */
-  readonly responseConstraints: ResponseConstraints;
-  
-  /** Whether numeric precision is allowed */
-  readonly numericPrecisionAllowed: boolean;
-  
-  /** Whether action recommendations are allowed */
-  readonly actionRecommendationsAllowed: boolean;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // User interaction (for blocked/degraded states)
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** User options if blocked */
-  readonly userOptions: readonly LensUserOption[] | null;
-  
-  /** Message to show user if action needed */
-  readonly userMessage: string | null;
-  
-  /** Fallback mode if primary fails */
-  readonly fallbackMode: FallbackMode;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Warnings and metadata
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Freshness warning to include in response */
-  readonly freshnessWarning: string | null;
-  
-  /** Whether response should include data freshness disclaimer */
-  readonly requiresFreshnessDisclaimer: boolean;
-  
-  /** Verification status for authoritative queries */
-  readonly verificationStatus: 'verified' | 'unverified' | 'partial' | 'not_applicable';
-  
-  /** Sources used (for citation) */
-  readonly sources: readonly string[];
+  // Additional properties used in code
+  readonly constraints?: ResponseConstraints;
+  readonly riskAssessment?: RiskAssessment | null;
+  readonly forceHigh?: boolean;
+  readonly degradationReason?: string;
+  readonly blockReason?: string;
+  readonly numericPrecisionAllowed?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LENS GATE RESULT BUILDERS
+// LENS CONSTRAINTS (alias for compatibility)
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Create a passthrough result (no live data needed).
- */
+export type LensConstraints = ResponseConstraints;
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// FACTORY FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function createEmptyEvidencePack(): EvidencePack {
+  return {
+    numericTokens: {
+      tokens: new Map(),
+      byValue: new Map(),
+      byContext: new Map(),
+    },
+    constraints: {
+      level: 'standard',
+      numericPrecisionAllowed: true,
+      actionRecommendationsAllowed: true,
+      bannedPhrases: [],
+      mustIncludeWarnings: [],
+    },
+    formattedContext: '',
+    systemPromptAdditions: [],
+    requiredCitations: [],
+    freshnessWarnings: [],
+    contextItems: [],
+    isComplete: true,
+  };
+}
+
 export function createPassthroughResult(
   classification: DataNeedClassification,
-  entities: ResolvedEntities,
-  defaultConstraints: ResponseConstraints
+  message?: string
 ): LensGateResult {
   return {
-    classification,
-    entities,
     mode: 'passthrough',
-    truthMode: 'local',
-    retrieval: null,
-    evidence: null,
-    responseConstraints: defaultConstraints,
-    numericPrecisionAllowed: true,
-    actionRecommendationsAllowed: true,
-    userOptions: null,
-    userMessage: null,
-    fallbackMode: 'degrade',
-    freshnessWarning: null,
-    requiresFreshnessDisclaimer: false,
-    verificationStatus: 'not_applicable',
-    sources: [],
-  };
-}
-
-/**
- * Create a degraded result (live data unavailable).
- */
-export function createDegradedResult(
-  classification: DataNeedClassification,
-  entities: ResolvedEntities,
-  degradedConstraints: ResponseConstraints,
-  reason: string
-): LensGateResult {
-  return {
     classification,
-    entities,
-    mode: 'degraded',
-    truthMode: classification.truthMode,
-    retrieval: {
-      status: 'degraded',
-      categoryResults: new Map(),
-      successfulData: [],
-      failedCategories: [...classification.liveCategories],
-      totalLatencyMs: 0,
-      usedStaleData: false,
-      degradationReason: reason,
-    },
-    evidence: null,
-    responseConstraints: degradedConstraints,
-    numericPrecisionAllowed: false,
-    actionRecommendationsAllowed: false,
-    userOptions: null,
-    userMessage: null,
-    fallbackMode: 'degrade',
-    freshnessWarning: 'Unable to retrieve current data. Response will not include precise numbers.',
-    requiresFreshnessDisclaimer: true,
-    verificationStatus: 'unverified',
-    sources: [],
+    retrieval: null,
+    evidence: createEmptyEvidencePack(),
+    userOptions: [],
+    message: message ?? 'No live data needed',
   };
 }
 
-/**
- * Create a blocked result (user action required).
- */
 export function createBlockedResult(
   classification: DataNeedClassification,
-  entities: ResolvedEntities,
-  userMessage: string,
-  userOptions: readonly LensUserOption[]
+  reason: string,
+  userOptions: readonly LensUserOption[] = []
 ): LensGateResult {
   return {
-    classification,
-    entities,
     mode: 'blocked',
-    truthMode: classification.truthMode,
+    classification,
     retrieval: null,
-    evidence: null,
-    responseConstraints: {
-      numericPrecisionAllowed: false,
-      allowedTokens: null,
-      numericExemptions: {
-        allowYears: false,
-        allowDates: false,
-        allowSmallIntegers: false,
-        smallIntegerMax: 0,
-        allowExplanatoryPercentages: false,
-        allowOrdinals: false,
-        allowInCodeBlocks: false,
-        allowInQuotes: false,
-        customPatterns: [],
-      },
-      actionRecommendationsAllowed: false,
-      bannedPhrases: [],
-      requiredPhrases: [],
-      freshnessWarningRequired: false,
-      requiredCitations: [],
-      level: 'strict',
-      reason: 'Blocked pending user action',
-      triggeredByCategories: [],
-    },
-    numericPrecisionAllowed: false,
-    actionRecommendationsAllowed: false,
+    evidence: createEmptyEvidencePack(),
     userOptions,
-    userMessage,
-    fallbackMode: 'refuse',
-    freshnessWarning: null,
-    requiresFreshnessDisclaimer: false,
-    verificationStatus: 'unverified',
-    sources: [],
+    message: reason,
+    blockReason: reason,
+  };
+}
+
+export function createDegradedResult(
+  classification: DataNeedClassification,
+  reason: string,
+  retrieval?: RetrievalOutcome,
+  userOptions: readonly LensUserOption[] = []
+): LensGateResult {
+  const evidence = createEmptyEvidencePack();
+  return {
+    mode: 'degraded',
+    classification,
+    retrieval: retrieval ?? null,
+    evidence: {
+      ...evidence,
+      constraints: {
+        ...evidence.constraints,
+        numericPrecisionAllowed: false,
+      },
+      mustIncludeWarnings: ['Information may not be current'],
+    },
+    userOptions,
+    message: reason,
+    degradationReason: reason,
+    numericPrecisionAllowed: false,
+  };
+}
+
+export function createLiveFetchResult(
+  classification: DataNeedClassification,
+  retrieval: RetrievalOutcome,
+  evidence: EvidencePack,
+  userOptions: readonly LensUserOption[] = []
+): LensGateResult {
+  return {
+    mode: 'live_fetch',
+    classification,
+    retrieval,
+    evidence,
+    userOptions,
+    message: 'Live data retrieved successfully',
+    numericPrecisionAllowed: true,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// TYPE GUARDS & HELPERS
+// HELPERS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Check if Lens result allows proceeding with response generation.
- */
-export function canProceed(result: LensGateResult): boolean {
-  return result.mode !== 'blocked';
+export function getConstraints(result: LensGateResult): ResponseConstraints | undefined {
+  return result.constraints ?? result.evidence?.constraints ?? undefined;
 }
 
-/**
- * Check if Lens result has evidence for the model.
- */
-export function hasEvidence(result: LensGateResult): result is LensGateResult & { evidence: EvidencePack } {
-  return result.evidence !== null;
+export function isBlocked(result: LensGateResult): boolean {
+  return result.mode === 'blocked';
 }
 
-/**
- * Check if Lens result requires user interaction.
- */
-export function requiresUserAction(result: LensGateResult): boolean {
-  return result.mode === 'blocked' && result.userOptions !== null && result.userOptions.length > 0;
-}
-
-/**
- * Check if Lens result is operating in degraded mode.
- */
 export function isDegraded(result: LensGateResult): boolean {
-  return result.mode === 'degraded' || !result.numericPrecisionAllowed;
+  return result.mode === 'degraded';
 }
 
-/**
- * Get all successful provider data from a Lens result.
- */
-export function getProviderData(result: LensGateResult): readonly ProviderData[] {
-  return result.retrieval?.successfulData ?? [];
+export function isPassthrough(result: LensGateResult): boolean {
+  return result.mode === 'passthrough';
 }
 
-/**
- * Get freshness warnings from a Lens result.
- */
-export function getFreshnessWarnings(result: LensGateResult): readonly string[] {
-  const warnings: string[] = [];
-  
-  if (result.freshnessWarning) {
-    warnings.push(result.freshnessWarning);
-  }
-  
-  if (result.evidence?.freshnessWarnings) {
-    warnings.push(...result.evidence.freshnessWarnings);
-  }
-  
-  return warnings;
+export function isLiveFetch(result: LensGateResult): boolean {
+  return result.mode === 'live_fetch';
+}
+
+export function hasEvidence(result: LensGateResult): boolean {
+  if (!result.evidence) return false;
+  return (result.evidence.numericTokens?.tokens?.size ?? 0) > 0;
+}
+
+export function getTokenCount(result: LensGateResult): number {
+  if (!result.evidence) return 0;
+  return result.evidence.numericTokens?.tokens?.size ?? 0;
 }

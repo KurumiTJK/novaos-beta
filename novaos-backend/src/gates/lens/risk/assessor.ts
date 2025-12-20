@@ -147,8 +147,8 @@ export function assessRisk(classification: DataNeedClassification): RiskAssessme
     truthMode,
     liveCategories,
     authoritativeCategories,
-    freshnessCritical,
-    requiresNumericPrecision,
+    freshnessCritical = false,
+    requiresNumericPrecision = false,
   } = classification;
   
   const riskFactors: RiskFactor[] = [];

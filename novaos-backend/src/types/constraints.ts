@@ -1,510 +1,425 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONSTRAINT TYPES — Numeric Leak Prevention & Response Constraints
-// Controls what numbers the model can output to prevent hallucinated data
+// CONSTRAINTS — Response Constraints and Numeric Tokens (CORRECTED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { LiveCategory } from './categories.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NUMERIC CONTEXT KEYS — Semantic binding for allowed numbers
+// CONSTRAINT LEVEL
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Context keys that describe the semantic meaning of a numeric value.
- * Used to bind numbers to their purpose and prevent misuse.
- */
+export type ConstraintLevel =
+  | 'permissive'
+  | 'standard'
+  | 'strict'
+  | 'forbid';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// NUMERIC CONTEXT KEY (includes ALL values used in code)
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export type NumericContextKey =
-  // Price/value contexts
+  // Stock market
   | 'price'
   | 'price_usd'
   | 'price_btc'
-  | 'market_cap'
-  | 'volume'
   | 'open'
   | 'close'
   | 'high'
   | 'low'
-  | 'previous_close'
-  // Change contexts
-  | 'change'
-  | 'change_absolute'
-  | 'change_percent'
-  | 'change_1h'
-  | 'change_24h'
-  | 'change_7d'
-  // Rate contexts
-  | 'rate'
-  | 'exchange_rate'
+  | 'volume'
+  | 'market_cap'
+  | 'pe_ratio'
+  | 'eps'
+  | 'dividend_yield'
   | 'bid'
   | 'ask'
   | 'spread'
-  // Weather contexts
+  | 'previous_close'
+  // Change values
+  | 'change'
+  | 'change_percent'
+  | 'change_absolute'
+  | 'change_1h'
+  | 'change_24h'
+  | 'change_7d'
+  // Currency
+  | 'rate'
+  | 'exchange_rate'
+  // Crypto
+  | 'circulating_supply'
+  | 'total_supply'
+  | 'max_supply'
+  // Weather
   | 'temperature'
   | 'temperature_c'
   | 'temperature_f'
   | 'feels_like'
+  | 'feels_like_c'
+  | 'feels_like_f'
   | 'humidity'
-  | 'wind_speed'
-  | 'wind_speed_kph'
-  | 'wind_speed_mph'
   | 'pressure'
-  | 'uv_index'
+  | 'wind_speed'
+  | 'wind_speed_mph'
+  | 'wind_speed_kph'
   | 'visibility'
-  // Time contexts
+  | 'uv_index'
+  | 'precipitation'
+  // Time
+  | 'hour'
+  | 'minute'
+  | 'second'
   | 'timestamp'
   | 'unix_timestamp'
   | 'utc_offset'
   | 'dst_offset'
-  // Supply contexts
-  | 'circulating_supply'
-  | 'max_supply'
-  | 'total_supply'
-  // Generic contexts
+  // General
   | 'count'
+  | 'total'
   | 'quantity'
-  | 'index'
+  | 'average'
+  | 'percentage'
+  | 'index_value'
+  | 'score'
   | 'rank';
 
-/**
- * All valid numeric context keys as a Set for runtime validation.
- */
-export const VALID_NUMERIC_CONTEXT_KEYS: ReadonlySet<NumericContextKey> = new Set([
-  'price', 'price_usd', 'price_btc', 'market_cap', 'volume',
-  'open', 'close', 'high', 'low', 'previous_close',
-  'change', 'change_absolute', 'change_percent', 'change_1h', 'change_24h', 'change_7d',
-  'rate', 'exchange_rate', 'bid', 'ask', 'spread',
-  'temperature', 'temperature_c', 'temperature_f', 'feels_like',
-  'humidity', 'wind_speed', 'wind_speed_kph', 'wind_speed_mph',
-  'pressure', 'uv_index', 'visibility',
-  'timestamp', 'unix_timestamp', 'utc_offset', 'dst_offset',
-  'circulating_supply', 'max_supply', 'total_supply',
-  'count', 'quantity', 'index', 'rank',
-]);
-
-/**
- * Type guard for NumericContextKey.
- */
-export function isNumericContextKey(value: unknown): value is NumericContextKey {
-  return typeof value === 'string' && VALID_NUMERIC_CONTEXT_KEYS.has(value as NumericContextKey);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────────
-// CONTEXT SYNONYMS — Maps natural language to context keys
+// NUMERIC TOKEN
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Maps natural language terms to their canonical NumericContextKey.
- * Used for fuzzy matching in output validation.
- * 
- * @example
- * "What's the current stock price?" → price
- * "How much did it go up?" → change, change_percent
- */
-export const CONTEXT_SYNONYMS: ReadonlyMap<string, readonly NumericContextKey[]> = new Map([
-  // Price synonyms
-  ['price', ['price', 'price_usd']],
-  ['cost', ['price', 'price_usd']],
-  ['value', ['price', 'price_usd', 'market_cap']],
-  ['worth', ['price', 'price_usd', 'market_cap']],
-  ['trading at', ['price', 'price_usd']],
-  ['quoted at', ['price', 'price_usd', 'rate']],
-  ['market cap', ['market_cap']],
-  ['capitalization', ['market_cap']],
-  ['volume', ['volume']],
-  ['traded', ['volume']],
-  
-  // Change synonyms
-  ['change', ['change', 'change_absolute', 'change_percent']],
-  ['up', ['change', 'change_absolute', 'change_percent']],
-  ['down', ['change', 'change_absolute', 'change_percent']],
-  ['gain', ['change', 'change_absolute', 'change_percent']],
-  ['loss', ['change', 'change_absolute', 'change_percent']],
-  ['increased', ['change', 'change_absolute', 'change_percent']],
-  ['decreased', ['change', 'change_absolute', 'change_percent']],
-  ['rose', ['change', 'change_absolute', 'change_percent']],
-  ['fell', ['change', 'change_absolute', 'change_percent']],
-  ['percent', ['change_percent']],
-  ['%', ['change_percent']],
-  
-  // Rate synonyms
-  ['rate', ['rate', 'exchange_rate']],
-  ['exchange rate', ['rate', 'exchange_rate']],
-  ['conversion', ['rate', 'exchange_rate']],
-  ['bid', ['bid']],
-  ['ask', ['ask']],
-  ['spread', ['spread']],
-  
-  // Weather synonyms
-  ['temperature', ['temperature', 'temperature_c', 'temperature_f']],
-  ['temp', ['temperature', 'temperature_c', 'temperature_f']],
-  ['degrees', ['temperature', 'temperature_c', 'temperature_f']],
-  ['celsius', ['temperature_c']],
-  ['fahrenheit', ['temperature_f']],
-  ['feels like', ['feels_like']],
-  ['humidity', ['humidity']],
-  ['wind', ['wind_speed', 'wind_speed_kph', 'wind_speed_mph']],
-  ['wind speed', ['wind_speed', 'wind_speed_kph', 'wind_speed_mph']],
-  ['pressure', ['pressure']],
-  ['uv', ['uv_index']],
-  ['uv index', ['uv_index']],
-  ['visibility', ['visibility']],
-  
-  // Time synonyms
-  ['time', ['timestamp', 'unix_timestamp']],
-  ['timestamp', ['timestamp', 'unix_timestamp']],
-  ['offset', ['utc_offset', 'dst_offset']],
-]);
-
-/**
- * Get canonical context keys for a natural language term.
- */
-export function getContextKeysForTerm(term: string): readonly NumericContextKey[] {
-  const normalized = term.toLowerCase().trim();
-  return CONTEXT_SYNONYMS.get(normalized) ?? [];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// NUMERIC TOKEN — Bound numeric value with provenance
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * A numeric value bound to its semantic context and source.
- * The model can ONLY output numbers that exist as NumericTokens.
- * 
- * @example
- * {
- *   value: 150.25,
- *   contextKey: 'price',
- *   sourceCategory: 'market',
- *   sourceEntity: 'AAPL',
- *   fetchedAt: 1703001234567,
- *   formatted: '$150.25'
- * }
- */
 export interface NumericToken {
-  /** The raw numeric value */
   readonly value: number;
-  
-  /** Semantic context describing what this number represents */
+  readonly formatted: string;
   readonly contextKey: NumericContextKey;
-  
-  /** The data category this number came from */
   readonly sourceCategory: LiveCategory;
-  
-  /** The entity this number is associated with (ticker, city, etc.) */
   readonly sourceEntity: string;
-  
-  /** When this value was fetched from the provider */
   readonly fetchedAt: number;
-  
-  /** Pre-formatted string representation (e.g., "$150.25", "72°F") */
-  readonly formatted?: string;
-  
-  /** Unit of measurement if applicable */
   readonly unit?: string;
-  
-  /** Precision (decimal places) for this value */
   readonly precision?: number;
+  readonly source?: string;
+  readonly type?: string;
 }
 
-/**
- * Collection of allowed numeric tokens for a response.
- */
+// ─────────────────────────────────────────────────────────────────────────────────
+// NUMERIC TOKEN SET
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export interface NumericTokenSet {
-  /** All allowed tokens indexed by a unique key */
   readonly tokens: ReadonlyMap<string, NumericToken>;
-  
-  /** Quick lookup: value → token(s) that have this value */
   readonly byValue: ReadonlyMap<number, readonly NumericToken[]>;
-  
-  /** Quick lookup: contextKey → token(s) with this context */
   readonly byContext: ReadonlyMap<NumericContextKey, readonly NumericToken[]>;
 }
 
-/**
- * Create a unique key for a NumericToken.
- */
-export function createTokenKey(token: NumericToken): string {
-  return `${token.sourceCategory}:${token.sourceEntity}:${token.contextKey}`;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────────
-// NUMERIC EXEMPTIONS — Numbers allowed without tokens
+// NUMERIC EXEMPTIONS (includes all values used in code)
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Categories of numbers that don't require token validation.
- */
 export interface NumericExemptions {
-  /** Allow years (1900-2100) */
-  readonly allowYears: boolean;
-  
-  /** Allow dates (day of month 1-31) */
-  readonly allowDates: boolean;
-  
-  /** Allow small integers for counting (0-10 or custom range) */
-  readonly allowSmallIntegers: boolean;
-  readonly smallIntegerMax: number;
-  
-  /** Allow percentages in explanatory context (not live data) */
-  readonly allowExplanatoryPercentages: boolean;
-  
-  /** Allow ordinals (1st, 2nd, 3rd, etc.) */
-  readonly allowOrdinals: boolean;
-  
-  /** Allow numbers in code blocks */
-  readonly allowInCodeBlocks: boolean;
-  
-  /** Allow numbers in quoted user text */
-  readonly allowInQuotes: boolean;
-  
-  /** Custom exemption patterns (regex strings) */
-  readonly customPatterns: readonly string[];
+  readonly allowedContextKeys?: readonly NumericContextKey[];
+  readonly allowedCategories?: readonly LiveCategory[];
+  readonly allowedPatterns?: readonly RegExp[];
+  readonly maxExemptValue?: number;
+  readonly minExemptValue?: number;
+  // Additional properties used in code
+  readonly allowYears?: boolean;
+  readonly allowDates?: boolean;
+  readonly allowSmallIntegers?: boolean;
+  readonly smallIntegerMax?: number;
+  readonly allowOrdinals?: boolean;
+  readonly allowInCodeBlocks?: boolean;
+  readonly allowInQuotes?: boolean;
+  readonly customPatterns?: readonly RegExp[];
+  readonly alwaysExempt?: readonly (string | RegExp)[];
+  readonly allowExplanatoryPercentages?: boolean;
+  readonly contextExemptions?: ReadonlyMap<string, readonly string[]>;
 }
 
-/**
- * Default exemptions for most responses.
- * Permissive for non-financial contexts.
- */
-export const DEFAULT_EXEMPTIONS: NumericExemptions = {
-  allowYears: true,
-  allowDates: true,
-  allowSmallIntegers: true,
-  smallIntegerMax: 10,
-  allowExplanatoryPercentages: false, // Still strict on percentages
-  allowOrdinals: true,
-  allowInCodeBlocks: true,
-  allowInQuotes: true,
-  customPatterns: [],
-} as const;
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONTENT CONSTRAINTS
+// ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Strict exemptions for financial/market responses.
- * Only allows numbers that are explicitly tokenized.
- */
-export const STRICT_EXEMPTIONS: NumericExemptions = {
-  allowYears: true,
-  allowDates: true,
-  allowSmallIntegers: true,
-  smallIntegerMax: 5,
-  allowExplanatoryPercentages: false,
-  allowOrdinals: true,
-  allowInCodeBlocks: true,
-  allowInQuotes: true,
-  customPatterns: [],
-} as const;
+export interface ContentConstraints {
+  readonly level: ConstraintLevel;
+  readonly numericPrecisionAllowed: boolean;
+  readonly actionRecommendationsAllowed: boolean;
+  readonly allowedTokens?: NumericTokenSet;
+  readonly bannedPhrases: readonly string[];
+  readonly mustIncludeWarnings: readonly string[];
+  readonly reason?: string;
+}
 
-/**
- * No exemptions - every number must be tokenized.
- * Used for maximum safety in critical contexts.
- */
-export const NO_EXEMPTIONS: NumericExemptions = {
+// ─────────────────────────────────────────────────────────────────────────────────
+// RESPONSE CONSTRAINTS (full constraint object)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ResponseConstraints {
+  readonly level: ConstraintLevel | 'quote_evidence_only';
+  readonly numericPrecisionAllowed: boolean;
+  readonly actionRecommendationsAllowed: boolean;
+  readonly allowedTokens?: NumericTokenSet;
+  readonly bannedPhrases: readonly string[];
+  readonly mustIncludeWarnings: readonly string[];
+  readonly mustInclude?: readonly string[];
+  readonly requireEvidence?: boolean;
+  readonly allowSpeculation?: boolean;
+  readonly reason?: string;
+  readonly numericExemptions?: NumericExemptions;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// FACTORY FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function createDefaultConstraints(
+  reason?: string,
+  _tokenSet?: NumericTokenSet,
+  _categories?: readonly LiveCategory[]
+): ContentConstraints {
+  return {
+    level: 'standard',
+    numericPrecisionAllowed: true,
+    actionRecommendationsAllowed: true,
+    bannedPhrases: [],
+    mustIncludeWarnings: [],
+    reason,
+  };
+}
+
+export function createStrictConstraints(
+  tokenSet?: NumericTokenSet,
+  categories?: readonly LiveCategory[],
+  reason?: string
+): ContentConstraints {
+  return {
+    level: 'strict',
+    numericPrecisionAllowed: true,
+    actionRecommendationsAllowed: false,
+    allowedTokens: tokenSet,
+    bannedPhrases: [],
+    mustIncludeWarnings: [],
+    reason: reason ?? 'Strict constraints - only evidence tokens allowed',
+  };
+}
+
+export function createDegradedConstraints(reason?: string): ContentConstraints {
+  return {
+    level: 'standard',
+    numericPrecisionAllowed: false,
+    actionRecommendationsAllowed: false,
+    bannedPhrases: [],
+    mustIncludeWarnings: ['Information may not be current'],
+    reason: reason ?? 'Degraded mode - live data unavailable',
+  };
+}
+
+export function createForbidNumericConstraints(reason?: string): ContentConstraints {
+  return {
+    level: 'forbid',
+    numericPrecisionAllowed: false,
+    actionRecommendationsAllowed: false,
+    bannedPhrases: [],
+    mustIncludeWarnings: ['Cannot provide specific numeric values'],
+    reason: reason ?? 'Numeric values forbidden',
+  };
+}
+
+export function createQualitativeConstraints(reason?: string): ContentConstraints {
+  return {
+    level: 'standard',
+    numericPrecisionAllowed: false,
+    actionRecommendationsAllowed: true,
+    bannedPhrases: [],
+    mustIncludeWarnings: ['Specific numbers not available'],
+    reason: reason ?? 'Qualitative mode - numbers unavailable',
+  };
+}
+
+export function createInsufficientConstraints(reason?: string): ContentConstraints {
+  return {
+    level: 'standard',
+    numericPrecisionAllowed: false,
+    actionRecommendationsAllowed: false,
+    bannedPhrases: [],
+    mustIncludeWarnings: ['Unable to verify information'],
+    reason: reason ?? 'Insufficient data for verification',
+  };
+}
+
+export function createPermissiveConstraints(): ContentConstraints {
+  return {
+    level: 'permissive',
+    numericPrecisionAllowed: true,
+    actionRecommendationsAllowed: true,
+    bannedPhrases: [],
+    mustIncludeWarnings: [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// NUMERIC TOKEN SET FACTORY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function createEmptyTokenSet(): NumericTokenSet {
+  return {
+    tokens: new Map(),
+    byValue: new Map(),
+    byContext: new Map(),
+  };
+}
+
+export function createTokenSet(tokens: readonly NumericToken[]): NumericTokenSet {
+  const tokenMap = new Map<string, NumericToken>();
+  const byValue = new Map<number, NumericToken[]>();
+  const byContext = new Map<NumericContextKey, NumericToken[]>();
+  
+  for (const token of tokens) {
+    const key = `${token.sourceCategory}:${token.sourceEntity}:${token.contextKey}`;
+    tokenMap.set(key, token);
+    
+    // By value
+    const valueTokens = byValue.get(token.value) ?? [];
+    valueTokens.push(token);
+    byValue.set(token.value, valueTokens);
+    
+    // By context
+    const contextTokens = byContext.get(token.contextKey) ?? [];
+    contextTokens.push(token);
+    byContext.set(token.contextKey, contextTokens);
+  }
+  
+  return { tokens: tokenMap, byValue, byContext };
+}
+
+export function addToken(set: NumericTokenSet, token: NumericToken): NumericTokenSet {
+  const key = `${token.sourceCategory}:${token.sourceEntity}:${token.contextKey}`;
+  const newTokens = new Map(set.tokens);
+  newTokens.set(key, token);
+  
+  const newByValue = new Map(set.byValue);
+  const valueTokens = [...(newByValue.get(token.value) ?? []), token];
+  newByValue.set(token.value, valueTokens);
+  
+  const newByContext = new Map(set.byContext);
+  const contextTokens = [...(newByContext.get(token.contextKey) ?? []), token];
+  newByContext.set(token.contextKey, contextTokens);
+  
+  return { tokens: newTokens, byValue: newByValue, byContext: newByContext };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// NUMERIC TOKEN FACTORY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function createNumericToken(
+  value: number,
+  contextKey: NumericContextKey,
+  sourceCategory: LiveCategory,
+  sourceEntity: string,
+  formatted: string,
+  unit?: string,
+  precision?: number
+): NumericToken {
+  return {
+    value,
+    formatted,
+    contextKey,
+    sourceCategory,
+    sourceEntity,
+    fetchedAt: Date.now(),
+    unit,
+    precision,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// EXEMPTION PRESETS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_ALWAYS_EXEMPT: readonly (string | RegExp)[] = Object.freeze([
+  /^\d{4}$/, // Years
+  /^\d{1,2}\/\d{1,2}\/\d{2,4}$/, // Dates
+  /^#\d+$/, // Issue numbers
+  /^v\d+\.\d+/, // Version numbers
+]);
+
+export function createEmptyExemptions(): NumericExemptions {
+  return {
+    allowYears: false,
+    allowDates: false,
+    allowSmallIntegers: false,
+    allowOrdinals: false,
+    allowInCodeBlocks: false,
+    allowInQuotes: false,
+    customPatterns: [],
+    alwaysExempt: [],
+    allowExplanatoryPercentages: false,
+  };
+}
+
+export const NO_EXEMPTIONS: NumericExemptions = Object.freeze({
   allowYears: false,
   allowDates: false,
   allowSmallIntegers: false,
-  smallIntegerMax: 0,
-  allowExplanatoryPercentages: false,
   allowOrdinals: false,
   allowInCodeBlocks: false,
   allowInQuotes: false,
   customPatterns: [],
-} as const;
+  alwaysExempt: [],
+  allowExplanatoryPercentages: false,
+});
+
+export const QUOTE_EVIDENCE_EXEMPTIONS: NumericExemptions = Object.freeze({
+  allowYears: true,
+  allowDates: true,
+  allowSmallIntegers: true,
+  smallIntegerMax: 10,
+  allowOrdinals: true,
+  allowInCodeBlocks: true,
+  allowInQuotes: true,
+  customPatterns: [],
+  alwaysExempt: DEFAULT_ALWAYS_EXEMPT,
+  allowExplanatoryPercentages: false,
+});
+
+export const QUALITATIVE_EXEMPTIONS: NumericExemptions = Object.freeze({
+  allowYears: true,
+  allowDates: true,
+  allowSmallIntegers: true,
+  smallIntegerMax: 100,
+  allowOrdinals: true,
+  allowInCodeBlocks: false,
+  allowInQuotes: false,
+  customPatterns: [],
+  alwaysExempt: DEFAULT_ALWAYS_EXEMPT,
+  allowExplanatoryPercentages: false,
+});
+
+export const PERMISSIVE_EXEMPTIONS: NumericExemptions = Object.freeze({
+  allowYears: true,
+  allowDates: true,
+  allowSmallIntegers: true,
+  smallIntegerMax: 1000,
+  allowOrdinals: true,
+  allowInCodeBlocks: true,
+  allowInQuotes: true,
+  customPatterns: [],
+  alwaysExempt: DEFAULT_ALWAYS_EXEMPT,
+  allowExplanatoryPercentages: true,
+});
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RESPONSE CONSTRAINTS — Full constraint specification
+// TYPE GUARDS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Constraint level for response generation.
- */
-export type ConstraintLevel = 'strict' | 'standard' | 'permissive';
-
-/**
- * Complete response constraints for the Model gate.
- * Controls what the model can and cannot output.
- */
-export interface ResponseConstraints {
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Numeric constraints
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Whether precise numeric output is allowed at all */
-  readonly numericPrecisionAllowed: boolean;
-  
-  /** Allowed numeric tokens (if numericPrecisionAllowed is true) */
-  readonly allowedTokens: NumericTokenSet | null;
-  
-  /** Exemptions from token validation */
-  readonly numericExemptions: NumericExemptions;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Content constraints
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Whether action recommendations are allowed (buy/sell/do X) */
-  readonly actionRecommendationsAllowed: boolean;
-  
-  /** Phrases that must not appear in output */
-  readonly bannedPhrases: readonly string[];
-  
-  /** Phrases that must appear in output */
-  readonly requiredPhrases: readonly string[];
-  
-  /** Text to prepend to response */
-  readonly mustPrepend?: string;
-  
-  /** Text to append to response */
-  readonly mustAppend?: string;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Style constraints
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Required tone for response */
-  readonly tone?: 'neutral' | 'cautious' | 'confident' | 'empathetic';
-  
-  /** Maximum uses of "we" (Nova voice constraint) */
-  readonly maxWeCount?: number;
-  
-  /** Maximum response length in tokens */
-  readonly maxTokens?: number;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Source constraints
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Sources that must be cited */
-  readonly requiredCitations: readonly string[];
-  
-  /** Whether freshness warning is required */
-  readonly freshnessWarningRequired: boolean;
-  
-  /** Custom freshness warning text */
-  readonly freshnessWarningText?: string;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Metadata
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Constraint level for logging/debugging */
-  readonly level: ConstraintLevel;
-  
-  /** Reason constraints were applied */
-  readonly reason: string;
-  
-  /** Categories that triggered these constraints */
-  readonly triggeredByCategories: readonly LiveCategory[];
+export function isConstraintLevel(value: string): value is ConstraintLevel {
+  return ['permissive', 'standard', 'strict', 'forbid'].includes(value);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONSTRAINT BUILDERS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Create default (permissive) constraints.
- */
-export function createDefaultConstraints(reason: string): ResponseConstraints {
-  return {
-    numericPrecisionAllowed: true,
-    allowedTokens: null, // No token validation
-    numericExemptions: DEFAULT_EXEMPTIONS,
-    actionRecommendationsAllowed: true,
-    bannedPhrases: [],
-    requiredPhrases: [],
-    freshnessWarningRequired: false,
-    requiredCitations: [],
-    level: 'permissive',
-    reason,
-    triggeredByCategories: [],
-  };
+export function hasAllowedTokens(constraints: ResponseConstraints): boolean {
+  return constraints.allowedTokens !== undefined &&
+         constraints.allowedTokens.tokens.size > 0;
 }
 
-/**
- * Create strict constraints for live data responses.
- */
-export function createStrictConstraints(
-  tokens: NumericTokenSet,
-  categories: readonly LiveCategory[],
-  reason: string
-): ResponseConstraints {
-  return {
-    numericPrecisionAllowed: true,
-    allowedTokens: tokens,
-    numericExemptions: STRICT_EXEMPTIONS,
-    actionRecommendationsAllowed: false,
-    bannedPhrases: [],
-    requiredPhrases: [],
-    freshnessWarningRequired: true,
-    requiredCitations: [],
-    level: 'strict',
-    reason,
-    triggeredByCategories: categories,
-  };
-}
-
-/**
- * Create degraded constraints when verification failed.
- */
-export function createDegradedConstraints(reason: string): ResponseConstraints {
-  return {
-    numericPrecisionAllowed: false,
-    allowedTokens: null,
-    numericExemptions: NO_EXEMPTIONS,
-    actionRecommendationsAllowed: false,
-    bannedPhrases: [],
-    requiredPhrases: [],
-    freshnessWarningRequired: true,
-    freshnessWarningText: 'Unable to verify current data. Information may be outdated.',
-    requiredCitations: [],
-    level: 'strict',
-    reason,
-    triggeredByCategories: [],
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// VALIDATION HELPERS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Check if a number is exempt from token validation.
- */
-export function isExemptNumber(
-  value: number,
-  context: string,
-  exemptions: NumericExemptions
-): boolean {
-  // Year check (1900-2100)
-  if (exemptions.allowYears && Number.isInteger(value) && value >= 1900 && value <= 2100) {
-    return true;
-  }
-  
-  // Date check (1-31)
-  if (exemptions.allowDates && Number.isInteger(value) && value >= 1 && value <= 31) {
-    return true;
-  }
-  
-  // Small integer check
-  if (exemptions.allowSmallIntegers && Number.isInteger(value) && value >= 0 && value <= exemptions.smallIntegerMax) {
-    return true;
-  }
-  
-  // Code block check
-  if (exemptions.allowInCodeBlocks && /```[\s\S]*```|`[^`]+`/.test(context)) {
-    return true;
-  }
-  
-  // Quote check
-  if (exemptions.allowInQuotes && /"[^"]*"|'[^']*'/.test(context)) {
-    return true;
-  }
-  
-  // Custom patterns
-  for (const pattern of exemptions.customPatterns) {
-    if (new RegExp(pattern).test(context)) {
-      return true;
-    }
-  }
-  
-  return false;
+export function isNumericPrecisionAllowed(constraints: ResponseConstraints): boolean {
+  return constraints.numericPrecisionAllowed;
 }

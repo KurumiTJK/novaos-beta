@@ -558,8 +558,8 @@ function buildDataNeedClassification(
   const maxDataAgeMs = determineMaxDataAge(liveCategories);
   
   // Check entity completeness
-  const entitiesComplete = entities.ambiguous.length === 0 && entities.failed.length === 0;
-  const entitiesNeedingClarification = entities.ambiguous.map(e => e.raw.rawText);
+  const entitiesComplete = (entities.ambiguous?.length ?? 0) === 0 && (entities.failed?.length ?? 0) === 0;
+  const entitiesNeedingClarification = (entities.ambiguous ?? []).map(e => e.raw?.rawText ?? '');
   
   // Determine if action recommendations are allowed
   // Not allowed for live financial data (no buy/sell advice)

@@ -12,6 +12,8 @@ import type {
   ResolutionStatus,
   EntityMetadata,
   EntityResolutionTrace,
+  FailedEntity,
+  AmbiguousEntity,
 } from '../../types/entities.js';
 
 import type { LiveCategory } from '../../types/categories.js';
@@ -470,7 +472,7 @@ const RESOLVER_VERSION = '1.0.0';
  * Resolve a ticker entity.
  */
 function resolveTicker(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? '').trim().toUpperCase();
   
   // Remove $ prefix if present
   const withoutDollar = text.startsWith('$') ? text.slice(1) : text;
@@ -561,7 +563,7 @@ function findPartialCompanyMatch(text: string): { ticker: string; confidence: nu
  * Resolve a crypto entity.
  */
 function resolveCrypto(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? "").trim().toUpperCase();
   
   const cryptoId = CRYPTO_TO_ID[text];
   if (cryptoId) {
@@ -576,7 +578,7 @@ function resolveCrypto(raw: RawEntity): ResolvedEntity {
   }
   
   // Try lowercase as CoinGecko ID
-  const lowered = raw.rawText.trim().toLowerCase();
+  const lowered = (raw.rawText ?? "").trim().toLowerCase();
   if (CRYPTO_DISPLAY_NAMES[lowered]) {
     return {
       raw,
@@ -602,7 +604,7 @@ function resolveCrypto(raw: RawEntity): ResolvedEntity {
  * Resolve a currency entity.
  */
 function resolveCurrency(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? "").trim().toUpperCase();
   
   const code = CURRENCY_NAME_TO_CODE[text];
   if (code) {
@@ -644,7 +646,7 @@ function resolveCurrency(raw: RawEntity): ResolvedEntity {
  * Resolve a currency pair entity.
  */
 function resolveCurrencyPair(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? "").trim().toUpperCase();
   
   // Parse formats: USD/EUR, USD-EUR, USDEUR, USD to EUR
   let base: string | null = null;
@@ -707,7 +709,7 @@ function resolveCurrencyPair(raw: RawEntity): ResolvedEntity {
  * Resolve a city entity.
  */
 function resolveCity(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? "").trim().toUpperCase();
   
   const alias = CITY_ALIASES[text];
   if (alias) {
@@ -733,8 +735,8 @@ function resolveCity(raw: RawEntity): ResolvedEntity {
   return {
     raw,
     status: 'resolved',
-    canonicalId: raw.rawText.trim(),
-    displayName: raw.rawText.trim(),
+    canonicalId: (raw.rawText ?? "").trim(),
+    displayName: (raw.rawText ?? "").trim(),
     category: 'weather',
     resolutionConfidence: 0.7,
   };
@@ -744,7 +746,7 @@ function resolveCity(raw: RawEntity): ResolvedEntity {
  * Resolve a timezone entity.
  */
 function resolveTimezone(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? "").trim().toUpperCase();
   
   // Check abbreviation
   const ianaFromAbbr = TIMEZONE_ABBREVIATIONS[text];
@@ -761,7 +763,7 @@ function resolveTimezone(raw: RawEntity): ResolvedEntity {
   }
   
   // Check if it's already an IANA format
-  if (raw.rawText.includes('/')) {
+  if ((raw.rawText ?? "").includes('/')) {
     try {
       Intl.DateTimeFormat(undefined, { timeZone: raw.rawText });
       return {
@@ -806,7 +808,7 @@ function resolveTimezone(raw: RawEntity): ResolvedEntity {
  * Resolve an index entity.
  */
 function resolveIndex(raw: RawEntity): ResolvedEntity {
-  const text = raw.rawText.trim().toUpperCase();
+  const text = (raw.rawText ?? "").trim().toUpperCase();
   
   // Map common index names to ETFs
   const indexMap: Record<string, { ticker: string; name: string }> = {
@@ -925,20 +927,18 @@ export function resolveEntities(rawEntities: readonly RawEntity[], originalQuery
   const resolutionTimeMs = Date.now() - startTime;
   
   const trace: EntityResolutionTrace = {
+    method: 'regex',
+    confidence: resolved.length > 0 ? 0.9 : 0.5,
     originalQuery,
     extractionTimeMs: 0, // Set by extractor
     resolutionTimeMs,
-    extractedCount: rawEntities.length,
-    resolvedCount: resolved.length,
-    method: 'regex',
-    resolverVersion: RESOLVER_VERSION,
   };
   
   return {
     entities,
     resolved,
-    failed,
-    ambiguous,
+    failed: failed as readonly FailedEntity[],
+    ambiguous: ambiguous as readonly AmbiguousEntity[],
     trace,
   };
 }
@@ -951,5 +951,6 @@ export function getCategoryForEntity(entity: ResolvedEntity): LiveCategory | nul
     return entity.category;
   }
   
-  return ENTITY_TO_CATEGORY.get(entity.raw.type) ?? null;
+  const entityType = entity.raw?.type;
+  return entityType ? (ENTITY_TO_CATEGORY[entityType] ?? null) : null;
 }

@@ -700,7 +700,7 @@ export function checkNumericLeak(
   // Determine mode based on constraints
   if (!constraints.numericPrecisionAllowed) {
     // FORBID MODE: Provider failed, no numeric data allowed
-    return checkLeakForbidMode(response, category, constraints.numericExemptions);
+    return checkLeakForbidMode(response, category, constraints.numericExemptions ?? {});
   }
   
   if (constraints.allowedTokens) {
@@ -708,7 +708,7 @@ export function checkNumericLeak(
     return checkLeakAllowlistMode(
       response,
       constraints.allowedTokens,
-      constraints.numericExemptions
+      constraints.numericExemptions ?? {}
     );
   }
   

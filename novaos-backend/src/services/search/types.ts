@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SEARCH SERVICE TYPES — Provider Interfaces and Extended Types
 // Phase 4: Entity System
+// PATCHED: Removed non-existent './search-types.js' import
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -9,8 +10,7 @@ import type {
   AuthoritativeCategory,
 } from '../../types/categories.js';
 
-// Re-export from the types.ts file that was uploaded (for authoritative-policy.ts, domain-filter.ts)
-export * from './search-types.js';
+// REMOVED: export * from './search-types.js'; - this file doesn't exist
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SEARCH PROVIDER INTERFACE — Used by Tavily and Google CSE
@@ -302,13 +302,15 @@ export interface ConflictDetectionResult {
 
 /**
  * Recommendation for handling conflicts.
+ * PATCHED: Added 'no_conflicts' as valid value
  */
 export type ConflictRecommendation =
   | 'use_official'
   | 'use_consensus'
   | 'use_most_recent'
   | 'flag_for_review'
-  | 'cannot_determine';
+  | 'cannot_determine'
+  | 'no_conflicts';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // AUTHORITATIVE POLICY

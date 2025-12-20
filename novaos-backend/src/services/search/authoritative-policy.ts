@@ -1,12 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTHORITATIVE POLICY — Policies and Conflict Detection for Non-Live Categories
 // Phase 4: Entity System
+// PATCHED: Added legal, medical, government, academic policies
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
   AuthoritativeCategory,
-  SearchResult,
 } from '../../types/index.js';
+
+// Import SearchResult from the search types file
+import type { SearchResult as TypesSearchResult } from '../../types/search.js';
 
 import type {
   AuthoritativePolicy,
@@ -21,6 +24,7 @@ import type {
   SourceTier,
   ExtractedValue,
   DisagreementHandling,
+  SearchResult,
 } from './types.js';
 
 import {
@@ -302,13 +306,216 @@ export const SERVICE_STATUS_POLICY: AuthoritativePolicy = {
 };
 
 /**
+ * Policy for legal information.
+ * PATCHED: Added new policy
+ */
+export const LEGAL_POLICY: AuthoritativePolicy = {
+  category: 'legal',
+  description: 'Policy for legal information, court cases, and legal precedents',
+  
+  officialDomains: [
+    'supremecourt.gov',
+    'uscourts.gov',
+    'justice.gov',
+    'law.cornell.edu',
+    'courtlistener.com',
+    'pacer.uscourts.gov',
+    'congress.gov',
+  ],
+  
+  verifiedDomains: [
+    'reuters.com',
+    'bloomberg.com',
+    'wsj.com',
+    'law360.com',
+    'lexisnexis.com',
+    'westlaw.com',
+  ],
+  
+  contextDomains: [
+    'wikipedia.org',
+    'nolo.com',
+    'findlaw.com',
+    'justia.com',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'x.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'prefer_official',
+  minSources: 1,
+  requireConsensus: false,
+  maxDataAgeDays: 30,
+};
+
+/**
+ * Policy for medical information.
+ * PATCHED: Added new policy
+ */
+export const MEDICAL_POLICY: AuthoritativePolicy = {
+  category: 'medical',
+  description: 'Policy for medical information and health data',
+  
+  officialDomains: [
+    'nih.gov',
+    'cdc.gov',
+    'fda.gov',
+    'who.int',
+    'pubmed.ncbi.nlm.nih.gov',
+    'medlineplus.gov',
+    'clinicaltrials.gov',
+  ],
+  
+  verifiedDomains: [
+    'mayoclinic.org',
+    'webmd.com',
+    'healthline.com',
+    'nejm.org',
+    'jamanetwork.com',
+    'thelancet.com',
+  ],
+  
+  contextDomains: [
+    'wikipedia.org',
+    'drugs.com',
+    'rxlist.com',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'x.com',
+    'reddit.com',
+    'quora.com',
+    'answers.com',
+  ],
+  
+  disagreementHandling: 'prefer_official',
+  minSources: 2,
+  requireConsensus: true,
+  maxDataAgeDays: 365,
+};
+
+/**
+ * Policy for government information.
+ * PATCHED: Added new policy
+ */
+export const GOVERNMENT_POLICY: AuthoritativePolicy = {
+  category: 'government',
+  description: 'Policy for government data and public records',
+  
+  officialDomains: [
+    'usa.gov',
+    'whitehouse.gov',
+    'congress.gov',
+    'senate.gov',
+    'house.gov',
+    'state.gov',
+    'treasury.gov',
+    'data.gov',
+    'census.gov',
+    'bls.gov',
+    'bea.gov',
+  ],
+  
+  verifiedDomains: [
+    'reuters.com',
+    'apnews.com',
+    'npr.org',
+    'pbs.org',
+    'c-span.org',
+  ],
+  
+  contextDomains: [
+    'wikipedia.org',
+    'ballotpedia.org',
+    'govtrack.us',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'x.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'prefer_official',
+  minSources: 1,
+  requireConsensus: false,
+  maxDataAgeDays: 7,
+};
+
+/**
+ * Policy for academic information.
+ * PATCHED: Added new policy
+ */
+export const ACADEMIC_POLICY: AuthoritativePolicy = {
+  category: 'academic',
+  description: 'Policy for academic research and citations',
+  
+  officialDomains: [
+    'scholar.google.com',
+    'pubmed.ncbi.nlm.nih.gov',
+    'arxiv.org',
+    'jstor.org',
+    'sciencedirect.com',
+    'springer.com',
+    'nature.com',
+    'science.org',
+    'ieee.org',
+    'acm.org',
+    'ssrn.com',
+  ],
+  
+  verifiedDomains: [
+    'researchgate.net',
+    'academia.edu',
+    'semanticscholar.org',
+  ],
+  
+  contextDomains: [
+    'wikipedia.org',
+    'mit.edu',
+    'stanford.edu',
+    'harvard.edu',
+    'berkeley.edu',
+    'cam.ac.uk',
+    'ox.ac.uk',
+  ],
+  
+  disallowedDomains: [
+    'facebook.com',
+    'twitter.com',
+    'x.com',
+    'reddit.com',
+    'quora.com',
+  ],
+  
+  disagreementHandling: 'require_consensus',
+  minSources: 2,
+  requireConsensus: true,
+  maxDataAgeDays: 365 * 5, // Academic data can be older
+};
+
+/**
  * All policies by category.
+ * PATCHED: Added legal, medical, government, academic
  */
 export const POLICIES: Readonly<Record<AuthoritativeCategory, AuthoritativePolicy>> = {
   leadership: LEADERSHIP_POLICY,
   regulatory: REGULATORY_POLICY,
   software: SOFTWARE_POLICY,
   service_status: SERVICE_STATUS_POLICY,
+  legal: LEGAL_POLICY,
+  medical: MEDICAL_POLICY,
+  government: GOVERNMENT_POLICY,
+  academic: ACADEMIC_POLICY,
 };
 
 /**
@@ -559,51 +766,55 @@ function determineRecommendation(
   const hasHighSeverity = conflicts.some(c => c.severity === 'high');
   const hasMediumSeverity = conflicts.some(c => c.severity === 'medium');
   
+  // Determine recommendation
   if (hasOfficial) {
-    // If we have official sources, prefer them
     return 'use_official';
   }
   
   if (hasHighSeverity) {
-    // High severity conflicts need review
     return 'flag_for_review';
+  }
+  
+  // Check for consensus
+  const consensusExists = checkConsensus(conflicts, results);
+  if (consensusExists) {
+    return 'use_consensus';
   }
   
   if (hasMediumSeverity) {
-    // Medium severity - check consensus
-    const consensusValue = findConsensus(conflicts);
-    if (consensusValue) {
-      return 'use_consensus';
-    }
-    return 'flag_for_review';
+    return 'use_most_recent';
   }
   
-  // Low severity - use most recent if available
-  return 'use_most_recent';
+  return 'cannot_determine';
 }
 
 /**
- * Find if there's consensus among sources.
+ * Check if there's a consensus among sources.
  */
-function findConsensus(conflicts: readonly ConflictInfo[]): string | null {
+function checkConsensus(
+  conflicts: readonly ConflictInfo[],
+  results: readonly SearchResultWithMeta[]
+): boolean {
+  // Simple consensus check: majority of sources agree
   for (const conflict of conflicts) {
-    // Count occurrences of each value
-    const valueCounts = new Map<string, number>();
+    const valueCount = new Map<string, number>();
+    
     for (const source of conflict.sources) {
-      const normalized = source.value.toLowerCase();
-      valueCounts.set(normalized, (valueCounts.get(normalized) ?? 0) + 1);
+      const count = valueCount.get(source.value) ?? 0;
+      valueCount.set(source.value, count + 1);
     }
     
-    // Find majority (> 50%)
-    const total = conflict.sources.length;
-    for (const [value, count] of valueCounts) {
-      if (count > total / 2) {
-        return value;
-      }
+    // Find max count
+    const maxCount = Math.max(...valueCount.values());
+    const totalCount = conflict.sources.length;
+    
+    // Consensus if > 50% agree
+    if (maxCount / totalCount <= 0.5) {
+      return false;
     }
   }
   
-  return null;
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -611,7 +822,7 @@ function findConsensus(conflicts: readonly ConflictInfo[]): string | null {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Validate search results against an authoritative policy.
+ * Validate search results against a policy.
  */
 export function validateAgainstPolicy(
   results: readonly SearchResult[],
@@ -929,4 +1140,5 @@ export function quickConflictCheck(
 // ─────────────────────────────────────────────────────────────────────────────────
 
 // Note: LEADERSHIP_POLICY, REGULATORY_POLICY, SOFTWARE_POLICY, SERVICE_STATUS_POLICY, 
+// LEGAL_POLICY, MEDICAL_POLICY, GOVERNMENT_POLICY, ACADEMIC_POLICY
 // and POLICIES are already exported inline above

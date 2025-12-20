@@ -368,7 +368,7 @@ function recordTraceFromResult(
     result.classification.truthMode,
     result.classification.liveCategories,
     result.classification.authoritativeCategories,
-    result.classification.entities.resolved.length,
+    result.classification.entities?.resolved?.length ?? 0,
     result.classification.confidenceScore,
     null, // Pattern confidence not separately tracked
     result.classification.method !== 'rule_based',
@@ -386,14 +386,14 @@ function recordTraceFromResult(
   ));
   
   // Record provider trace
-  const categoryTraces = result.retrieval.successfulData.map(d => ({
+  const categoryTraces = (result.retrieval?.successfulData ?? []).map(d => ({
     category: d.type as any,
     durationMs: 0,
     success: true,
     stale: false,
   }));
   
-  for (const cat of result.retrieval.failedCategories) {
+  for (const cat of result.retrieval?.failedCategories ?? []) {
     categoryTraces.push({
       category: cat,
       durationMs: 0,
@@ -403,7 +403,7 @@ function recordTraceFromResult(
   }
   
   builder.recordProviders(createProviderTrace(
-    result.retrieval.totalLatencyMs,
+    result.retrieval?.totalLatencyMs ?? 0,
     true,
     categoryTraces
   ));
@@ -413,7 +413,7 @@ function recordTraceFromResult(
     result.mode,
     !!result.evidence,
     result.evidence?.numericTokens?.tokens.size ?? 0,
-    result.constraints.level,
+    result.responseConstraints?.level ?? 'standard',
     result.evidence?.systemPromptAdditions?.length ?? 0
   ));
 }

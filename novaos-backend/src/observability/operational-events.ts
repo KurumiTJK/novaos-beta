@@ -136,9 +136,9 @@ export const INVALID_STATE_CONDITIONS: readonly InvalidStateCondition[] = [
     description: 'Evidence pack exists but no numeric tokens extracted',
     check: (result) => {
       const hasEvidence = result.evidence !== null && 
-                          result.evidence.contextItems.length > 0;
-      const hasTokens = result.evidence?.numericTokens?.tokens?.size ?? 0 > 0;
-      const requiresTokens = result.classification.requiresNumericPrecision;
+                          (result.evidence?.contextItems?.length ?? 0) > 0;
+      const hasTokens = (result.evidence?.numericTokens?.tokens?.size ?? 0) > 0;
+      const requiresTokens = result.classification?.requiresNumericPrecision ?? false;
       return hasEvidence && requiresTokens && !hasTokens;
     },
   },

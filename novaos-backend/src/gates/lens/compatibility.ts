@@ -1,18 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// LENS GATE COMPATIBILITY LAYER
-// Maps Phase 7 LensGateResult to legacy LensResult for pipeline integration
+// LENS GATE COMPATIBILITY — Legacy Format Conversion
+// PATCHED: Fixed type imports from types/index.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { StakesLevel, LensResult } from '../../types/index.js';
-import type { LensGateResult, EvidencePack, ContextItem } from '../../types/lens.js';
+import type { StakesLevel } from '../../types/index.js';
+import type { LensGateResult, LensMode, LensConstraints, RiskAssessment } from '../../types/lens.js';
 import type { DataNeedClassification } from '../../types/data-need.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LEGACY EVIDENCE PACK FORMAT
+// LEGACY TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Legacy evidence item format expected by execution-pipeline.ts
+ * Legacy evidence item format.
  */
 export interface LegacyEvidenceItem {
   readonly title: string;
@@ -20,208 +20,189 @@ export interface LegacyEvidenceItem {
   readonly excerpt?: string;
   readonly snippet?: string;
   readonly source?: string;
-  readonly category?: string;
-  readonly relevance?: number;
+  readonly confidence?: number;
 }
 
 /**
- * Legacy evidence pack format expected by execution-pipeline.ts
+ * Legacy evidence pack format.
  */
 export interface LegacyEvidencePack {
   readonly items: readonly LegacyEvidenceItem[];
-  readonly formattedContext?: string;
-  readonly freshnessWarning?: string;
+  readonly sources: readonly string[];
+  readonly freshness: 'fresh' | 'stale' | 'unknown';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// EXTENDED LENS RESULT
-// ─────────────────────────────────────────────────────────────────────────────────
-
 /**
- * Extended LensResult that includes both legacy fields and new Phase 7 data.
- * This allows the pipeline to use legacy fields while new code can access
- * the full LensGateResult.
+ * Legacy lens result format expected by the execution pipeline.
  */
-export interface ExtendedLensResult extends LensResult {
-  /** Legacy evidence pack for pipeline injection */
-  readonly evidencePack?: LegacyEvidencePack;
-  
-  /** Full Phase 7 result for new code */
-  readonly _fullResult?: LensGateResult;
-  
-  /** Response constraints for model gate */
-  readonly responseConstraints?: {
-    readonly numericPrecisionAllowed: boolean;
-    readonly actionRecommendationsAllowed: boolean;
-    readonly bannedPhrases?: readonly string[];
-    readonly requiredPhrases?: readonly string[];
-    readonly freshnessWarningRequired?: boolean;
+export interface LegacyLensResult {
+  readonly classification: {
+    readonly truthMode: string;
+    readonly categories: readonly string[];
+    readonly confidence: string;
   };
+  readonly evidence?: LegacyEvidencePack;
+  readonly stakes: StakesLevel;
+  readonly mode: string;
+}
+
+/**
+ * Extended lens result that includes both legacy and new fields.
+ */
+export interface ExtendedLensResult extends LegacyLensResult {
+  /** Full classification data */
+  readonly fullClassification: DataNeedClassification;
+  
+  /** Response constraints */
+  readonly constraints: LensConstraints;
+  
+  /** Risk assessment if available */
+  readonly riskAssessment?: RiskAssessment | null;
+  
+  /** Force high invariant */
+  readonly forceHigh: boolean;
+  
+  /** Operating mode */
+  readonly lensMode: LensMode;
+  
+  /** Degradation reason if applicable */
+  readonly degradationReason?: string;
+  
+  /** Block reason if applicable */
+  readonly blockReason?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// MAPPING FUNCTIONS
+// CONVERSION FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Map Phase 7 LensMode to legacy status.
- */
-function mapModeToStatus(mode: LensGateResult['mode']): LensResult['status'] {
-  switch (mode) {
-    case 'passthrough':
-    case 'live_fetch':
-    case 'verification':
-      return 'verified';
-    case 'degraded':
-      return 'degraded';
-    case 'blocked':
-      return 'stopped';
-    default:
-      return 'degraded';
-  }
-}
-
-/**
- * Map Phase 7 classification to legacy domain.
- */
-function mapCategoryToDomain(classification: DataNeedClassification): string {
-  // Use primary category or first live category
-  if (classification.primaryCategory) {
-    return classification.primaryCategory;
-  }
-  if (classification.liveCategories.length > 0) {
-    return classification.liveCategories[0]!;
-  }
-  return 'general';
-}
-
-/**
- * Map Phase 7 confidence to legacy stakes level.
- */
-function mapConfidenceToStakes(
-  classification: DataNeedClassification,
-  forceHigh: boolean
-): StakesLevel {
-  if (forceHigh) {
-    return 'high';
-  }
-  
-  // High-stakes categories
-  const highStakesCategories = ['market', 'crypto', 'fx'];
-  if (classification.liveCategories.some(c => highStakesCategories.includes(c))) {
-    return 'high';
-  }
-  
-  // Medium stakes for time (critical but simple)
-  if (classification.liveCategories.includes('time')) {
-    return 'medium';
-  }
-  
-  // Default based on truth mode
-  if (classification.truthMode === 'live_feed' || classification.truthMode === 'mixed') {
-    return 'high';
-  }
-  
-  return 'low';
-}
-
-/**
- * Convert Phase 7 ContextItem to legacy EvidenceItem.
- */
-function mapContextItemToLegacy(item: ContextItem): LegacyEvidenceItem {
-  return {
-    title: item.entity ?? item.category ?? 'Evidence',
-    url: item.sourceUrl,
-    excerpt: item.content,
-    snippet: item.content.slice(0, 200),
-    source: item.citation ?? item.source,
-    category: item.category,
-    relevance: item.relevance,
-  };
-}
-
-/**
- * Convert Phase 7 EvidencePack to legacy format.
- */
-function mapEvidencePackToLegacy(evidence: EvidencePack | null): LegacyEvidencePack | undefined {
-  if (!evidence) {
-    return undefined;
-  }
-  
-  return {
-    items: evidence.contextItems.map(mapContextItemToLegacy),
-    formattedContext: evidence.formattedContext,
-    freshnessWarning: evidence.freshnessWarnings.join(' '),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// MAIN CONVERSION FUNCTION
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Convert Phase 7 LensGateResult to legacy-compatible ExtendedLensResult.
- * 
- * This function bridges the new Live Data Router output to the existing
- * pipeline infrastructure, allowing gradual migration.
- * 
- * @param result - Phase 7 LensGateResult
- * @returns ExtendedLensResult compatible with legacy pipeline
+ * Convert a LensGateResult to the legacy LensResult format.
  */
 export function toLegacyLensResult(result: LensGateResult): ExtendedLensResult {
-  const classification = result.classification;
-  const forceHigh = result.numericPrecisionAllowed === false && 
-                    (classification.truthMode === 'live_feed' || classification.truthMode === 'mixed');
+  // Convert classification to legacy format
+  const legacyClassification = {
+    truthMode: result.classification.truthMode,
+    categories: result.classification.categories,
+    confidence: result.classification.confidence,
+  };
+  
+  // Convert evidence to legacy format
+  let legacyEvidence: LegacyEvidencePack | undefined;
+  if (result.evidence) {
+    const items: LegacyEvidenceItem[] = [];
+    
+    // Convert numeric tokens to evidence items
+    if (result.evidence.numericTokens) {
+      for (const [, token] of result.evidence.numericTokens.tokens) {
+        items.push({
+          title: `${token.type}: ${token.value}${token.unit ? ' ' + token.unit : ''}`,
+          source: token.source,
+          confidence: 1.0,
+        });
+      }
+    }
+    
+    // Add system prompt additions as evidence
+    for (const addition of result.evidence.systemPromptAdditions) {
+      items.push({
+        title: 'Context',
+        excerpt: addition,
+        confidence: 0.9,
+      });
+    }
+    
+    legacyEvidence = {
+      items,
+      sources: result.evidence.sources ?? [],
+      freshness: result.evidence.freshnessInfo?.allFresh ? 'fresh' : 'stale',
+    };
+  }
+  
+  // Determine stakes from risk assessment
+  const stakes: StakesLevel = result.riskAssessment?.stakes ?? 
+    (result.forceHigh ? 'high' : 'low');
   
   return {
     // Legacy fields
-    needsVerification: classification.truthMode !== 'local',
-    verified: result.mode === 'live_fetch' || result.mode === 'verification',
-    domain: mapCategoryToDomain(classification),
-    stakes: mapConfidenceToStakes(classification, forceHigh),
-    confidence: classification.confidenceScore,
-    status: mapModeToStatus(result.mode),
-    message: result.userMessage ?? result.freshnessWarning ?? undefined,
-    freshnessWindow: result.freshnessWarning ?? undefined,
-    sources: result.sources.length > 0 ? [...result.sources] : undefined,
+    classification: legacyClassification,
+    evidence: legacyEvidence,
+    stakes,
+    mode: result.mode,
     
-    // Extended fields for pipeline evidence injection
-    evidencePack: mapEvidencePackToLegacy(result.evidence),
-    
-    // Full result for new code
-    _fullResult: result,
-    
-    // Response constraints for model gate
-    responseConstraints: {
-      numericPrecisionAllowed: result.numericPrecisionAllowed,
-      actionRecommendationsAllowed: result.actionRecommendationsAllowed,
-      bannedPhrases: result.responseConstraints.bannedPhrases,
-      requiredPhrases: result.responseConstraints.requiredPhrases,
-      freshnessWarningRequired: result.requiresFreshnessDisclaimer,
+    // Extended fields
+    fullClassification: result.classification,
+    constraints: result.responseConstraints ?? {
+      level: 'standard',
+      requireEvidence: false,
+      allowSpeculation: true,
     },
+    riskAssessment: result.riskAssessment,
+    forceHigh: result.forceHigh ?? false,
+    lensMode: result.mode,
+    degradationReason: result.degradationReason,
+    blockReason: result.blockReason,
   };
 }
 
 /**
- * Extract the full Phase 7 result from an ExtendedLensResult.
- * Returns undefined if not available (legacy result).
+ * Get the full LensGateResult from an ExtendedLensResult if available.
+ * Note: This only works for results that were converted from LensGateResult.
  */
-export function getFullLensResult(result: LensResult): LensGateResult | undefined {
-  return (result as ExtendedLensResult)._fullResult;
+export function getFullLensResult(result: ExtendedLensResult): Partial<LensGateResult> {
+  return {
+    mode: result.lensMode,
+    classification: result.fullClassification,
+    constraints: result.constraints,
+    forceHigh: result.forceHigh,
+    riskAssessment: result.riskAssessment,
+  };
 }
 
 /**
- * Check if a LensResult has extended Phase 7 data.
+ * Check if a result has extended data.
  */
-export function hasExtendedData(result: LensResult): result is ExtendedLensResult {
-  return '_fullResult' in result && result._fullResult !== undefined;
+export function hasExtendedData(result: LegacyLensResult): result is ExtendedLensResult {
+  return 'fullClassification' in result && 'lensMode' in result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// TYPE EXPORTS
+// COMPATIBILITY HELPERS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export type {
-  LensResult,
-  LensGateResult,
-};
+/**
+ * Extract stakes level from any lens result format.
+ */
+export function getStakes(result: LegacyLensResult | ExtendedLensResult): StakesLevel {
+  if (hasExtendedData(result) && result.riskAssessment) {
+    return result.riskAssessment.stakes;
+  }
+  return result.stakes;
+}
+
+/**
+ * Check if result requires verification.
+ */
+export function requiresVerification(result: LegacyLensResult | ExtendedLensResult): boolean {
+  if (hasExtendedData(result)) {
+    return result.fullClassification.truthMode !== 'local';
+  }
+  return result.classification.truthMode !== 'local';
+}
+
+/**
+ * Get effective constraints from result.
+ */
+export function getConstraints(result: LegacyLensResult | ExtendedLensResult): LensConstraints {
+  if (hasExtendedData(result)) {
+    return result.constraints;
+  }
+  
+  // Create default constraints based on legacy data
+  const isHighStakes = result.stakes === 'high';
+  return {
+    level: isHighStakes ? 'strict' : 'standard',
+    requireEvidence: isHighStakes,
+    allowSpeculation: !isHighStakes,
+  };
+}

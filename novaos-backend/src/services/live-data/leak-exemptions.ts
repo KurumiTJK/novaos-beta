@@ -349,9 +349,10 @@ export function isExempted(
   
   // Small integer check
   if (exemptions.allowSmallIntegers) {
+    const maxSmallInt = exemptions.smallIntegerMax ?? 10;
     if (Number.isInteger(numericValue) && 
         numericValue >= 0 && 
-        numericValue <= exemptions.smallIntegerMax) {
+        numericValue <= maxSmallInt) {
       // Exclude if it looks like a price or percentage
       const looksLikePrice = /[$€£¥]/.test(context) || 
                             /\.\d{2}\b/.test(match) ||
@@ -362,7 +363,7 @@ export function isExempted(
         return {
           exempted: true,
           reason: 'small_integer',
-          description: `Small integer (≤${exemptions.smallIntegerMax}): ${match}`,
+          description: `Small integer (≤${maxSmallInt}): ${match}`,
         };
       }
     }

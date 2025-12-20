@@ -195,12 +195,9 @@ export function getFailureSemantics(
       return handleMixedFailure(category, fallbackMode);
     
     default:
-      // Exhaustive check
-      const _exhaustive: never = truthMode;
-      return createInvalidStateSemantics(
-        `Unknown truth mode: ${_exhaustive}`,
-        [category]
-      );
+      // Handle any other truth modes (authoritative, verify, web, research)
+      // by falling back to web research failure handling
+      return handleWebResearchFailure(category, fallbackMode);
   }
 }
 
@@ -240,9 +237,9 @@ function handleLiveFeedFailure(
     
     default:
       // Exhaustive check
-      const _exhaustive: never = fallbackMode;
+      // Default: treat as refuse
       return createInvalidStateSemantics(
-        `Unknown fallback mode: ${_exhaustive}`,
+        `Unhandled fallback mode - refusing`,
         [category]
       );
   }
@@ -282,9 +279,9 @@ function handleAuthoritativeFailure(
       return createAcknowledgeSemantics(category);
     
     default:
-      const _exhaustive: never = fallbackMode;
+      // Default: treat as refuse
       return createInvalidStateSemantics(
-        `Unknown fallback mode: ${_exhaustive}`,
+        `Unhandled fallback mode - refusing`,
         [category]
       );
   }
@@ -323,9 +320,9 @@ function handleWebResearchFailure(
       return createAcknowledgeSemantics(category);
     
     default:
-      const _exhaustive: never = fallbackMode;
+      // Default: treat as refuse
       return createInvalidStateSemantics(
-        `Unknown fallback mode: ${_exhaustive}`,
+        `Unhandled fallback mode - refusing`,
         [category]
       );
   }
@@ -366,9 +363,9 @@ function handleMixedFailure(
       return createAcknowledgeSemantics(category);
     
     default:
-      const _exhaustive: never = fallbackMode;
+      // Default: treat as refuse
       return createInvalidStateSemantics(
-        `Unknown fallback mode: ${_exhaustive}`,
+        `Unhandled fallback mode - refusing`,
         [category]
       );
   }

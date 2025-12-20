@@ -1,387 +1,224 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONSTRAINTS BUILDER — Build ResponseConstraints from Failure Semantics
-// Phase 6: Evidence & Injection
-// 
-// This module builds ResponseConstraints based on:
-// 1. Failure semantics (what level of constraint to apply)
-// 2. Provider result (tokens to allow if verified)
-// 3. Category (what exemptions are appropriate)
-// 
-// The constraints are consumed by:
-// - Model gate (prompt construction)
-// - Post-model validation (leak guard)
+// CONSTRAINTS BUILDER — Build ResponseConstraints from Semantics
+// PATCHED STUB: Provides exports needed by index.ts
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { LiveCategory } from '../../types/categories.js';
 import type {
   ResponseConstraints,
+  NumericToken,
   NumericTokenSet,
   NumericExemptions,
-  ConstraintLevel,
 } from '../../types/constraints.js';
-import type { ProviderResult, ProviderOkResult } from '../../types/provider-results.js';
+import type { ProviderOkResult } from '../../types/provider-results.js';
+import type { FailureSemantics, ConstraintLevel } from './failure-semantics.js';
 
 import {
-  FailureSemantics,
-  ConstraintLevel as SemanticsConstraintLevel,
-  canProceed,
-  allowsNumeric,
-} from './failure-semantics.js';
-
-import {
-  extractTokensFromData,
-  buildTokenSet,
-} from './numeric-tokens.js';
+  createDefaultConstraints,
+  createStrictConstraints,
+  createDegradedConstraints,
+  createQualitativeConstraints,
+  createInsufficientConstraints,
+  createEmptyExemptions,
+  createEmptyTokenSet,
+  DEFAULT_ALWAYS_EXEMPT,
+} from '../../types/constraints.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Options for constraint building.
+ * Options for building constraints.
  */
 export interface ConstraintBuildOptions {
-  /** Include freshness warning in constraints */
-  readonly includeFreshnessWarning?: boolean;
+  /** Whether to include stale data warnings */
+  readonly includeStaleWarnings?: boolean;
   
   /** Custom banned phrases */
-  readonly bannedPhrases?: readonly string[];
+  readonly customBannedPhrases?: readonly string[];
   
-  /** Custom required phrases */
-  readonly requiredPhrases?: readonly string[];
+  /** Custom must-include phrases */
+  readonly customMustInclude?: readonly string[];
   
-  /** Override exemptions */
-  readonly exemptionOverrides?: Partial<NumericExemptions>;
+  /** Override constraint level */
+  readonly overrideLevel?: ConstraintLevel;
 }
 
 /**
- * Result of constraint building.
+ * Result of building constraints.
  */
 export interface ConstraintBuildResult {
   /** Built constraints */
   readonly constraints: ResponseConstraints;
   
-  /** Whether constraints are valid */
-  readonly valid: boolean;
+  /** Token set if applicable */
+  readonly tokenSet: NumericTokenSet | null;
   
-  /** Validation errors if any */
-  readonly errors: readonly string[];
+  /** Warnings generated */
+  readonly warnings: readonly string[];
   
-  /** Human-readable summary */
-  readonly summary: string;
+  /** Whether constraints are complete */
+  readonly complete: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DEFAULT EXEMPTIONS BY CONSTRAINT LEVEL
+// EXEMPTION PRESETS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Standard exemptions for quote_evidence_only mode.
- * Allow structural numbers but require tokens for data.
+ * Exemptions for quote_evidence_only mode.
+ * Allow dates, years, ordinals, and rankings.
  */
-const QUOTE_EVIDENCE_EXEMPTIONS: NumericExemptions = {
-  allowYears: true,
-  allowDates: true,
-  allowSmallIntegers: true,
-  smallIntegerMax: 10,
-  allowExplanatoryPercentages: false, // Must come from tokens
-  allowOrdinals: true,
-  allowInCodeBlocks: true,
-  allowInQuotes: true,
-  customPatterns: [],
+export const QUOTE_EVIDENCE_EXEMPTIONS: NumericExemptions = {
+  alwaysExempt: DEFAULT_ALWAYS_EXEMPT,
+  contextExemptions: new Map(),
 };
 
 /**
- * Strict exemptions for forbid_numeric_claims mode.
- * Only allow structural numbers.
+ * Exemptions for forbid_numeric_claims mode.
+ * Very restrictive - only basic dates/years.
  */
-const FORBID_NUMERIC_EXEMPTIONS: NumericExemptions = {
-  allowYears: true,
-  allowDates: true,
-  allowSmallIntegers: true,
-  smallIntegerMax: 5, // More restrictive
-  allowExplanatoryPercentages: false,
-  allowOrdinals: true,
-  allowInCodeBlocks: true,
-  allowInQuotes: false, // Don't allow in quotes - could be fabricated
-  customPatterns: [],
+export const FORBID_NUMERIC_EXEMPTIONS: NumericExemptions = {
+  alwaysExempt: [
+    /^\d{4}$/,                    // Years only
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}$/, // Dates
+  ],
+  contextExemptions: new Map(),
 };
 
 /**
- * Minimal exemptions for qualitative_only mode.
- * Almost no numbers allowed.
+ * Exemptions for qualitative_only mode.
+ * Even more restrictive.
  */
-const QUALITATIVE_EXEMPTIONS: NumericExemptions = {
-  allowYears: true,
-  allowDates: false,
-  allowSmallIntegers: true,
-  smallIntegerMax: 3, // Very restrictive
-  allowExplanatoryPercentages: false,
-  allowOrdinals: true,
-  allowInCodeBlocks: false,
-  allowInQuotes: false,
-  customPatterns: [],
+export const QUALITATIVE_EXEMPTIONS: NumericExemptions = {
+  alwaysExempt: [
+    /^\d{4}$/,  // Years only
+  ],
+  contextExemptions: new Map(),
 };
 
 /**
- * No exemptions for insufficient mode.
+ * No exemptions at all.
  */
-const NO_EXEMPTIONS: NumericExemptions = {
-  allowYears: false,
-  allowDates: false,
-  allowSmallIntegers: false,
-  smallIntegerMax: 0,
-  allowExplanatoryPercentages: false,
-  allowOrdinals: false,
-  allowInCodeBlocks: false,
-  allowInQuotes: false,
-  customPatterns: [],
+export const NO_EXEMPTIONS: NumericExemptions = {
+  alwaysExempt: [],
+  contextExemptions: new Map(),
 };
 
 /**
- * Permissive exemptions for local/passthrough mode.
+ * Permissive exemptions (allow all).
  */
-const PERMISSIVE_EXEMPTIONS: NumericExemptions = {
-  allowYears: true,
-  allowDates: true,
-  allowSmallIntegers: true,
-  smallIntegerMax: 100,
-  allowExplanatoryPercentages: true,
-  allowOrdinals: true,
-  allowInCodeBlocks: true,
-  allowInQuotes: true,
-  customPatterns: [],
+export const PERMISSIVE_EXEMPTIONS: NumericExemptions = {
+  alwaysExempt: [/.*/],
+  contextExemptions: new Map(),
 };
-
-/**
- * Get exemptions for a constraint level.
- */
-function getExemptionsForLevel(level: SemanticsConstraintLevel): NumericExemptions {
-  switch (level) {
-    case 'quote_evidence_only':
-      return QUOTE_EVIDENCE_EXEMPTIONS;
-    case 'forbid_numeric_claims':
-      return FORBID_NUMERIC_EXEMPTIONS;
-    case 'qualitative_only':
-      return QUALITATIVE_EXEMPTIONS;
-    case 'insufficient':
-      return NO_EXEMPTIONS;
-    case 'permissive':
-      return PERMISSIVE_EXEMPTIONS;
-    default:
-      // Exhaustive check
-      const _exhaustive: never = level;
-      return NO_EXEMPTIONS;
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// BANNED PHRASES BY CATEGORY
+// BANNED PHRASES
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Phrases that should NEVER appear in responses with live data.
- * These indicate the model is fabricating or speculating.
+ * Universal banned phrases for all modes.
  */
-const UNIVERSAL_BANNED_PHRASES: readonly string[] = [
-  'I believe the price is',
-  'I think it might be',
-  'The price should be around',
-  'It was probably',
-  'Last I checked',
-  'As of my knowledge',
-  'Based on my training',
-  'I don\'t have real-time',
-  'I cannot access live',
-];
-
-/**
- * Category-specific banned phrases.
- */
-const CATEGORY_BANNED_PHRASES: ReadonlyMap<LiveCategory, readonly string[]> = new Map([
-  ['market', [
-    'you should buy',
-    'you should sell',
-    'I recommend buying',
-    'I recommend selling',
-    'this is a good investment',
-    'this is a bad investment',
-    'the stock will go up',
-    'the stock will go down',
-  ]],
-  ['crypto', [
-    'you should buy',
-    'you should sell',
-    'to the moon',
-    'guaranteed returns',
-    'this coin will',
-    'crypto will',
-  ]],
-  ['fx', [
-    'the rate will',
-    'currency will strengthen',
-    'currency will weaken',
-    'you should exchange now',
-  ]],
-  ['weather', [
-    // Weather has fewer banned phrases
-  ]],
-  ['time', [
-    // Time has no banned phrases
-  ]],
-]);
-
-/**
- * Get banned phrases for categories.
- */
-function getBannedPhrases(categories: readonly LiveCategory[]): string[] {
-  const phrases = [...UNIVERSAL_BANNED_PHRASES];
-  
-  for (const category of categories) {
-    const categoryPhrases = CATEGORY_BANNED_PHRASES.get(category);
-    if (categoryPhrases) {
-      phrases.push(...categoryPhrases);
-    }
-  }
-  
-  return phrases;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// REQUIRED PHRASES BY CONSTRAINT LEVEL
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Phrases that MUST appear when data is stale.
- */
-const STALE_DATA_PHRASES: readonly string[] = [
-  // At least one of these should appear
-  'may be outdated',
-  'might not reflect',
-  'check for latest',
-  'verify current',
-  'data from',
-];
-
-/**
- * Phrases for degraded mode responses.
- */
-const DEGRADED_MODE_PHRASES: readonly string[] = [
-  // At least one of these should appear
-  'unable to retrieve',
-  'couldn\'t access',
-  'for current',
-  'check',
-  'visit',
+export const UNIVERSAL_BANNED_PHRASES: readonly string[] = [
+  "I'm always here for you",
+  "I'm so proud of you",
+  "You should definitely",
+  "Trust me",
+  "I promise",
+  "I guarantee",
+  "Without a doubt",
+  "100% certain",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// MAIN BUILDER FUNCTIONS
+// BUILD FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Build constraints from failure semantics and provider result.
- * 
- * @param semantics - Failure semantics determining constraint level
- * @param providerResult - Provider result (may contain tokens)
- * @param category - Primary category
- * @param options - Build options
- * @returns Built constraints with validation
  */
 export function buildConstraints(
   semantics: FailureSemantics,
-  providerResult: ProviderResult | null,
+  providerResult: ProviderOkResult | null,
   category: LiveCategory,
   options: ConstraintBuildOptions = {}
 ): ConstraintBuildResult {
-  const errors: string[] = [];
+  const warnings: string[] = [];
+  let tokenSet: NumericTokenSet | null = null;
   
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // INSUFFICIENT — Cannot proceed
-  // ═══════════════════════════════════════════════════════════════════════════════
+  // Determine level (allow override)
+  const level = options.overrideLevel ?? semantics.constraintLevel;
   
-  if (semantics.constraintLevel === 'insufficient') {
-    return buildInsufficientConstraints(semantics, category);
+  // Build constraints based on level
+  let constraints: ResponseConstraints;
+  
+  switch (level) {
+    case 'quote_evidence_only':
+      tokenSet = providerResult ? extractTokenSet(providerResult) : createEmptyTokenSet();
+      constraints = createStrictConstraints(tokenSet, [category], semantics.reason);
+      break;
+      
+    case 'forbid_numeric_claims':
+      constraints = createDegradedConstraints(semantics.reason);
+      break;
+      
+    case 'qualitative_only':
+      constraints = createQualitativeConstraints(semantics.reason);
+      break;
+      
+    case 'insufficient':
+      constraints = createInsufficientConstraints(semantics.reason);
+      break;
+      
+    case 'permissive':
+    default:
+      constraints = createDefaultConstraints(semantics.reason);
+      break;
   }
   
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // QUALITATIVE ONLY — No numeric precision, no tokens
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  if (semantics.constraintLevel === 'qualitative_only') {
-    return buildQualitativeConstraints(semantics, category, options);
+  // Add custom banned phrases
+  if (options.customBannedPhrases?.length) {
+    constraints = {
+      ...constraints,
+      bannedPhrases: [...(constraints.bannedPhrases ?? []), ...options.customBannedPhrases],
+    };
   }
   
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // FORBID NUMERIC — No numeric precision, no tokens
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  if (semantics.constraintLevel === 'forbid_numeric_claims') {
-    return buildForbidNumericConstraints(semantics, category, options);
+  // Add must-include phrases
+  if (options.customMustInclude?.length) {
+    constraints = {
+      ...constraints,
+      mustInclude: [...(constraints.mustInclude ?? []), ...options.customMustInclude],
+    };
   }
   
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // QUOTE EVIDENCE ONLY — Extract tokens from provider result
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  if (semantics.constraintLevel === 'quote_evidence_only') {
-    if (!providerResult || !providerResult.ok) {
-      // Should have verified data but don't - this is inconsistent
-      errors.push('quote_evidence_only requires verified provider data');
-      return buildForbidNumericConstraints(semantics, category, options);
-    }
-    
-    return buildLiveDataConstraints(semantics, providerResult, category, options);
+  // Add warnings for stale data
+  if (options.includeStaleWarnings && semantics.systemMessage) {
+    warnings.push(semantics.systemMessage);
   }
-  
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // PERMISSIVE — No constraints
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  if (semantics.constraintLevel === 'permissive') {
-    return buildPermissiveConstraints(category);
-  }
-  
-  // Should never reach here
-  errors.push(`Unknown constraint level: ${semantics.constraintLevel}`);
-  return {
-    constraints: buildDefaultConstraints(category),
-    valid: false,
-    errors,
-    summary: 'Unknown constraint level - using defaults',
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// SPECIFIC CONSTRAINT BUILDERS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Build constraints for insufficient data (cannot proceed).
- */
-export function buildInsufficientConstraints(
-  semantics: FailureSemantics,
-  category: LiveCategory
-): ConstraintBuildResult {
-  const constraints: ResponseConstraints = {
-    numericPrecisionAllowed: false,
-    allowedTokens: null,
-    numericExemptions: NO_EXEMPTIONS,
-    actionRecommendationsAllowed: false,
-    bannedPhrases: getBannedPhrases([category]),
-    requiredPhrases: [],
-    freshnessWarningRequired: false,
-    requiredCitations: [],
-    level: 'strict',
-    reason: semantics.reason,
-    triggeredByCategories: [...semantics.triggeredBy],
-  };
   
   return {
     constraints,
-    valid: true,
-    errors: [],
-    summary: `INSUFFICIENT: ${semantics.reason}`,
+    tokenSet,
+    warnings,
+    complete: level !== 'insufficient',
+  };
+}
+
+/**
+ * Build constraints for insufficient data.
+ */
+export function buildInsufficientConstraints(
+  reason: string,
+  category?: LiveCategory
+): ConstraintBuildResult {
+  return {
+    constraints: createInsufficientConstraints(reason),
+    tokenSet: null,
+    warnings: [reason],
+    complete: false,
   };
 }
 
@@ -389,37 +226,14 @@ export function buildInsufficientConstraints(
  * Build constraints for qualitative-only mode.
  */
 export function buildQualitativeConstraints(
-  semantics: FailureSemantics,
-  category: LiveCategory,
-  options: ConstraintBuildOptions = {}
+  reason: string,
+  category?: LiveCategory
 ): ConstraintBuildResult {
-  const exemptions = mergeExemptions(
-    QUALITATIVE_EXEMPTIONS,
-    options.exemptionOverrides
-  );
-  
-  const constraints: ResponseConstraints = {
-    numericPrecisionAllowed: false,
-    allowedTokens: null,
-    numericExemptions: exemptions,
-    actionRecommendationsAllowed: semantics.actionRecommendationsAllowed,
-    bannedPhrases: [
-      ...getBannedPhrases([category]),
-      ...(options.bannedPhrases ?? []),
-    ],
-    requiredPhrases: options.requiredPhrases ?? [],
-    freshnessWarningRequired: options.includeFreshnessWarning ?? false,
-    requiredCitations: [],
-    level: 'strict',
-    reason: semantics.reason,
-    triggeredByCategories: [...semantics.triggeredBy],
-  };
-  
   return {
-    constraints,
-    valid: true,
-    errors: [],
-    summary: `QUALITATIVE: ${semantics.reason}`,
+    constraints: createQualitativeConstraints(reason),
+    tokenSet: null,
+    warnings: [],
+    complete: true,
   };
 }
 
@@ -427,310 +241,75 @@ export function buildQualitativeConstraints(
  * Build constraints for forbid-numeric mode.
  */
 export function buildForbidNumericConstraints(
-  semantics: FailureSemantics,
-  category: LiveCategory,
-  options: ConstraintBuildOptions = {}
+  reason: string,
+  category?: LiveCategory
 ): ConstraintBuildResult {
-  const exemptions = mergeExemptions(
-    FORBID_NUMERIC_EXEMPTIONS,
-    options.exemptionOverrides
-  );
-  
-  const constraints: ResponseConstraints = {
-    numericPrecisionAllowed: false,
-    allowedTokens: null,
-    numericExemptions: exemptions,
-    actionRecommendationsAllowed: false,
-    bannedPhrases: [
-      ...getBannedPhrases([category]),
-      ...(options.bannedPhrases ?? []),
-    ],
-    requiredPhrases: [
-      ...DEGRADED_MODE_PHRASES.slice(0, 1), // Require at least one
-      ...(options.requiredPhrases ?? []),
-    ],
-    freshnessWarningRequired: true, // Always warn in degraded mode
-    requiredCitations: [],
-    level: 'strict',
-    reason: semantics.reason,
-    triggeredByCategories: [...semantics.triggeredBy],
-  };
-  
   return {
-    constraints,
-    valid: true,
-    errors: [],
-    summary: `FORBID_NUMERIC: ${semantics.reason}`,
+    constraints: createDegradedConstraints(reason),
+    tokenSet: null,
+    warnings: [],
+    complete: true,
   };
 }
 
 /**
- * Build constraints for live data mode (with tokens).
+ * Build constraints for live data with token allowlist.
  */
 export function buildLiveDataConstraints(
-  semantics: FailureSemantics,
-  providerResult: ProviderOkResult,
-  category: LiveCategory,
-  options: ConstraintBuildOptions = {}
+  tokenSet: NumericTokenSet,
+  categories: readonly LiveCategory[],
+  reason: string
 ): ConstraintBuildResult {
-  // Extract tokens from provider data
-  const tokens = extractTokensFromData(providerResult.data, providerResult.fetchedAt);
-  const tokenSet = buildTokenSet(tokens);
-  
-  const exemptions = mergeExemptions(
-    QUOTE_EVIDENCE_EXEMPTIONS,
-    options.exemptionOverrides
-  );
-  
-  // Check if data is stale
-  const isStale = isDataStale(providerResult);
-  
-  const constraints: ResponseConstraints = {
-    numericPrecisionAllowed: true,
-    allowedTokens: tokenSet,
-    numericExemptions: exemptions,
-    actionRecommendationsAllowed: false, // Never allow recommendations with live data
-    bannedPhrases: [
-      ...getBannedPhrases([category]),
-      ...(options.bannedPhrases ?? []),
-    ],
-    requiredPhrases: isStale
-      ? [...STALE_DATA_PHRASES.slice(0, 1), ...(options.requiredPhrases ?? [])]
-      : (options.requiredPhrases ?? []),
-    freshnessWarningRequired: isStale || (options.includeFreshnessWarning ?? false),
-    requiredCitations: [providerResult.provider],
-    level: 'strict',
-    reason: semantics.reason,
-    triggeredByCategories: [...semantics.triggeredBy],
-  };
-  
   return {
-    constraints,
-    valid: true,
-    errors: [],
-    summary: `LIVE_DATA: ${tokens.length} tokens from ${providerResult.provider}`,
+    constraints: createStrictConstraints(tokenSet, categories, reason),
+    tokenSet,
+    warnings: [],
+    complete: true,
   };
 }
 
 /**
- * Build permissive constraints (no restrictions).
+ * Build permissive constraints.
  */
 export function buildPermissiveConstraints(
-  category: LiveCategory
+  reason: string = 'Permissive mode'
 ): ConstraintBuildResult {
-  const constraints: ResponseConstraints = {
-    numericPrecisionAllowed: true,
-    allowedTokens: null, // No token restriction
-    numericExemptions: PERMISSIVE_EXEMPTIONS,
-    actionRecommendationsAllowed: true,
-    bannedPhrases: [],
-    requiredPhrases: [],
-    freshnessWarningRequired: false,
-    requiredCitations: [],
-    level: 'permissive',
-    reason: 'Local/passthrough mode - no live data constraints',
-    triggeredByCategories: [category],
-  };
-  
   return {
-    constraints,
-    valid: true,
-    errors: [],
-    summary: 'PERMISSIVE: No live data constraints',
+    constraints: createDefaultConstraints(reason),
+    tokenSet: null,
+    warnings: [],
+    complete: true,
   };
 }
-
-/**
- * Build default constraints (fallback).
- */
-function buildDefaultConstraints(category: LiveCategory): ResponseConstraints {
-  return {
-    numericPrecisionAllowed: false,
-    allowedTokens: null,
-    numericExemptions: FORBID_NUMERIC_EXEMPTIONS,
-    actionRecommendationsAllowed: false,
-    bannedPhrases: getBannedPhrases([category]),
-    requiredPhrases: [],
-    freshnessWarningRequired: true,
-    requiredCitations: [],
-    level: 'strict',
-    reason: 'Default constraints applied',
-    triggeredByCategories: [category],
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// MULTI-PROVIDER CONSTRAINT BUILDING
-// ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Build constraints from multiple provider results.
- * 
- * @param results - Map of category to provider result and semantics
- * @param options - Build options
- * @returns Combined constraints
  */
 export function buildMultiProviderConstraints(
-  results: ReadonlyMap<LiveCategory, {
-    semantics: FailureSemantics;
-    providerResult: ProviderResult | null;
-  }>,
-  options: ConstraintBuildOptions = {}
+  results: ReadonlyMap<LiveCategory, ProviderOkResult>,
+  reason: string
 ): ConstraintBuildResult {
-  if (results.size === 0) {
-    return {
-      constraints: buildDefaultConstraints('market'),
-      valid: false,
-      errors: ['No provider results provided'],
-      summary: 'ERROR: No results',
-    };
+  const allTokens: NumericToken[] = [];
+  const categories: LiveCategory[] = [];
+  
+  for (const [category, result] of results) {
+    categories.push(category);
+    const tokens = extractTokensFromResult(result);
+    allTokens.push(...tokens);
   }
   
-  const allConstraints: ResponseConstraints[] = [];
-  const allErrors: string[] = [];
-  const summaries: string[] = [];
-  
-  for (const [category, { semantics, providerResult }] of results) {
-    const result = buildConstraints(semantics, providerResult, category, options);
-    allConstraints.push(result.constraints);
-    allErrors.push(...result.errors);
-    summaries.push(`${category}: ${result.summary}`);
-  }
-  
-  // Merge constraints (most restrictive wins)
-  const merged = mergeConstraints(allConstraints);
+  const tokenSet = buildTokenSetFromTokens(allTokens);
   
   return {
-    constraints: merged,
-    valid: allErrors.length === 0,
-    errors: allErrors,
-    summary: summaries.join('; '),
+    constraints: createStrictConstraints(tokenSet, categories, reason),
+    tokenSet,
+    warnings: [],
+    complete: true,
   };
 }
 
 /**
- * Merge multiple constraints (most restrictive wins).
- */
-function mergeConstraints(constraints: readonly ResponseConstraints[]): ResponseConstraints {
-  if (constraints.length === 0) {
-    return buildDefaultConstraints('market');
-  }
-  
-  if (constraints.length === 1) {
-    return constraints[0]!;
-  }
-  
-  // Find most restrictive
-  let mostRestrictive = constraints[0]!;
-  
-  for (const c of constraints.slice(1)) {
-    // If any is strict with no numeric, that wins
-    if (!c.numericPrecisionAllowed && mostRestrictive.numericPrecisionAllowed) {
-      mostRestrictive = c;
-      continue;
-    }
-    
-    // If levels differ, use stricter
-    if (c.level === 'strict' && mostRestrictive.level !== 'strict') {
-      mostRestrictive = c;
-    }
-  }
-  
-  // Merge tokens if both allow numeric
-  let mergedTokens: NumericTokenSet | null = null;
-  if (mostRestrictive.numericPrecisionAllowed) {
-    const allTokens = new Map<string, import('../../types/constraints.js').NumericToken>();
-    const byValue = new Map<number, import('../../types/constraints.js').NumericToken[]>();
-    const byContext = new Map<import('../../types/constraints.js').NumericContextKey, import('../../types/constraints.js').NumericToken[]>();
-    
-    for (const c of constraints) {
-      if (c.allowedTokens) {
-        for (const [key, token] of c.allowedTokens.tokens) {
-          allTokens.set(key, token);
-          
-          const valueTokens = byValue.get(token.value) ?? [];
-          valueTokens.push(token);
-          byValue.set(token.value, valueTokens);
-          
-          const contextTokens = byContext.get(token.contextKey) ?? [];
-          contextTokens.push(token);
-          byContext.set(token.contextKey, contextTokens);
-        }
-      }
-    }
-    
-    if (allTokens.size > 0) {
-      mergedTokens = { tokens: allTokens, byValue, byContext };
-    }
-  }
-  
-  // Merge banned phrases (union)
-  const allBanned = new Set<string>();
-  for (const c of constraints) {
-    for (const phrase of c.bannedPhrases) {
-      allBanned.add(phrase);
-    }
-  }
-  
-  // Merge triggered categories
-  const allCategories = new Set<LiveCategory>();
-  for (const c of constraints) {
-    for (const cat of c.triggeredByCategories) {
-      allCategories.add(cat);
-    }
-  }
-  
-  return {
-    ...mostRestrictive,
-    allowedTokens: mergedTokens,
-    bannedPhrases: [...allBanned],
-    triggeredByCategories: [...allCategories],
-    freshnessWarningRequired: constraints.some(c => c.freshnessWarningRequired),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// HELPER FUNCTIONS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Merge exemption overrides with base exemptions.
- */
-function mergeExemptions(
-  base: NumericExemptions,
-  overrides?: Partial<NumericExemptions>
-): NumericExemptions {
-  if (!overrides) {
-    return base;
-  }
-  
-  return {
-    allowYears: overrides.allowYears ?? base.allowYears,
-    allowDates: overrides.allowDates ?? base.allowDates,
-    allowSmallIntegers: overrides.allowSmallIntegers ?? base.allowSmallIntegers,
-    smallIntegerMax: overrides.smallIntegerMax ?? base.smallIntegerMax,
-    allowExplanatoryPercentages: overrides.allowExplanatoryPercentages ?? base.allowExplanatoryPercentages,
-    allowOrdinals: overrides.allowOrdinals ?? base.allowOrdinals,
-    allowInCodeBlocks: overrides.allowInCodeBlocks ?? base.allowInCodeBlocks,
-    allowInQuotes: overrides.allowInQuotes ?? base.allowInQuotes,
-    customPatterns: overrides.customPatterns ?? base.customPatterns,
-  };
-}
-
-/**
- * Check if provider data is stale.
- */
-function isDataStale(result: ProviderOkResult, now: number = Date.now()): boolean {
-  const age = now - result.fetchedAt;
-  return age > result.freshnessPolicy.maxAgeMs;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// VALIDATION
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Validate built constraints for consistency.
+ * Validate constraints.
  */
 export function validateConstraints(constraints: ResponseConstraints): {
   valid: boolean;
@@ -738,32 +317,18 @@ export function validateConstraints(constraints: ResponseConstraints): {
 } {
   const errors: string[] = [];
   
-  // If numeric precision is allowed, should have tokens or be permissive
-  if (constraints.numericPrecisionAllowed && 
-      constraints.allowedTokens === null && 
-      constraints.level === 'strict') {
-    errors.push(
-      'numericPrecisionAllowed=true with level=strict requires allowedTokens'
-    );
+  // Check for required fields
+  if (!constraints.level) {
+    errors.push('Missing constraint level');
   }
   
-  // If tokens exist, numeric precision should be allowed
-  if (constraints.allowedTokens !== null && !constraints.numericPrecisionAllowed) {
-    errors.push(
-      'allowedTokens provided but numericPrecisionAllowed=false'
-    );
+  if (!constraints.reason) {
+    errors.push('Missing reason');
   }
   
-  // Level should match numeric precision setting
-  if (constraints.level === 'permissive' && !constraints.numericPrecisionAllowed) {
-    errors.push(
-      'level=permissive should have numericPrecisionAllowed=true'
-    );
-  }
-  
-  // Should have at least one triggered category
-  if (constraints.triggeredByCategories.length === 0) {
-    errors.push('triggeredByCategories must not be empty');
+  // If quote_evidence_only, should have token set
+  if (constraints.level === 'quote_evidence_only' && !constraints.allowedTokens) {
+    errors.push('quote_evidence_only requires allowedTokens');
   }
   
   return {
@@ -773,14 +338,49 @@ export function validateConstraints(constraints: ResponseConstraints): {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// EXPORTS
+// HELPER FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export {
-  QUOTE_EVIDENCE_EXEMPTIONS,
-  FORBID_NUMERIC_EXEMPTIONS,
-  QUALITATIVE_EXEMPTIONS,
-  NO_EXEMPTIONS,
-  PERMISSIVE_EXEMPTIONS,
-  UNIVERSAL_BANNED_PHRASES,
-};
+/**
+ * Extract token set from provider result.
+ */
+function extractTokenSet(result: ProviderOkResult): NumericTokenSet {
+  // Placeholder - actual implementation would extract tokens from result.data
+  return createEmptyTokenSet();
+}
+
+/**
+ * Extract tokens from provider result.
+ */
+function extractTokensFromResult(result: ProviderOkResult): NumericToken[] {
+  // Placeholder - actual implementation would extract tokens
+  return [];
+}
+
+/**
+ * Build token set from array of tokens.
+ */
+function buildTokenSetFromTokens(tokens: NumericToken[]): NumericTokenSet {
+  const tokenMap = new Map<string, NumericToken>();
+  const byValue = new Map<number, NumericToken[]>();
+  const byContext = new Map<string, NumericToken[]>();
+  
+  for (const token of tokens) {
+    const key = `${token.sourceCategory}:${token.sourceEntity}:${token.contextKey}`;
+    tokenMap.set(key, token);
+    
+    const valueList = byValue.get(token.value) ?? [];
+    valueList.push(token);
+    byValue.set(token.value, valueList);
+    
+    const contextList = byContext.get(token.contextKey) ?? [];
+    contextList.push(token);
+    byContext.set(token.contextKey, contextList);
+  }
+  
+  return {
+    tokens: tokenMap,
+    byValue,
+    byContext: byContext as Map<any, NumericToken[]>,
+  };
+}

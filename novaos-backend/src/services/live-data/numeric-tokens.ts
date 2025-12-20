@@ -451,17 +451,18 @@ export function formatCryptoData(
   lines.push(`${data.symbol} (${data.name}):`);
   
   // Price USD - ALWAYS included
-  const priceFormatted = formatCryptoPrice(data.priceUsd, 'USD');
+  const priceUsd = data.priceUsd ?? 0;
+  const priceFormatted = formatCryptoPrice(priceUsd, 'USD');
   
   tokens.push(createToken(
-    data.priceUsd,
+    priceUsd,
     'price_usd',
     category,
     entity,
     fetchedAt,
     priceFormatted,
     'USD',
-    data.priceUsd >= 1 ? 2 : 6
+    priceUsd >= 1 ? 2 : 6
   ));
   
   lines.push(`- Price: ${priceFormatted}`);
@@ -648,41 +649,41 @@ export function formatWeatherData(
   lines.push(`- Condition: ${data.condition}`);
   
   // Temperature - format based on preference
+  const tempC = data.temperatureCelsius ?? data.temperatureC ?? 0;
+  const tempF = data.temperatureFahrenheit ?? data.temperatureF ?? 0;
+  
   if (temperatureUnit === 'both') {
-    const tempFormatted = formatTemperatureDual(
-      data.temperatureCelsius,
-      data.temperatureFahrenheit
-    );
+    const tempFormatted = formatTemperatureDual(tempC, tempF);
     
     // Add both tokens
     tokens.push(createToken(
-      data.temperatureFahrenheit,
+      tempF,
       'temperature_f',
       category,
       entity,
       fetchedAt,
-      formatTemperature(data.temperatureFahrenheit, 'F'),
+      formatTemperature(tempF, 'F'),
       '°F',
       0
     ));
     
     tokens.push(createToken(
-      data.temperatureCelsius,
+      tempC,
       'temperature_c',
       category,
       entity,
       fetchedAt,
-      formatTemperature(data.temperatureCelsius, 'C'),
+      formatTemperature(tempC, 'C'),
       '°C',
       0
     ));
     
     lines.push(`- Temperature: ${tempFormatted}`);
   } else if (temperatureUnit === 'F') {
-    const tempFormatted = formatTemperature(data.temperatureFahrenheit, 'F');
+    const tempFormatted = formatTemperature(tempF, 'F');
     
     tokens.push(createToken(
-      data.temperatureFahrenheit,
+      tempF,
       'temperature_f',
       category,
       entity,
@@ -694,10 +695,10 @@ export function formatWeatherData(
     
     lines.push(`- Temperature: ${tempFormatted}`);
   } else {
-    const tempFormatted = formatTemperature(data.temperatureCelsius, 'C');
+    const tempFormatted = formatTemperature(tempC, 'C');
     
     tokens.push(createToken(
-      data.temperatureCelsius,
+      tempC,
       'temperature_c',
       category,
       entity,
@@ -772,11 +773,10 @@ export function formatWeatherData(
     const windSpeed = speedUnit === 'mph' ? data.windSpeedMph : data.windSpeedKph;
     
     if (windSpeed !== undefined) {
-      const windFormatted = formatWindSpeed(
-        windSpeed,
-        speedUnit,
-        data.windDirection
-      );
+      const windFormatted = formatWindSpeed(windSpeed, speedUnit);
+      const windWithDirection = data.windDirection 
+        ? `${windFormatted} ${data.windDirection}`
+        : windFormatted;
       
       tokens.push(createToken(
         windSpeed,
@@ -880,18 +880,20 @@ export function formatTimeData(
   lines.push(`Time in ${data.timezone}:`);
   
   // Local time - ALWAYS included
-  const localTimeFormatted = timeFormat === '12h'
-    ? formatTime12(data.localTime)
-    : formatTime24(data.localTime);
+  const localTime = data.localTime ?? '';
+  const utcTime = data.utcTime ?? '';
+  const unixTs = data.unixTimestamp ?? 0;
   
-  const localTimeWithZone = formatTimeWithZone(
-    data.localTime,
-    data.abbreviation ?? data.timezone,
-    timeFormat
-  );
+  const localTimeFormatted = localTime
+    ? (timeFormat === '12h' ? formatTime12(localTime) : formatTime24(localTime))
+    : 'N/A';
+  
+  const localTimeWithZone = localTime
+    ? formatTimeWithZone(localTime, data.abbreviation ?? data.timezone, timeFormat)
+    : 'N/A';
   
   // Extract hour and minute as tokens (for leak guard validation)
-  const timeComponents = parseTimeString(data.localTime);
+  const timeComponents = localTime ? parseTimeString(localTime) : null;
   if (timeComponents) {
     // The formatted time string itself
     tokens.push(createToken(
@@ -909,23 +911,27 @@ export function formatTimeData(
   lines.push(`- Local Time: ${localTimeWithZone}`);
   
   // UTC time
-  const utcTimeFormatted = timeFormat === '12h'
-    ? formatTime12(data.utcTime)
-    : formatTime24(data.utcTime);
+  const utcTimeFormatted = utcTime
+    ? (timeFormat === '12h' ? formatTime12(utcTime) : formatTime24(utcTime))
+    : 'N/A';
   
-  lines.push(`- UTC: ${formatTimeWithZone(data.utcTime, 'UTC', timeFormat)}`);
+  if (utcTime) {
+    lines.push(`- UTC: ${formatTimeWithZone(utcTime, 'UTC', timeFormat)}`);
+  }
   
   // Unix timestamp
-  tokens.push(createToken(
-    data.unixTimestamp,
-    'unix_timestamp',
-    category,
-    entity,
-    fetchedAt,
-    data.unixTimestamp.toString(),
-    undefined,
-    0
-  ));
+  if (unixTs) {
+    tokens.push(createToken(
+      unixTs,
+      'unix_timestamp',
+      category,
+      entity,
+      fetchedAt,
+      unixTs.toString(),
+      undefined,
+      0
+    ));
+  }
   
   // UTC offset
   lines.push(`- UTC Offset: ${data.utcOffset}`);

@@ -664,7 +664,8 @@ export function processResult(
   options?: TierAssignmentOptions
 ): SearchResultWithMeta {
   const domainInfo = parseDomain(result.url);
-  const tier = assignTier(result.domain, options);
+  const domain = (result as any).domain ?? domainInfo.normalized;
+  const tier = assignTier(domain, options);
   const extractedValues = extractValues(result);
   
   const isAuthoritative = tier === 'official' || tier === 'verified';

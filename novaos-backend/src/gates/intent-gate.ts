@@ -651,8 +651,8 @@ export function getFailOpenDefault(message: string): IntentClassification {
         'mental_health'
       );
     } else {
-      classification.primaryDomain = detectedDomains[0];
-      classification.domains = sortDomains(detectedDomains, detectedDomains[0]);
+      classification.primaryDomain = detectedDomains[0]!;
+      classification.domains = sortDomains(detectedDomains, detectedDomains[0]!);
     }
   }
 

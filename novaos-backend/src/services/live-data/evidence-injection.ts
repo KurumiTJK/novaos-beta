@@ -371,7 +371,7 @@ export function buildEvidenceXml(
   }
   
   // Data blocks
-  for (const item of evidencePack.contextItems) {
+  for (const item of evidencePack.contextItems ?? []) {
     const freshness = getFreshnessStatus(item);
     const attrs = buildDataAttributes(item, freshness, options);
     
@@ -635,7 +635,7 @@ export function buildPartialDataMessage(
   lines.push('');
   
   // Add available data
-  for (const item of evidencePack.contextItems) {
+  for (const item of evidencePack.contextItems ?? []) {
     const freshness = getFreshnessStatus(item);
     const attrs = buildDataAttributes(item, freshness, options);
     
@@ -700,7 +700,7 @@ export function validateInjection(result: AugmentedMessageResult): {
   }
   
   // If complete, should have context items
-  if (result.isComplete && result.evidencePack.contextItems.length === 0) {
+  if (result.isComplete && (result.evidencePack?.contextItems?.length ?? 0) === 0) {
     errors.push('Complete evidence should have context items');
   }
   

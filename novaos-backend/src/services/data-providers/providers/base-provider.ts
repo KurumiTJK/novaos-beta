@@ -424,7 +424,7 @@ export abstract class BaseProvider {
    */
   protected createOkResult(data: ProviderData, latencyMs: number = 0): ProviderOkResult {
     const category = this.categories[0] as LiveCategory;
-    const freshnessPolicy = DEFAULT_FRESHNESS_POLICIES.get(category) ?? {
+    const freshnessPolicy = DEFAULT_FRESHNESS_POLICIES[category] ?? {
       maxAgeMs: 60000,
       serveStaleOnError: true,
     };
