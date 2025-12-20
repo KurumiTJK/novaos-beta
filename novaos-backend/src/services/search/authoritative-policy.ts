@@ -928,10 +928,5 @@ export function quickConflictCheck(
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export {
-  LEADERSHIP_POLICY,
-  REGULATORY_POLICY,
-  SOFTWARE_POLICY,
-  SERVICE_STATUS_POLICY,
-  POLICIES,
-};
+// Note: LEADERSHIP_POLICY, REGULATORY_POLICY, SOFTWARE_POLICY, SERVICE_STATUS_POLICY, 
+// and POLICIES are already exported inline above

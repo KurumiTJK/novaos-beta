@@ -6,8 +6,9 @@
 import type {
   ResolvedEntity,
   ResolvedEntities,
-  LiveCategory,
-} from '../../types/index.js';
+} from '../../types/entities.js';
+
+import type { LiveCategory } from '../../types/categories.js';
 
 import type { BaseProvider, ProviderFetchParams } from './providers/base-provider.js';
 

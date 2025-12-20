@@ -78,11 +78,11 @@ export class TavilySearchProvider implements SearchProvider {
       };
 
       if (options?.includeDomains?.length) {
-        requestBody.include_domains = options.includeDomains;
+        requestBody.include_domains = [...options.includeDomains];
       }
 
       if (options?.excludeDomains?.length) {
-        requestBody.exclude_domains = options.excludeDomains;
+        requestBody.exclude_domains = [...options.excludeDomains];
       }
 
       const response = await fetch(`${this.baseUrl}/search`, {

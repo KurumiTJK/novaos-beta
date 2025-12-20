@@ -816,8 +816,4 @@ export function filterToOfficial(
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export {
-  OFFICIAL_DOMAINS,
-  DISALLOWED_DOMAINS,
-  CONTEXT_DOMAINS,
-};
+// Note: OFFICIAL_DOMAINS, DISALLOWED_DOMAINS, CONTEXT_DOMAINS are already exported inline above

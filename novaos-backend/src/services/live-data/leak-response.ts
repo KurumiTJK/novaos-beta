@@ -376,5 +376,5 @@ export function validateAllTemplates(): { valid: boolean; errors: string[] } {
 
 export {
   SAFE_RESPONSE_TEMPLATES,
-  INVALID_STATE_RESPONSE,
+  // INVALID_STATE_RESPONSE is already exported inline above
 };

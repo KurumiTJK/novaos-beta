@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CATEGORIES — Live Data Category Types
-// From Phase 1 types
+// FIXED: Added missing AuthoritativeCategory values
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -15,12 +15,17 @@ export type LiveCategory =
 
 /**
  * Categories requiring authoritative source verification.
+ * FIXED: Added leadership, regulatory, software, service_status
  */
 export type AuthoritativeCategory =
-  | 'legal'      // Laws, regulations
-  | 'medical'    // Medical information
-  | 'government' // Government data
-  | 'academic';  // Academic/scientific
+  | 'legal'          // Laws, regulations
+  | 'medical'        // Medical information
+  | 'government'     // Government data
+  | 'academic'       // Academic/scientific
+  | 'leadership'     // Company/org leadership
+  | 'regulatory'     // Regulatory filings (SEC, etc.)
+  | 'software'       // Software versions, releases
+  | 'service_status'; // Service status pages
 
 /**
  * All data categories (union of live and authoritative).
@@ -40,12 +45,17 @@ export const VALID_LIVE_CATEGORIES: ReadonlySet<LiveCategory> = new Set([
 
 /**
  * All valid authoritative categories as a Set.
+ * FIXED: Added new categories
  */
 export const VALID_AUTHORITATIVE_CATEGORIES: ReadonlySet<AuthoritativeCategory> = new Set([
   'legal',
   'medical',
   'government',
   'academic',
+  'leadership',
+  'regulatory',
+  'software',
+  'service_status',
 ]);
 
 /**
@@ -60,4 +70,14 @@ export function isLiveCategory(value: unknown): value is LiveCategory {
  */
 export function isAuthoritativeCategory(value: unknown): value is AuthoritativeCategory {
   return typeof value === 'string' && VALID_AUTHORITATIVE_CATEGORIES.has(value as AuthoritativeCategory);
+}
+
+/**
+ * Type guard for DataCategory.
+ */
+export function isDataCategory(value: unknown): value is DataCategory {
+  if (typeof value !== 'string') return false;
+  return value === 'general' || 
+         isLiveCategory(value) || 
+         isAuthoritativeCategory(value);
 }

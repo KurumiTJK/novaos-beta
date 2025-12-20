@@ -12,10 +12,11 @@ import type {
   ResolutionStatus,
   EntityMetadata,
   EntityResolutionTrace,
-  LiveCategory,
-} from '../../types/index.js';
+} from '../../types/entities.js';
 
-import { ENTITY_TO_CATEGORY } from '../../types/index.js';
+import type { LiveCategory } from '../../types/categories.js';
+
+import { ENTITY_TO_CATEGORY } from '../../types/entities.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // COMPANY NAME → TICKER MAPPINGS
@@ -300,7 +301,7 @@ export const CURRENCY_NAME_TO_CODE: Readonly<Record<string, string>> = {
   'RUPIAH': 'IDR',
   'INDONESIAN RUPIAH': 'IDR',
   'IDR': 'IDR',
-  'PESO': 'PHP',
+  // Note: 'PESO' ambiguous - use 'MEXICAN PESO' or 'PHILIPPINE PESO' for specific currencies
   'PHILIPPINE PESO': 'PHP',
   'PHP': 'PHP',
   'FORINT': 'HUF',

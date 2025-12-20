@@ -239,7 +239,7 @@ export async function orchestrate(
     // ─── STEP 7: DETERMINE FAILURE SEMANTICS ───
     const semantics = determineSemantics(state);
     
-    console.log(`[ORCHESTRATOR] Semantics: proceed=${semantics.modelProceed}, ` +
+    console.log(`[ORCHESTRATOR] Semantics: proceed=${semantics.proceed}, ` +
       `constraints=${semantics.constraintLevel}`);
     
     // ─── STEP 8: BUILD RESULT ───
@@ -404,7 +404,7 @@ async function fetchCategory(
     
     // Race provider call against timeout
     const result = await Promise.race([
-      provider.fetch(query),
+      provider.fetch({ query }),
       timeoutPromise,
     ]);
     
@@ -536,17 +536,17 @@ function determineSemantics(state: OrchestrationState): FailureSemantics {
   }
   
   // Partial failure - combine semantics from each category
-  const semanticsList: FailureSemantics[] = [];
+  const semanticsMap = new Map<LiveCategory, FailureSemantics>();
   
   for (const category of liveCategories) {
     const result = providerResults.get(category);
     const status: ProviderStatus = !result ? 'failed' :
       isProviderOk(result) ? 'verified' : 'failed';
     
-    semanticsList.push(getFailureSemantics(truthMode, category, status, fallbackMode));
+    semanticsMap.set(category, getFailureSemantics(truthMode, category, status, fallbackMode));
   }
   
-  return combineSemantics(semanticsList);
+  return combineSemantics(semanticsMap);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -570,8 +570,8 @@ function buildResult(
   const retrieval = buildRetrievalOutcome(state);
   
   // Build evidence pack (if we have data)
-  let evidence: EvidencePack | undefined;
-  let constraints: ResponseConstraints | undefined;
+  let evidence: EvidencePack | null = null;
+  let constraints: ResponseConstraints;
   
   if (successfulData.length > 0) {
     const evidenceResult = buildEvidenceFromData(successfulData, semantics, classification.liveCategories);
@@ -581,20 +581,30 @@ function buildResult(
     constraints = buildConstraintsFromSemantics(semantics, undefined, classification.liveCategories);
   }
   
+  // Build user options for blocked mode
+  const userOptions: LensUserOption[] | null = mode === 'blocked' ? [
+    { id: 'retry', label: 'Try Again', requiresAck: false, action: 'retry' },
+    { id: 'proceed', label: 'Proceed Without Data', requiresAck: true, action: 'proceed_degraded' },
+  ] : null;
+  
   return {
     classification,
+    entities: classification.entities ?? createEmptyEntities(),
+    mode,
+    truthMode: classification.truthMode,
     retrieval,
     evidence,
-    constraints: constraints ?? createDefaultConstraints('Default constraints'),
-    mode,
-    forceHigh: riskAssessment.forceHigh,
-    riskAssessment: {
-      score: riskAssessment.riskScore,
-      factors: [...riskAssessment.riskFactors],
-      stakes: riskAssessment.stakes,
-    },
-    processingTimeMs: Date.now() - startTime,
-    correlationId,
+    responseConstraints: constraints,
+    numericPrecisionAllowed: semantics.numericPrecisionAllowed,
+    actionRecommendationsAllowed: semantics.actionRecommendationsAllowed,
+    userOptions,
+    userMessage: semantics.userMessage,
+    fallbackMode: classification.fallbackMode,
+    freshnessWarning: semantics.systemMessage,
+    requiresFreshnessDisclaimer: !semantics.numericPrecisionAllowed,
+    verificationStatus: failedCategories.length === 0 ? 'verified' : 
+                        failedCategories.length === classification.liveCategories.length ? 'unverified' : 'partial',
+    sources: [],
   };
 }
 
@@ -606,7 +616,7 @@ function determineMode(
   failedCount: number,
   totalCount: number
 ): LensMode {
-  switch (semantics.modelProceed) {
+  switch (semantics.proceed) {
     case 'refuse':
       return 'blocked';
     case 'proceed_degraded':
@@ -640,29 +650,34 @@ function buildRetrievalOutcome(state: OrchestrationState): RetrievalOutcome {
     status = 'partial';
   }
   
-  // Build category results
+  // Build category results with proper structure
   const categoryResults = new Map<LiveCategory, {
-    status: 'success' | 'failed' | 'stale';
-    data?: ProviderData;
-    error?: string;
+    category: LiveCategory;
+    providerResult: ProviderResult;
+    entity: string;
+    latencyMs: number;
+    usedFallback: boolean;
   }>();
   
   for (const [category, result] of providerResults) {
-    if (!result) {
-      categoryResults.set(category, { status: 'failed', error: 'No response' });
-    } else if (isProviderOk(result)) {
-      categoryResults.set(category, { status: 'success', data: result.data });
-    } else {
-      categoryResults.set(category, { status: 'failed', error: result.error.message });
+    if (result) {
+      categoryResults.set(category, {
+        category,
+        providerResult: result,
+        entity: '',
+        latencyMs: 0,
+        usedFallback: false,
+      });
     }
   }
   
   return {
     status,
-    categoryResults,
+    categoryResults: categoryResults as any, // Type assertion needed due to complex generic
     successfulData,
     failedCategories,
     totalLatencyMs: Date.now() - startTime,
+    usedStaleData: false,
   };
 }
 
@@ -686,25 +701,30 @@ function buildEvidenceFromData(
   const allTokens = formattedResults.flatMap(r => [...r.tokens]);
   const tokenSet = buildTokenSet(allTokens);
   
-  // Build context items
-  const contextItems: ContextItem[] = formattedResults.map(r => ({
-    source: `${r.category}_provider`,
+  // Build context items with all required fields
+  const contextItems: ContextItem[] = formattedResults.map((r, i) => ({
+    id: `evidence-${i}-${Date.now()}`,
+    source: 'provider' as const,
     category: r.category,
     content: r.text,
     relevance: 1.0,
-    staleness: 0,
+    fetchedAt,
+    isStale: false,
   }));
   
   // Build constraints based on semantics
   const constraints = buildConstraintsFromSemantics(semantics, tokenSet, categories);
   
-  // Build evidence pack
+  // Build evidence pack with all required fields
   const evidence: EvidencePack = {
     contextItems,
     numericTokens: tokenSet,
     constraints,
     formattedContext,
     systemPromptAdditions: buildSystemPromptAdditions(semantics),
+    requiredCitations: [],
+    freshnessWarnings: semantics.systemMessage ? [semantics.systemMessage] : [],
+    isComplete: true,
   };
   
   return { evidence, constraints };
@@ -765,8 +785,9 @@ function buildSystemPromptAdditions(semantics: FailureSemantics): string[] {
     );
   }
   
-  if (semantics.freshnessWarning) {
-    additions.push(semantics.freshnessWarning);
+  // Use systemMessage for freshness warnings
+  if (semantics.systemMessage) {
+    additions.push(semantics.systemMessage);
   }
   
   return additions;
@@ -814,26 +835,32 @@ export function orchestrateSync(
   
   // Can't fetch data synchronously - return degraded
   const riskAssessment = assessRisk(classification);
+  const degradedConstraints = createDegradedConstraints('Sync mode - proceeding with qualitative information only');
   
   return {
     classification,
+    entities: classification.entities ?? createEmptyEntities(),
+    mode: 'degraded',
+    truthMode: classification.truthMode,
     retrieval: {
       status: 'skipped',
-      categoryResults: new Map(),
+      categoryResults: new Map() as any,
       successfulData: [],
       failedCategories: [...classification.liveCategories],
       totalLatencyMs: 0,
+      usedStaleData: false,
     },
-    constraints: createDegradedConstraints('Sync mode - proceeding with qualitative information only'),
-    mode: 'degraded',
-    forceHigh: riskAssessment.forceHigh,
-    riskAssessment: {
-      score: riskAssessment.riskScore,
-      factors: [...riskAssessment.riskFactors],
-      stakes: riskAssessment.stakes,
-    },
-    processingTimeMs: 0,
-    correlationId: generateCorrelationId(),
+    evidence: null,
+    responseConstraints: degradedConstraints,
+    numericPrecisionAllowed: false,
+    actionRecommendationsAllowed: false,
+    userOptions: null,
+    userMessage: null,
+    fallbackMode: classification.fallbackMode,
+    freshnessWarning: 'Unable to fetch live data in synchronous mode.',
+    requiresFreshnessDisclaimer: true,
+    verificationStatus: 'unverified',
+    sources: [],
   };
 }
 
