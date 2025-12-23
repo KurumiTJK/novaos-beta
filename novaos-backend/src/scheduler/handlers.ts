@@ -1,12 +1,29 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // JOB HANDLERS — Implementation of Scheduled Tasks
+// NovaOS Scheduler — Phase 15: Enhanced Scheduler & Jobs
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Contains handlers for:
+// - Core scheduler jobs (memory, sessions, cleanup, health)
+// - Sword system jobs (imported from ./jobs/ directory)
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { JobContext, JobResult, JobHandler, SparkReminder, GoalCheckin, JobId } from './types.js';
 import { getStore, storeManager, type KeyValueStore } from '../storage/index.js';
 import { getMemoryStore, MEMORY_DECAY_CONFIG } from '../core/memory/index.js';
 import { getSwordStore } from '../core/sword/index.js';
-import { getLogger } from '../logging/index.js';
+import { getLogger } from '../observability/logging/index.js';
+
+// Import Sword job handlers
+import {
+  generateDailyStepsHandler,
+  morningSparksHandler,
+  reminderEscalationHandler,
+  dayEndReconciliationHandler,
+  knownSourcesHealthHandler,
+  retentionEnforcementHandler,
+} from './jobs/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER
@@ -20,9 +37,6 @@ const logger = getLogger({ component: 'job-handlers' });
 
 /**
  * Applies decay to memory reinforcement scores.
- * 
- * Decay formula: score = score * (1 - decayRate * daysSinceAccess)
- * Memories below threshold are marked for deletion.
  */
 export const memoryDecayHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
   logger.info('Starting memory decay job', { executionId: context.executionId });
@@ -35,14 +49,11 @@ export const memoryDecayHandler: JobHandler = async (context: JobContext): Promi
   let memoriesDeleted = 0;
   
   try {
-    // Get all user IDs with memories
     const userKeys = await store.keys('memory:user:*:memories');
     const userIds = userKeys.map(key => {
       const match = key.match(/memory:user:([^:]+):memories/);
       return match?.[1];
     }).filter((id): id is string => !!id);
-    
-    logger.info(`Processing ${userIds.length} users for memory decay`);
     
     for (const userId of userIds) {
       try {
@@ -55,18 +66,15 @@ export const memoryDecayHandler: JobHandler = async (context: JobContext): Promi
           const lastAccess = new Date(memory.lastAccessedAt).getTime();
           const daysSinceAccess = (now - lastAccess) / (1000 * 60 * 60 * 24);
           
-          // Apply decay using category-specific multiplier
           const baseDecay = MEMORY_DECAY_CONFIG.baseDecayRate;
           const categoryMultiplier = MEMORY_DECAY_CONFIG.categoryDecay[memory.category] ?? 1.0;
           const decay = baseDecay * categoryMultiplier * daysSinceAccess;
           const newScore = Math.max(0, memory.reinforcementScore - decay);
           
           if (newScore < MEMORY_DECAY_CONFIG.forgetThreshold) {
-            // Delete memory
             await memoryStore.deleteMemory(memory.id, userId);
             memoriesDeleted++;
           } else if (newScore !== memory.reinforcementScore) {
-            // Update score - use type assertion for extended properties
             await memoryStore.updateMemory(memory.id, userId, {
               reinforcementScore: Math.round(newScore),
             } as Parameters<typeof memoryStore.updateMemory>[2]);
@@ -79,13 +87,6 @@ export const memoryDecayHandler: JobHandler = async (context: JobContext): Promi
         logger.warn(msg);
       }
     }
-    
-    logger.info('Memory decay completed', {
-      executionId: context.executionId,
-      itemsProcessed,
-      memoriesDecayed,
-      memoriesDeleted,
-    });
     
     return {
       success: errors.length === 0,
@@ -109,9 +110,6 @@ export const memoryDecayHandler: JobHandler = async (context: JobContext): Promi
 // SPARK REMINDERS HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Generates reminder notifications for pending and expiring sparks.
- */
 export const sparkRemindersHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
   logger.info('Starting spark reminders job', { executionId: context.executionId });
   
@@ -122,7 +120,6 @@ export const sparkRemindersHandler: JobHandler = async (context: JobContext): Pr
   const reminders: SparkReminder[] = [];
   
   try {
-    // Get all user IDs with active sparks
     const sparkKeys = await store.keys('sword:user:*:sparks');
     const userIds = sparkKeys.map(key => {
       const match = key.match(/sword:user:([^:]+):sparks/);
@@ -144,7 +141,6 @@ export const sparkRemindersHandler: JobHandler = async (context: JobContext): Pr
         const expiresAt = activeSpark.expiresAt ? new Date(activeSpark.expiresAt).getTime() : null;
         const age = now - createdAt;
         
-        // Determine reminder type
         let reminderType: SparkReminder['reminderType'] | null = null;
         
         if (expiresAt && (expiresAt - now) < oneHour) {
@@ -165,11 +161,10 @@ export const sparkRemindersHandler: JobHandler = async (context: JobContext): Pr
             delivered: false,
           };
           
-          // Store reminder for notification system
           await store.set(
             `reminders:spark:${userId}:${activeSpark.id}`,
             JSON.stringify(reminder),
-            3600 // 1 hour TTL
+            3600
           );
           
           reminders.push(reminder);
@@ -180,12 +175,6 @@ export const sparkRemindersHandler: JobHandler = async (context: JobContext): Pr
         logger.warn(msg);
       }
     }
-    
-    logger.info('Spark reminders completed', {
-      executionId: context.executionId,
-      itemsProcessed,
-      remindersGenerated: reminders.length,
-    });
     
     return {
       success: errors.length === 0,
@@ -216,9 +205,6 @@ export const sparkRemindersHandler: JobHandler = async (context: JobContext): Pr
 // GOAL DEADLINE CHECK-INS HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Monitors goal deadlines and generates check-in prompts.
- */
 export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
   logger.info('Starting goal deadline check-ins job', { executionId: context.executionId });
   
@@ -229,7 +215,6 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
   const checkins: GoalCheckin[] = [];
   
   try {
-    // Get all user IDs with goals
     const goalKeys = await store.keys('sword:user:*:goals');
     const userIds = goalKeys.map(key => {
       const match = key.match(/sword:user:([^:]+):goals/);
@@ -242,46 +227,27 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
     
     for (const userId of userIds) {
       try {
-        const goals = await swordStore.getUserGoals(userId, 'active');
+        const goals = await swordStore.getGoals(userId);
         
         for (const goal of goals) {
+          if (goal.status !== 'active') continue;
+          
           itemsProcessed++;
           
-          const path = await swordStore.getPath(goal.id, userId);
-          if (!path) continue;
+          const deadline = goal.deadline ? new Date(goal.deadline).getTime() : null;
+          const daysUntilDeadline = deadline ? Math.ceil((deadline - now) / oneDay) : undefined;
           
           let checkInType: GoalCheckin['checkInType'] | null = null;
           
-          // Check deadline
-          if (goal.targetDate) {
-            const deadline = new Date(goal.targetDate).getTime();
-            const daysRemaining = Math.ceil((deadline - now) / oneDay);
-            
-            if (daysRemaining <= 1) {
-              checkInType = 'deadline_approaching';
-            } else if (daysRemaining <= 7 && goal.progress < 80) {
-              checkInType = 'deadline_approaching';
-            }
-          }
-          
-          // Check for stalled progress
-          if (!checkInType) {
-            const lastUpdated = new Date(goal.updatedAt).getTime();
-            const daysSinceUpdate = (now - lastUpdated) / oneDay;
-            
-            if (daysSinceUpdate > 7 && goal.progress < 100) {
+          if (daysUntilDeadline !== undefined && daysUntilDeadline <= 3) {
+            checkInType = 'deadline_approaching';
+          } else if (goal.progress >= 50 && goal.progress < 100) {
+            checkInType = 'milestone';
+          } else if (goal.lastActivityAt) {
+            const lastActivity = new Date(goal.lastActivityAt).getTime();
+            if (now - lastActivity > oneWeek) {
               checkInType = 'stalled';
             }
-          }
-          
-          // Check for milestone (progress % 25)
-          if (!checkInType && goal.progress > 0 && goal.progress % 25 === 0) {
-            checkInType = 'milestone';
-          }
-          
-          // Regular progress check
-          if (!checkInType && goal.progress > 0) {
-            checkInType = 'progress';
           }
           
           if (checkInType) {
@@ -289,19 +255,16 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
               userId,
               goalId: goal.id,
               goalTitle: goal.title,
-              progress: goal.progress,
-              daysUntilDeadline: goal.targetDate 
-                ? Math.ceil((new Date(goal.targetDate).getTime() - now) / oneDay)
-                : undefined,
-              blockers: path.blockers.map(b => b.description),
+              progress: goal.progress ?? 0,
+              daysUntilDeadline,
+              blockers: [],
               checkInType,
             };
             
-            // Store check-in for notification system
             await store.set(
               `checkins:goal:${userId}:${goal.id}`,
               JSON.stringify(checkin),
-              86400 // 24 hour TTL
+              86400
             );
             
             checkins.push(checkin);
@@ -314,18 +277,12 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
       }
     }
     
-    logger.info('Goal deadline check-ins completed', {
-      executionId: context.executionId,
-      itemsProcessed,
-      checkinsGenerated: checkins.length,
-    });
-    
     return {
       success: errors.length === 0,
       duration: Date.now() - context.startedAt,
       itemsProcessed,
       errors: errors.length > 0 ? errors : undefined,
-      metadata: {
+      metadata: { 
         checkinsGenerated: checkins.length,
         byType: {
           progress: checkins.filter(c => c.checkInType === 'progress').length,
@@ -350,12 +307,7 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
 // SESSION CLEANUP HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Removes expired session data.
- */
 export const sessionCleanupHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
-  logger.info('Starting session cleanup job', { executionId: context.executionId });
-  
   const store = getStore();
   const errors: string[] = [];
   let itemsProcessed = 0;
@@ -364,33 +316,25 @@ export const sessionCleanupHandler: JobHandler = async (context: JobContext): Pr
   try {
     const sessionKeys = await store.keys('session:*');
     const now = Date.now();
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+    const maxAge = 24 * 60 * 60 * 1000;
     
     for (const key of sessionKeys) {
       itemsProcessed++;
-      
       try {
         const data = await store.get(key);
         if (!data) continue;
         
         const session = JSON.parse(data);
-        const lastActivity = new Date(session.lastActivity || session.createdAt).getTime();
+        const lastActivity = session.lastActivity ?? session.createdAt;
         
         if (now - lastActivity > maxAge) {
           await store.delete(key);
           sessionsDeleted++;
         }
       } catch (error) {
-        const msg = `Error processing session ${key}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        errors.push(msg);
+        errors.push(`Error processing session ${key}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
-    
-    logger.info('Session cleanup completed', {
-      executionId: context.executionId,
-      itemsProcessed,
-      sessionsDeleted,
-    });
     
     return {
       success: errors.length === 0,
@@ -400,7 +344,6 @@ export const sessionCleanupHandler: JobHandler = async (context: JobContext): Pr
       metadata: { sessionsDeleted },
     };
   } catch (error) {
-    logger.error('Session cleanup job failed', error instanceof Error ? error : new Error(String(error)));
     return {
       success: false,
       duration: Date.now() - context.startedAt,
@@ -414,12 +357,7 @@ export const sessionCleanupHandler: JobHandler = async (context: JobContext): Pr
 // CONVERSATION CLEANUP HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Archives old conversations and removes orphaned data.
- */
 export const conversationCleanupHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
-  logger.info('Starting conversation cleanup job', { executionId: context.executionId });
-  
   const store = getStore();
   const errors: string[] = [];
   let itemsProcessed = 0;
@@ -429,54 +367,33 @@ export const conversationCleanupHandler: JobHandler = async (context: JobContext
   try {
     const conversationKeys = await store.keys('conversation:*');
     const now = Date.now();
-    const archiveAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const archiveAge = 30 * 24 * 60 * 60 * 1000;
     
     for (const key of conversationKeys) {
-      // Skip message keys
-      if (key.includes(':messages')) continue;
+      if (key.includes(':messages') || key.includes(':index')) continue;
       
       itemsProcessed++;
-      
       try {
         const data = await store.get(key);
         if (!data) {
-          // Orphaned key
           await store.delete(key);
           orphansDeleted++;
           continue;
         }
         
         const conversation = JSON.parse(data);
-        const lastActivity = new Date(conversation.updatedAt || conversation.createdAt).getTime();
+        const lastActivity = new Date(conversation.updatedAt ?? conversation.createdAt).getTime();
         
         if (now - lastActivity > archiveAge) {
-          // Archive conversation (move to archive namespace)
-          const conversationId = key.replace('conversation:', '');
-          await store.set(`archive:conversation:${conversationId}`, data, 365 * 24 * 60 * 60); // 1 year TTL
+          const archiveKey = key.replace('conversation:', 'archive:conversation:');
+          await store.set(archiveKey, data, 365 * 24 * 60 * 60);
           await store.delete(key);
-          
-          // Archive messages too
-          const messageKey = `${key}:messages`;
-          const messages = await store.get(messageKey);
-          if (messages) {
-            await store.set(`archive:${messageKey}`, messages, 365 * 24 * 60 * 60);
-            await store.delete(messageKey);
-          }
-          
           conversationsArchived++;
         }
       } catch (error) {
-        const msg = `Error processing conversation ${key}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        errors.push(msg);
+        errors.push(`Error processing conversation ${key}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
-    
-    logger.info('Conversation cleanup completed', {
-      executionId: context.executionId,
-      itemsProcessed,
-      conversationsArchived,
-      orphansDeleted,
-    });
     
     return {
       success: errors.length === 0,
@@ -486,7 +403,6 @@ export const conversationCleanupHandler: JobHandler = async (context: JobContext
       metadata: { conversationsArchived, orphansDeleted },
     };
   } catch (error) {
-    logger.error('Conversation cleanup job failed', error instanceof Error ? error : new Error(String(error)));
     return {
       success: false,
       duration: Date.now() - context.startedAt,
@@ -500,53 +416,25 @@ export const conversationCleanupHandler: JobHandler = async (context: JobContext
 // EXPIRED TOKENS CLEANUP HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Removes expired auth and ack tokens.
- */
 export const expiredTokensCleanupHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
-  logger.info('Starting expired tokens cleanup job', { executionId: context.executionId });
-  
   const store = getStore();
-  const errors: string[] = [];
   let itemsProcessed = 0;
   let tokensDeleted = 0;
   
   try {
-    // Clean up ack tokens
     const ackKeys = await store.keys('ack:*');
     for (const key of ackKeys) {
       itemsProcessed++;
-      try {
-        const exists = await store.exists(key);
-        // If Redis TTL has expired, key won't exist
-        if (!exists) {
-          tokensDeleted++;
-        }
-      } catch {
-        // Key already expired
-        tokensDeleted++;
-      }
+      const exists = await store.exists(key);
+      if (!exists) tokensDeleted++;
     }
     
-    // Clean up nonce tokens
     const nonceKeys = await store.keys('nonce:*');
     for (const key of nonceKeys) {
       itemsProcessed++;
-      try {
-        const exists = await store.exists(key);
-        if (!exists) {
-          tokensDeleted++;
-        }
-      } catch {
-        tokensDeleted++;
-      }
+      const exists = await store.exists(key);
+      if (!exists) tokensDeleted++;
     }
-    
-    logger.info('Expired tokens cleanup completed', {
-      executionId: context.executionId,
-      itemsProcessed,
-      tokensDeleted,
-    });
     
     return {
       success: true,
@@ -555,7 +443,6 @@ export const expiredTokensCleanupHandler: JobHandler = async (context: JobContex
       metadata: { tokensDeleted },
     };
   } catch (error) {
-    logger.error('Expired tokens cleanup job failed', error instanceof Error ? error : new Error(String(error)));
     return {
       success: false,
       duration: Date.now() - context.startedAt,
@@ -569,22 +456,14 @@ export const expiredTokensCleanupHandler: JobHandler = async (context: JobContex
 // METRICS AGGREGATION HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Aggregates detailed metrics into summary data.
- */
 export const metricsAggregationHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
-  logger.info('Starting metrics aggregation job', { executionId: context.executionId });
-  
   const store = getStore();
   const now = Date.now();
-  const fiveMinutes = 5 * 60 * 1000;
   
   try {
-    // Aggregate request metrics
     const requestCount = await store.get('metrics:requests:count') ?? '0';
     const errorCount = await store.get('metrics:errors:count') ?? '0';
     
-    // Store aggregated snapshot
     const snapshot = {
       timestamp: new Date().toISOString(),
       window: '5m',
@@ -595,16 +474,9 @@ export const metricsAggregationHandler: JobHandler = async (context: JobContext)
         : 0,
     };
     
-    // Store in time-series format
     const hourKey = `metrics:hourly:${Math.floor(now / (60 * 60 * 1000))}`;
     await store.lpush(hourKey, JSON.stringify(snapshot));
-    await store.ltrim(hourKey, 0, 11); // Keep 12 snapshots per hour
-    
-    // Reset counters (optional, depends on strategy)
-    // await store.set('metrics:requests:count', '0');
-    // await store.set('metrics:errors:count', '0');
-    
-    logger.info('Metrics aggregation completed', { executionId: context.executionId });
+    await store.ltrim(hourKey, 0, 11);
     
     return {
       success: true,
@@ -613,7 +485,6 @@ export const metricsAggregationHandler: JobHandler = async (context: JobContext)
       metadata: { snapshot },
     };
   } catch (error) {
-    logger.error('Metrics aggregation job failed', error instanceof Error ? error : new Error(String(error)));
     return {
       success: false,
       duration: Date.now() - context.startedAt,
@@ -626,32 +497,22 @@ export const metricsAggregationHandler: JobHandler = async (context: JobContext)
 // HEALTH CHECK HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Internal health monitoring.
- */
 export const healthCheckHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
   const store = getStore();
   const checks: Record<string, boolean> = {};
   
   try {
-    // Storage check
     const testKey = `health:${context.executionId}`;
     await store.set(testKey, 'test', 10);
     const value = await store.get(testKey);
     checks['storage'] = value === 'test';
     await store.delete(testKey);
     
-    // Memory check
     const memUsage = process.memoryUsage();
     const heapUsedPercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
     checks['memory'] = heapUsedPercent < 90;
     
-    // All checks passed?
     const allPassed = Object.values(checks).every(v => v);
-    
-    if (!allPassed) {
-      logger.warn('Health check detected issues', { checks });
-    }
     
     return {
       success: allPassed,
@@ -664,7 +525,6 @@ export const healthCheckHandler: JobHandler = async (context: JobContext): Promi
       },
     };
   } catch (error) {
-    logger.error('Health check failed', error instanceof Error ? error : new Error(String(error)));
     return {
       success: false,
       duration: Date.now() - context.startedAt,
@@ -678,6 +538,7 @@ export const healthCheckHandler: JobHandler = async (context: JobContext): Promi
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export const JOB_HANDLERS: Record<JobId, JobHandler> = {
+  // Core handlers
   memory_decay: memoryDecayHandler,
   spark_reminders: sparkRemindersHandler,
   goal_deadline_checkins: goalDeadlineCheckinsHandler,
@@ -686,11 +547,25 @@ export const JOB_HANDLERS: Record<JobId, JobHandler> = {
   expired_tokens_cleanup: expiredTokensCleanupHandler,
   metrics_aggregation: metricsAggregationHandler,
   health_check: healthCheckHandler,
+  // Sword handlers (Phase 15)
+  generate_daily_steps: generateDailyStepsHandler,
+  morning_sparks: morningSparksHandler,
+  reminder_escalation: reminderEscalationHandler,
+  day_end_reconciliation: dayEndReconciliationHandler,
+  known_sources_health: knownSourcesHealthHandler,
+  retention_enforcement: retentionEnforcementHandler,
 };
 
-/**
- * Get handler for a job ID.
- */
 export function getJobHandler(jobId: JobId): JobHandler | undefined {
   return JOB_HANDLERS[jobId];
 }
+
+// Re-export Sword handlers
+export {
+  generateDailyStepsHandler,
+  morningSparksHandler,
+  reminderEscalationHandler,
+  dayEndReconciliationHandler,
+  knownSourcesHealthHandler,
+  retentionEnforcementHandler,
+};
