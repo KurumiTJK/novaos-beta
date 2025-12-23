@@ -1,164 +1,124 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST SETUP — Global Test Configuration
-// NovaOS Sword System v3.0 — Phase 17: Integration & Testing
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// This file runs before all tests and sets up:
-//   - Environment variables for testing
-//   - Global mocks (Redis, LLM)
-//   - Test utilities
-//   - Cleanup handlers
-//
+// NovaOS Phase 17 — Integration Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { resetMockRedis } from './mocks/redis.js';
-import { resetMockLLM } from './mocks/llm.js';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// ENVIRONMENT SETUP
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Set up test environment variables.
- */
-function setupTestEnvironment(): void {
-  // Node environment
-  process.env.NODE_ENV = 'test';
-  
-  // Disable Redis for tests (use in-memory mock)
-  process.env.REDIS_DISABLED = 'true';
-  
-  // Use mock LLM provider
-  process.env.USE_MOCK_PROVIDER = 'true';
-  
-  // Disable metrics collection in tests
-  process.env.METRICS_DISABLED = 'true';
-  
-  // Disable audit logging in tests
-  process.env.AUDIT_DISABLED = 'true';
-  
-  // Set test-specific timeouts
-  process.env.LLM_TIMEOUT_MS = '5000';
-  process.env.REDIS_COMMAND_TIMEOUT_MS = '1000';
-  
-  // JWT secret for test tokens
-  process.env.JWT_SECRET = 'test-jwt-secret-do-not-use-in-production';
-  process.env.JWT_ISSUER = 'novaos-test';
-  process.env.JWT_AUDIENCE = 'novaos-test';
-  
-  // Encryption key for tests
-  process.env.ENCRYPTION_KEY = 'test-encryption-key-32-chars-xx';
-  process.env.ENCRYPTION_KEY_ID = 'test-key-1';
-}
+import { beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // GLOBAL SETUP
 // ─────────────────────────────────────────────────────────────────────────────────
 
-beforeAll(async () => {
-  // Set up environment
-  setupTestEnvironment();
+beforeAll(() => {
+  // Set test environment
+  process.env.NODE_ENV = 'test';
   
-  // Suppress console output during tests (optional)
-  // Uncomment to reduce noise in test output
+  // Disable console logs during tests (optional)
   // vi.spyOn(console, 'log').mockImplementation(() => {});
   // vi.spyOn(console, 'info').mockImplementation(() => {});
-  // vi.spyOn(console, 'debug').mockImplementation(() => {});
-  
-  // Allow console.error and console.warn for debugging
+});
+
+afterAll(() => {
+  // Cleanup
+  vi.restoreAllMocks();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// PER-TEST CLEANUP
+// PER-TEST SETUP
 // ─────────────────────────────────────────────────────────────────────────────────
 
-afterEach(async () => {
-  // Clear all mocks between tests
+beforeEach(() => {
+  // Reset mocks before each test
   vi.clearAllMocks();
   
-  // Reset mock Redis state
-  resetMockRedis();
-  
-  // Reset mock LLM state
-  resetMockLLM();
+  // Reset timers if using fake timers
+  // vi.useRealTimers();
+});
+
+afterEach(() => {
+  // Cleanup after each test
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// GLOBAL TEARDOWN
+// GLOBAL TEST UTILITIES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-afterAll(async () => {
-  // Restore all mocks
-  vi.restoreAllMocks();
+/**
+ * Wait for a condition to be true
+ */
+export async function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  timeout = 5000,
+  interval = 100
+): Promise<void> {
+  const start = Date.now();
   
-  // Any global cleanup
-});
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// TEST UTILITIES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Wait for a specified duration.
- * Useful for testing time-sensitive operations.
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  while (Date.now() - start < timeout) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  
+  throw new Error(`waitFor timed out after ${timeout}ms`);
 }
 
 /**
- * Wait for next tick.
+ * Create a deferred promise for testing async flows
  */
-export function nextTick(): Promise<void> {
-  return new Promise(resolve => setImmediate(resolve));
-}
-
-/**
- * Create a deferred promise for testing async flows.
- */
-export function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: Error) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (error: Error) => void;
+export function createDeferred<T>() {
+  let resolve: (value: T) => void;
+  let reject: (error: Error) => void;
   
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
   });
   
-  return { promise, resolve, reject };
+  return { promise, resolve: resolve!, reject: reject! };
 }
 
 /**
- * Generate a random string for unique test data.
+ * Sleep for a specified duration
  */
-export function randomString(length: number = 8): string {
-  return Math.random().toString(36).substring(2, 2 + length);
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Get a date string in YYYY-MM-DD format.
+ * Create a mock function that resolves after a delay
  */
-export function toDateString(date: Date): string {
-  return date.toISOString().split('T')[0]!;
+export function createDelayedMock<T>(value: T, delayMs: number) {
+  return vi.fn(async () => {
+    await sleep(delayMs);
+    return value;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// ASSERTION HELPERS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Assert that a promise rejects with a specific error code
+ */
+export async function expectError(
+  promise: Promise<unknown>,
+  expectedCode: string
+): Promise<void> {
+  try {
+    await promise;
+    throw new Error(`Expected promise to reject with ${expectedCode}`);
+  } catch (error: any) {
+    if (error.code !== expectedCode) {
+      throw new Error(`Expected error code ${expectedCode}, got ${error.code}`);
+    }
+  }
 }
 
 /**
- * Get today's date string in YYYY-MM-DD format.
+ * Assert that a value is within a range
  */
-export function todayString(): string {
-  return toDateString(new Date());
-}
-
-/**
- * Get a date offset from today.
- */
-export function dateOffset(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return toDateString(date);
+export function expectInRange(value: number, min: number, max: number): void {
+  if (value < min || value > max) {
+    throw new Error(`Expected ${value} to be between ${min} and ${max}`);
+  }
 }

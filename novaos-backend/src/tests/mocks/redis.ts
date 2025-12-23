@@ -1,19 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // MOCK REDIS — In-Memory Redis Mock for Testing
-// NovaOS Sword System v3.0 — Phase 17: Integration & Testing
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// Wraps the existing MemoryRedisClient for test isolation.
-// Provides additional test utilities:
-//   - State inspection
-//   - Manual state manipulation
-//   - Reset between tests
-//
+// NovaOS Phase 17 — Integration Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { vi } from 'vitest';
-import type { RedisStore, ConnectionState } from '../../infrastructure/redis/client.js';
-import type { RateLimitResult, LockResult, ConditionalResult } from '../../infrastructure/redis/scripts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // MOCK REDIS CLIENT
@@ -21,130 +11,115 @@ import type { RateLimitResult, LockResult, ConditionalResult } from '../../infra
 
 /**
  * In-memory Redis mock for testing.
- * Mirrors the MemoryRedisClient from Phase 4 with test utilities.
+ * Self-contained - no external dependencies.
  */
-export class MockRedisClient implements RedisStore {
+export class MockRedisClient {
   private data = new Map<string, { value: string; expiresAt?: number }>();
   private hashes = new Map<string, Map<string, string>>();
   private lists = new Map<string, string[]>();
   private sets = new Map<string, Set<string>>();
-  private zsets = new Map<string, Map<string, number>>();
-  private locks = new Map<string, { owner: string; expiresAt: number }>();
-  private state: ConnectionState = 'disconnected';
-  private fencingToken = 0;
-  
+  private sortedSets = new Map<string, Map<string, number>>();
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Connection
+  // STRING OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────────
-  
-  async connect(): Promise<void> {
-    this.state = 'connected';
-  }
-  
-  async disconnect(): Promise<void> {
-    this.state = 'disconnected';
-  }
-  
-  getState(): ConnectionState {
-    return this.state;
-  }
-  
-  async ping(): Promise<boolean> {
-    return this.state === 'connected';
-  }
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Basic Operations
-  // ─────────────────────────────────────────────────────────────────────────────
-  
+
   async get(key: string): Promise<string | null> {
-    this.cleanExpired();
     const entry = this.data.get(key);
-    return entry?.value ?? null;
+    if (!entry) return null;
+    if (entry.expiresAt && Date.now() > entry.expiresAt) {
+      this.data.delete(key);
+      return null;
+    }
+    return entry.value;
   }
-  
+
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined;
-    this.data.set(key, { value, expiresAt });
+    this.data.set(key, {
+      value,
+      expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined,
+    });
   }
-  
-  async delete(key: string): Promise<boolean> {
+
+  async del(key: string): Promise<boolean> {
     return this.data.delete(key);
   }
-  
+
   async exists(key: string): Promise<boolean> {
-    this.cleanExpired();
-    return this.data.has(key);
-  }
-  
-  async incr(key: string): Promise<number> {
-    const current = parseInt(await this.get(key) ?? '0', 10);
-    const next = current + 1;
-    await this.set(key, next.toString());
-    return next;
-  }
-  
-  async expire(key: string, ttlSeconds: number): Promise<void> {
     const entry = this.data.get(key);
-    if (entry) {
-      entry.expiresAt = Date.now() + ttlSeconds * 1000;
+    if (!entry) return false;
+    if (entry.expiresAt && Date.now() > entry.expiresAt) {
+      this.data.delete(key);
+      return false;
     }
+    return true;
   }
-  
+
+  async incr(key: string): Promise<number> {
+    const current = await this.get(key);
+    const newValue = (parseInt(current || '0', 10) + 1).toString();
+    await this.set(key, newValue);
+    return parseInt(newValue, 10);
+  }
+
+  async expire(key: string, seconds: number): Promise<boolean> {
+    const entry = this.data.get(key);
+    if (!entry) return false;
+    entry.expiresAt = Date.now() + seconds * 1000;
+    return true;
+  }
+
+  async ttl(key: string): Promise<number> {
+    const entry = this.data.get(key);
+    if (!entry) return -2;
+    if (!entry.expiresAt) return -1;
+    return Math.ceil((entry.expiresAt - Date.now()) / 1000);
+  }
+
   async keys(pattern: string): Promise<string[]> {
-    this.cleanExpired();
     const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-    return Array.from(this.data.keys()).filter(k => regex.test(k));
+    return Array.from(this.data.keys()).filter((k) => regex.test(k));
   }
-  
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Hash Operations
+  // HASH OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────────
-  
+
+  async hget(key: string, field: string): Promise<string | null> {
+    return this.hashes.get(key)?.get(field) ?? null;
+  }
+
   async hset(key: string, field: string, value: string): Promise<void> {
     if (!this.hashes.has(key)) {
       this.hashes.set(key, new Map());
     }
     this.hashes.get(key)!.set(field, value);
   }
-  
-  async hget(key: string, field: string): Promise<string | null> {
-    return this.hashes.get(key)?.get(field) ?? null;
-  }
-  
-  async hgetall(key: string): Promise<Record<string, string> | null> {
+
+  async hgetall(key: string): Promise<Record<string, string>> {
     const hash = this.hashes.get(key);
-    if (!hash || hash.size === 0) return null;
+    if (!hash) return {};
     return Object.fromEntries(hash);
   }
-  
-  async hmset(key: string, fields: Record<string, string>): Promise<void> {
+
+  async hdel(key: string, field: string): Promise<boolean> {
+    return this.hashes.get(key)?.delete(field) ?? false;
+  }
+
+  async hmset(key: string, data: Record<string, string>): Promise<void> {
     if (!this.hashes.has(key)) {
       this.hashes.set(key, new Map());
     }
     const hash = this.hashes.get(key)!;
-    for (const [field, value] of Object.entries(fields)) {
+    for (const [field, value] of Object.entries(data)) {
       hash.set(field, value);
     }
   }
-  
-  async hdel(key: string, field: string): Promise<boolean> {
-    return this.hashes.get(key)?.delete(field) ?? false;
-  }
-  
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // List Operations
+  // LIST OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────────
-  
-  async rpush(key: string, ...values: string[]): Promise<number> {
-    if (!this.lists.has(key)) {
-      this.lists.set(key, []);
-    }
-    const list = this.lists.get(key)!;
-    list.push(...values);
-    return list.length;
-  }
-  
+
   async lpush(key: string, ...values: string[]): Promise<number> {
     if (!this.lists.has(key)) {
       this.lists.set(key, []);
@@ -153,25 +128,37 @@ export class MockRedisClient implements RedisStore {
     list.unshift(...values);
     return list.length;
   }
-  
-  async lpop(key: string): Promise<string | null> {
-    return this.lists.get(key)?.shift() ?? null;
+
+  async rpush(key: string, ...values: string[]): Promise<number> {
+    if (!this.lists.has(key)) {
+      this.lists.set(key, []);
+    }
+    const list = this.lists.get(key)!;
+    list.push(...values);
+    return list.length;
   }
-  
+
   async lrange(key: string, start: number, stop: number): Promise<string[]> {
-    const list = this.lists.get(key) ?? [];
+    const list = this.lists.get(key) || [];
     const end = stop === -1 ? list.length : stop + 1;
     return list.slice(start, end);
   }
-  
+
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    const list = this.lists.get(key);
+    if (!list) return;
+    const end = stop === -1 ? list.length : stop + 1;
+    this.lists.set(key, list.slice(start, end));
+  }
+
   async llen(key: string): Promise<number> {
     return this.lists.get(key)?.length ?? 0;
   }
-  
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Set Operations
+  // SET OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────────
-  
+
   async sadd(key: string, ...members: string[]): Promise<number> {
     if (!this.sets.has(key)) {
       this.sets.set(key, new Set());
@@ -186,279 +173,117 @@ export class MockRedisClient implements RedisStore {
     }
     return added;
   }
-  
+
   async srem(key: string, ...members: string[]): Promise<number> {
     const set = this.sets.get(key);
     if (!set) return 0;
     let removed = 0;
     for (const member of members) {
-      if (set.delete(member)) {
-        removed++;
-      }
+      if (set.delete(member)) removed++;
     }
     return removed;
   }
-  
+
   async smembers(key: string): Promise<string[]> {
-    return Array.from(this.sets.get(key) ?? []);
+    return Array.from(this.sets.get(key) || []);
   }
-  
+
   async sismember(key: string, member: string): Promise<boolean> {
     return this.sets.get(key)?.has(member) ?? false;
   }
-  
+
+  async scard(key: string): Promise<number> {
+    return this.sets.get(key)?.size ?? 0;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Sorted Set Operations
+  // SORTED SET OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────────
-  
+
   async zadd(key: string, score: number, member: string): Promise<number> {
-    if (!this.zsets.has(key)) {
-      this.zsets.set(key, new Map());
+    if (!this.sortedSets.has(key)) {
+      this.sortedSets.set(key, new Map());
     }
-    const zset = this.zsets.get(key)!;
+    const zset = this.sortedSets.get(key)!;
     const isNew = !zset.has(member);
     zset.set(member, score);
     return isNew ? 1 : 0;
   }
-  
-  async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
-    const zset = this.zsets.get(key);
+
+  async zrem(key: string, member: string): Promise<number> {
+    return this.sortedSets.get(key)?.delete(member) ? 1 : 0;
+  }
+
+  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+    const zset = this.sortedSets.get(key);
     if (!zset) return [];
-    
-    const minNum = min === '-inf' ? -Infinity : Number(min);
-    const maxNum = max === '+inf' ? Infinity : Number(max);
-    
+    const sorted = Array.from(zset.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([member]) => member);
+    const end = stop === -1 ? sorted.length : stop + 1;
+    return sorted.slice(start, end);
+  }
+
+  async zrangebyscore(key: string, min: number, max: number): Promise<string[]> {
+    const zset = this.sortedSets.get(key);
+    if (!zset) return [];
     return Array.from(zset.entries())
-      .filter(([_, score]) => score >= minNum && score <= maxNum)
+      .filter(([, score]) => score >= min && score <= max)
       .sort((a, b) => a[1] - b[1])
       .map(([member]) => member);
   }
-  
-  async zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number> {
-    const zset = this.zsets.get(key);
-    if (!zset) return 0;
-    
-    const minNum = min === '-inf' ? -Infinity : Number(min);
-    const maxNum = max === '+inf' ? Infinity : Number(max);
-    
-    let removed = 0;
-    for (const [member, score] of zset.entries()) {
-      if (score >= minNum && score <= maxNum) {
-        zset.delete(member);
-        removed++;
-      }
-    }
-    return removed;
+
+  async zscore(key: string, member: string): Promise<number | null> {
+    return this.sortedSets.get(key)?.get(member) ?? null;
   }
-  
-  async zcard(key: string): Promise<number> {
-    return this.zsets.get(key)?.size ?? 0;
-  }
-  
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Lua Script Operations
+  // CONNECTION
   // ─────────────────────────────────────────────────────────────────────────────
-  
-  async rateLimit(key: string, capacity: number, refillRate: number, tokens = 1): Promise<RateLimitResult> {
-    const now = Date.now();
-    const entry = this.data.get(key);
-    
-    let currentTokens = capacity;
-    let lastRefill = now;
-    
-    if (entry) {
-      const [tokensStr, lastStr] = entry.value.split(':');
-      currentTokens = parseFloat(tokensStr ?? '0');
-      lastRefill = parseInt(lastStr ?? '0', 10);
-      
-      // Refill based on time elapsed
-      const elapsed = (now - lastRefill) / 1000;
-      currentTokens = Math.min(capacity, currentTokens + elapsed * refillRate);
-    }
-    
-    const allowed = currentTokens >= tokens;
-    
-    if (allowed) {
-      currentTokens -= tokens;
-    }
-    
-    this.data.set(key, { value: `${currentTokens}:${now}` });
-    
-    return {
-      allowed,
-      remainingTokens: Math.floor(currentTokens),
-      retryAfterMs: allowed ? 0 : Math.ceil((tokens - currentTokens) / refillRate * 1000),
-      maxTokens: capacity,
-    };
+
+  isConnected(): boolean {
+    return true;
   }
-  
-  async acquireLock(lockKey: string, ownerId: string, ttlMs: number): Promise<LockResult> {
-    const now = Date.now();
-    const existing = this.locks.get(lockKey);
-    
-    // Check if lock exists and is not expired
-    if (existing && existing.expiresAt > now) {
-      return {
-        acquired: false,
-        fencingToken: 0,
-        existingOwner: existing.owner,
-        remainingTtlMs: existing.expiresAt - now,
-      };
-    }
-    
-    // Acquire lock
-    this.fencingToken++;
-    this.locks.set(lockKey, {
-      owner: ownerId,
-      expiresAt: now + ttlMs,
-    });
-    
-    return {
-      acquired: true,
-      fencingToken: this.fencingToken,
-    };
+
+  async disconnect(): Promise<void> {
+    // No-op for mock
   }
-  
-  async releaseLock(lockKey: string, ownerId: string): Promise<boolean> {
-    const lock = this.locks.get(lockKey);
-    if (lock && lock.owner === ownerId) {
-      this.locks.delete(lockKey);
-      return true;
-    }
-    return false;
-  }
-  
-  async createIfNotExists(key: string, data: string, ttlSeconds = 0): Promise<ConditionalResult> {
-    if (this.data.has(key)) {
-      return { success: false, version: 0, existingValue: await this.get(key) };
-    }
-    
-    await this.set(key, data, ttlSeconds || undefined);
-    return { success: true, version: 1 };
-  }
-  
-  async conditionalUpdate(key: string, expectedVersion: number, data: string): Promise<ConditionalResult> {
-    const existing = this.data.get(key);
-    if (!existing) {
-      return { success: false, version: 0, reason: 'NOT_FOUND' };
-    }
-    
-    // For simplicity, we don't track versions in the mock
-    // Just update if key exists
-    await this.set(key, data);
-    return { success: true, version: expectedVersion + 1 };
-  }
-  
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Test Utilities
+  // TEST UTILITIES
   // ─────────────────────────────────────────────────────────────────────────────
-  
-  /**
-   * Reset all data (call between tests).
-   */
+
   reset(): void {
     this.data.clear();
     this.hashes.clear();
     this.lists.clear();
     this.sets.clear();
-    this.zsets.clear();
-    this.locks.clear();
-    this.fencingToken = 0;
+    this.sortedSets.clear();
   }
-  
-  /**
-   * Get raw data for inspection.
-   */
-  inspectData(): Map<string, { value: string; expiresAt?: number }> {
-    this.cleanExpired();
-    return new Map(this.data);
-  }
-  
-  /**
-   * Get all keys.
-   */
-  getAllKeys(): string[] {
-    this.cleanExpired();
-    return Array.from(this.data.keys());
-  }
-  
-  /**
-   * Set raw data directly (for test setup).
-   */
-  seedData(key: string, value: string, ttlSeconds?: number): void {
-    const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined;
-    this.data.set(key, { value, expiresAt });
-  }
-  
-  /**
-   * Clean expired entries.
-   */
-  private cleanExpired(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.data.entries()) {
-      if (entry.expiresAt && entry.expiresAt <= now) {
-        this.data.delete(key);
-      }
-    }
+
+  getState() {
+    return {
+      data: Object.fromEntries(this.data),
+      hashes: Object.fromEntries(
+        Array.from(this.hashes.entries()).map(([k, v]) => [k, Object.fromEntries(v)])
+      ),
+      lists: Object.fromEntries(this.lists),
+      sets: Object.fromEntries(
+        Array.from(this.sets.entries()).map(([k, v]) => [k, Array.from(v)])
+      ),
+      sortedSets: Object.fromEntries(
+        Array.from(this.sortedSets.entries()).map(([k, v]) => [k, Object.fromEntries(v)])
+      ),
+    };
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SINGLETON & FACTORY
+// FACTORY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-let mockRedisInstance: MockRedisClient | null = null;
-
-/**
- * Get or create the mock Redis client singleton.
- */
-export function getMockRedis(): MockRedisClient {
-  if (!mockRedisInstance) {
-    mockRedisInstance = new MockRedisClient();
-  }
-  return mockRedisInstance;
-}
-
-/**
- * Reset the mock Redis (call between tests).
- */
-export function resetMockRedis(): void {
-  if (mockRedisInstance) {
-    mockRedisInstance.reset();
-  }
-}
-
-/**
- * Create a new isolated mock Redis instance.
- * Useful for tests that need independent state.
- */
-export function createMockRedis(): MockRedisClient {
+export function createMockRedisClient(): MockRedisClient {
   return new MockRedisClient();
 }
 
-/**
- * Create a spy-wrapped mock Redis for call tracking.
- */
-export function createSpyRedis(): MockRedisClient & { _spies: Record<string, ReturnType<typeof vi.fn>> } {
-  const mock = new MockRedisClient();
-  const spies: Record<string, ReturnType<typeof vi.fn>> = {};
-  
-  // Wrap key methods with spies
-  const methodsToSpy = [
-    'get', 'set', 'delete', 'exists',
-    'hset', 'hget', 'hgetall',
-    'rpush', 'lpush', 'lrange',
-    'sadd', 'smembers',
-    'zadd', 'zrangebyscore',
-    'rateLimit', 'acquireLock', 'releaseLock',
-  ] as const;
-  
-  for (const method of methodsToSpy) {
-    const original = (mock as Record<string, unknown>)[method] as (...args: unknown[]) => unknown;
-    const spy = vi.fn(original.bind(mock));
-    spies[method] = spy;
-    (mock as Record<string, unknown>)[method] = spy;
-  }
-  
-  return Object.assign(mock, { _spies: spies });
-}
+export const mockRedis = createMockRedisClient();

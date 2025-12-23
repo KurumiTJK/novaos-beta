@@ -1,30 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TEST UTILITIES — Central Export for Test Infrastructure
-// NovaOS Sword System v3.0 — Phase 17: Integration & Testing
+// TEST SUITE INDEX
+// NovaOS Phase 17 — Integration & E2E Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// MOCKS
-// ─────────────────────────────────────────────────────────────────────────────────
-
+// Mocks
 export * from './mocks/index.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// FIXTURES
-// ─────────────────────────────────────────────────────────────────────────────────
-
+// Fixtures
 export * from './fixtures/index.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// SETUP UTILITIES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export {
-  sleep,
-  nextTick,
-  createDeferred,
-  randomString,
-  toDateString,
-  todayString,
-  dateOffset,
-} from './setup.js';
+// Setup utilities
+export * from './setup.js';

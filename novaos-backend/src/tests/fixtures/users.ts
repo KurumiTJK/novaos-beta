@@ -1,257 +1,80 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST FIXTURES — User Fixtures
-// NovaOS Sword System v3.0 — Phase 17: Integration & Testing
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// Provides test user fixtures for:
-//   - Different tiers (free, pro, enterprise)
-//   - Different roles (user, premium, admin)
-//   - JWT token generation
-//
+// NovaOS Phase 17 — Integration Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import {
-  createUserId,
-  createTimestamp,
-  createSessionId,
-  createRequestId,
-  createCorrelationId,
-  type UserId,
-  type Timestamp,
-} from '../../types/branded.js';
-import type {
-  AuthenticatedUser,
-  UserTier,
-  UserRole,
-  UserMetadata,
-  RequestContext,
-  Permission,
-} from '../../security/auth/types.js';
+import { createUserId, createTimestamp } from '../../types/branded.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// USER IDS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const TEST_USER_IDS = {
+  FREE_USER: createUserId('user_free_test'),
+  PRO_USER: createUserId('user_pro_test'),
+  ADMIN_USER: createUserId('user_admin_test'),
+  NEW_USER: createUserId('user_new_test'),
+  LOCKED_USER: createUserId('user_locked_test'),
+} as const;
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // USER FIXTURES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Create a test user with defaults.
- */
-export function createTestUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
-  const userId = overrides?.id ?? createUserId();
-  const tier = overrides?.tier ?? 'free';
-  
-  return {
-    id: userId,
-    email: overrides?.email ?? `test-${userId.slice(-8)}@example.com`,
-    tier,
-    roles: overrides?.roles ?? getRolesForTier(tier),
-    permissions: overrides?.permissions ?? getPermissionsForTier(tier),
-    metadata: overrides?.metadata ?? createUserMetadata(),
+export interface TestUser {
+  id: ReturnType<typeof createUserId>;
+  email: string;
+  tier: 'free' | 'pro' | 'enterprise';
+  createdAt: ReturnType<typeof createTimestamp>;
+  settings?: {
+    timezone?: string;
+    reminderEnabled?: boolean;
   };
 }
 
-/**
- * Create a free tier user.
- */
-export function createFreeUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
-  return createTestUser({ ...overrides, tier: 'free' });
-}
-
-/**
- * Create a pro tier user.
- */
-export function createProUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
-  return createTestUser({
+export function createTestUser(overrides: Partial<TestUser> = {}): TestUser {
+  return {
+    id: TEST_USER_IDS.FREE_USER,
+    email: 'test@example.com',
+    tier: 'free',
+    createdAt: createTimestamp(),
+    settings: {
+      timezone: 'America/New_York',
+      reminderEnabled: true,
+    },
     ...overrides,
-    tier: 'pro',
-    roles: ['user', 'premium'],
-    permissions: getPermissionsForTier('pro'),
-  });
-}
-
-/**
- * Create an enterprise tier user.
- */
-export function createEnterpriseUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
-  return createTestUser({
-    ...overrides,
-    tier: 'enterprise',
-    roles: ['user', 'premium'],
-    permissions: getPermissionsForTier('enterprise'),
-  });
-}
-
-/**
- * Create an admin user.
- */
-export function createAdminUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
-  return createTestUser({
-    ...overrides,
-    tier: 'enterprise',
-    roles: ['user', 'premium', 'admin'],
-    permissions: ['*'],
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// USER METADATA
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Create user metadata with defaults.
- */
-export function createUserMetadata(overrides?: Partial<UserMetadata>): UserMetadata {
-  return {
-    createdAt: overrides?.createdAt ?? createTimestamp(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
-    lastLoginAt: overrides?.lastLoginAt ?? createTimestamp(),
-    loginCount: overrides?.loginCount ?? 10,
-    mfaEnabled: overrides?.mfaEnabled ?? false,
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// REQUEST CONTEXT FIXTURES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Create a test request context with user authentication.
- */
-export function createTestRequestContext(
-  user?: AuthenticatedUser,
-  overrides?: Partial<RequestContext>
-): RequestContext {
-  const authenticatedUser = user ?? createTestUser();
-  
-  return {
-    requestId: overrides?.requestId ?? createRequestId(),
-    correlationId: overrides?.correlationId ?? createCorrelationId(),
-    sessionId: overrides?.sessionId ?? createSessionId(),
-    timestamp: overrides?.timestamp ?? createTimestamp(),
-    startTime: overrides?.startTime ?? Date.now(),
-    ip: overrides?.ip ?? '127.0.0.1',
-    userAgent: overrides?.userAgent ?? 'vitest/1.0',
-    origin: overrides?.origin ?? 'http://localhost:3000',
-    user: authenticatedUser,
-    isAuthenticated: true,
-    isService: false,
-    isAnonymous: false,
-  };
-}
-
-/**
- * Create an anonymous request context.
- */
-export function createAnonymousRequestContext(
-  overrides?: Partial<RequestContext>
-): RequestContext {
-  return {
-    requestId: overrides?.requestId ?? createRequestId(),
-    correlationId: overrides?.correlationId ?? createCorrelationId(),
-    timestamp: overrides?.timestamp ?? createTimestamp(),
-    startTime: overrides?.startTime ?? Date.now(),
-    ip: overrides?.ip ?? '127.0.0.1',
-    userAgent: overrides?.userAgent ?? 'vitest/1.0',
-    origin: overrides?.origin ?? 'http://localhost:3000',
-    isAuthenticated: false,
-    isService: false,
-    isAnonymous: true,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// PERMISSION HELPERS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Get default roles for a tier.
- */
-function getRolesForTier(tier: UserTier): readonly UserRole[] {
-  switch (tier) {
-    case 'free':
-      return ['user'];
-    case 'pro':
-    case 'enterprise':
-      return ['user', 'premium'];
-  }
-}
-
-/**
- * Get default permissions for a tier.
- */
-function getPermissionsForTier(tier: UserTier): readonly Permission[] {
-  const base: Permission[] = [
-    'goals:read',
-    'goals:write',
-    'quests:read',
-    'quests:write',
-    'steps:read',
-    'steps:write',
-    'sparks:read',
-    'sparks:write',
-    'memories:read',
-    'memories:write',
-    'conversations:read',
-    'conversations:write',
-  ];
-  
-  if (tier === 'pro' || tier === 'enterprise') {
-    base.push(
-      'advanced_features',
-      'export:read',
-      'analytics:read'
-    );
-  }
-  
-  if (tier === 'enterprise') {
-    base.push(
-      'team:read',
-      'team:write',
-      'audit:read'
-    );
-  }
-  
-  return base;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// PREDEFINED TEST USERS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Well-known test user IDs for consistent testing.
- */
-export const TEST_USER_IDS = {
-  alice: createUserId('user-alice-test-00000001'),
-  bob: createUserId('user-bob-test-000000002'),
-  carol: createUserId('user-carol-test-00000003'),
-  admin: createUserId('user-admin-test-00000000'),
-} as const;
-
-/**
- * Pre-created test users.
- */
 export const TEST_USERS = {
-  /** Free tier user */
-  alice: createTestUser({
-    id: TEST_USER_IDS.alice,
-    email: 'alice@example.com',
+  freeUser: createTestUser({
+    id: TEST_USER_IDS.FREE_USER,
+    email: 'free@example.com',
     tier: 'free',
   }),
   
-  /** Pro tier user */
-  bob: createProUser({
-    id: TEST_USER_IDS.bob,
-    email: 'bob@example.com',
+  proUser: createTestUser({
+    id: TEST_USER_IDS.PRO_USER,
+    email: 'pro@example.com',
+    tier: 'pro',
   }),
   
-  /** Enterprise tier user */
-  carol: createEnterpriseUser({
-    id: TEST_USER_IDS.carol,
-    email: 'carol@example.com',
-  }),
-  
-  /** Admin user */
-  admin: createAdminUser({
-    id: TEST_USER_IDS.admin,
+  adminUser: createTestUser({
+    id: TEST_USER_IDS.ADMIN_USER,
     email: 'admin@example.com',
+    tier: 'enterprise',
+  }),
+  
+  newUser: createTestUser({
+    id: TEST_USER_IDS.NEW_USER,
+    email: 'new@example.com',
+    tier: 'free',
+    settings: undefined,
+  }),
+  
+  lockedUser: createTestUser({
+    id: TEST_USER_IDS.LOCKED_USER,
+    email: 'locked@example.com',
+    tier: 'free',
   }),
 } as const;
