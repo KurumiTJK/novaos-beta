@@ -1,48 +1,26 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// E2E MODULE INDEX — End-to-End Testing Exports
+// E2E TESTS — Central Export
+// NovaOS Sword System v3.0 — Phase 17: Integration & Testing
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// End-to-end tests verify complete user journeys through the system.
+// These tests simulate real user workflows and validate the entire stack.
+//
+// Test files in this directory:
+//   - learn-rust-flow.test.ts — Complete beginner learning journey
+//
+// E2E tests cover:
+//   1. User registration and authentication
+//   2. Goal creation with LLM-generated curriculum
+//   3. Daily spark workflow and completion
+//   4. Escalation on skip (full → reduced → minimal)
+//   5. Difficulty feedback collection
+//   6. Progress tracking
+//   7. Quest and goal completion cascades
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Utilities
-export {
-  // Test context
-  createTestContext,
-  type TestContext,
-  
-  // HTTP client
-  request,
-  createAuthenticatedClient,
-  type RequestOptions,
-  type TestResponse,
-  
-  // User management
-  createTestUser,
-  createTestUsers,
-  type TestUser,
-  
-  // Assertions
-  assertStatus,
-  assertLatency,
-  assertProperty,
-  
-  // Timing
-  wait,
-  waitUntil,
-  measure,
-  
-  // Data generators
-  randomString,
-  randomEmail,
-  sampleGoal,
-  sampleMemory,
-  
-  // Metrics
-  createMetricsCollector,
-  type TestMetrics,
-  
-  // Server management
-  startTestServer,
-  stopTestServer,
-} from './utils.js';
+// This file serves as documentation for the E2E test suite.
+// Individual test files are discovered automatically by vitest.
 
-// Re-export test configuration
-export { TEST_CATEGORIES, TEST_ENV_VARS, PERFORMANCE_THRESHOLDS, TEST_DATA } from '../config.js';
+export {};

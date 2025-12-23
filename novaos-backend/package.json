@@ -37,8 +37,10 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/luxon": "^3.7.1",
     "@types/node": "^22.7.4",
+    "@types/supertest": "^6.0.3",
     "@types/uuid": "^10.0.0",
     "cross-env": "^7.0.3",
+    "supertest": "^7.1.4",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "vitest": "^2.1.1"
