@@ -222,7 +222,7 @@ describe('Job Definitions', () => {
     it('should have reasonable timeouts', () => {
       for (const job of Object.values(JOB_DEFINITIONS)) {
         expect(job.timeout).toBeGreaterThan(0);
-        expect(job.timeout).toBeLessThanOrEqual(600000); // Max 10 minutes
+        expect(job.timeout).toBeLessThanOrEqual(900000); // Max 15 minutes (retention_enforcement)
       }
     });
   });

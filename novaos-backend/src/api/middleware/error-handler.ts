@@ -40,14 +40,15 @@ export class ApiError extends Error {
     message: string,
     statusCode: number = 400,
     code: string = 'BAD_REQUEST',
-    details?: Record<string, unknown>
+    details?: Record<string, unknown>,
+    isOperational: boolean = true
   ) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
     this.code = code;
     this.details = details;
-    this.isOperational = true; // Operational errors are expected and handled
+    this.isOperational = isOperational; // Operational errors are expected and handled
   }
 }
 
@@ -115,8 +116,7 @@ export class RateLimitError extends ApiError {
  */
 export class InternalError extends ApiError {
   constructor(message: string = 'Internal server error') {
-    super(message, 500, 'INTERNAL_ERROR');
-    this.isOperational = false; // Non-operational errors are unexpected
+    super(message, 500, 'INTERNAL_ERROR', undefined, false); // Non-operational errors are unexpected
   }
 }
 
@@ -463,7 +463,7 @@ export function errorHandler(
   
   // Set rate limit header if applicable
   if (error instanceof RateLimitError) {
-    res.setHeader('Retry-After', error.retryAfter);
+    res.setHeader('Retry-After', String(error.retryAfter));
   }
   
   res.status(statusCode).json(response);

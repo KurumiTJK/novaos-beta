@@ -13,8 +13,8 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { UserId, Timestamp, AuditId } from '../../../types/branded.js';
-import type { AsyncAppResult } from '../../../types/result.js';
+import type { UserId, Timestamp, AuditId } from '../../types/branded.js';
+import type { AsyncAppResult } from '../../types/result.js';
 import type { ConsentPurpose } from '../consent/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -567,7 +567,7 @@ export type AuditErrorCode = (typeof AuditErrorCode)[keyof typeof AuditErrorCode
 
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
-import { createAuditId } from '../../../types/branded.js';
+import { createAuditId } from '../../types/branded.js';
 
 export { createAuditId };
 

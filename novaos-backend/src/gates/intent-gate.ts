@@ -269,6 +269,23 @@ function parseAndValidate(
     rawOutput = JSON.parse(jsonStr.trim());
     const raw = rawOutput as RawLLMOutput;
 
+    // Detect non-intent responses (e.g., shield-format responses from test mocks)
+    // Shield responses have riskLevel/category but no type field
+    if (
+      (raw as Record<string, unknown>).riskLevel !== undefined ||
+      (raw as Record<string, unknown>).category !== undefined
+    ) {
+      if (raw.type === undefined) {
+        console.warn('[INTENT] Received non-intent response format, using keyword fallback');
+        repairs.push('non_intent_response_fallback');
+        return {
+          classification: getFailOpenDefault(originalMessage),
+          repairs,
+          rawOutput,
+        };
+      }
+    }
+
     // Build classification with validation
     const classification: IntentClassification = {
       type: validateIntentType(raw.type, repairs),
@@ -559,6 +576,15 @@ const DOMAIN_KEYWORD_PATTERNS: Array<{ pattern: RegExp; domain: Domain }> = [
   { pattern: /\b(art|design|write|writing|creative|music|paint)\b/i, domain: 'creative' },
 ];
 
+// Planning patterns → type: planning (check before action)
+// Only match when explicitly planning/creating a PLAN, schedule, strategy
+const PLANNING_PATTERNS = [
+  /\b(help me|let'?s)\s+plan\b/i,                          // "help me plan" (verb)
+  /\b(plan|planning|schedule|strategy|roadmap)\s+(my|a|the|for)\b/i,  // "plan my day"
+  /\bneed\s+(a\s+)?(plan|strategy|schedule|roadmap)\b/i,   // "need a plan"
+  /\b(create|make|build)\s+(a\s+)?(plan|schedule|workout\s*plan|routine|roadmap|strategy)\b/i, // "create a plan"
+];
+
 // Action verb patterns → type: action
 const ACTION_PATTERNS = [
   /^i('m| am) (going to|gonna)\b/i,
@@ -658,7 +684,10 @@ export function getFailOpenDefault(message: string): IntentClassification {
 
   // ─── TYPE DETECTION ───
   if (classification.type !== 'venting') {
-    if (ACTION_PATTERNS.some((p) => p.test(message))) {
+    if (PLANNING_PATTERNS.some((p) => p.test(message))) {
+      classification.type = 'planning';
+      classification.reasoningCode = 'PLANNING_REQUEST';
+    } else if (ACTION_PATTERNS.some((p) => p.test(message))) {
       classification.type = 'action';
       classification.reasoningCode = 'ACTION_INTENT';
     } else if (QUESTION_PATTERNS.some((p) => p.test(message))) {

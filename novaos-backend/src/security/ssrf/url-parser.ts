@@ -239,7 +239,12 @@ export function isIPv6(value: string): boolean {
   // Empty check
   if (!ip) return false;
   
-  // Check for IPv4-mapped IPv6 (::ffff:192.168.1.1)
+  // Check for IPv4-mapped IPv6 (::ffff:192.168.1.1 or similar)
+  if (isIPv4MappedIPv6(value)) {
+    return true;
+  }
+  
+  // Check for IPv4 suffix in other forms (e.g., ::192.168.1.1)
   const lastColon = ip.lastIndexOf(':');
   if (lastColon !== -1) {
     const possibleIPv4 = ip.substring(lastColon + 1);
@@ -247,7 +252,7 @@ export function isIPv6(value: string): boolean {
       // Validate the IPv6 prefix part
       const prefix = ip.substring(0, lastColon);
       // For mapped addresses, prefix should be valid
-      if (prefix === ':' || prefix.endsWith(':')) {
+      if (prefix === '' || prefix === ':' || prefix.endsWith(':')) {
         return validateIPv6Prefix(prefix);
       }
     }
@@ -685,12 +690,15 @@ export function parseURL(urlString: string): URLParseResult {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Check if a hostname matches a pattern (exact or suffix match).
+ * Check if a hostname matches a pattern (exact, suffix, or wildcard match).
  * 
  * Examples:
- * - "example.com" matches "example.com"
+ * - "example.com" matches "example.com" (exact)
  * - "sub.example.com" matches "example.com" (suffix)
- * - "example.com" matches ".example.com" (pattern with leading dot)
+ * - "api.example.com" matches "*.example.com" (wildcard)
+ * - "deep.api.example.com" matches "*.example.com" (wildcard, any depth)
+ * - "sub.example.com" matches ".example.com" (pattern with leading dot)
+ * - "example.com" does NOT match ".example.com" (exact domain excluded)
  */
 export function hostnameMatches(hostname: string, pattern: string): boolean {
   const h = hostname.toLowerCase();
@@ -701,12 +709,20 @@ export function hostnameMatches(hostname: string, pattern: string): boolean {
     return true;
   }
   
-  // Pattern with leading dot matches subdomains
-  if (p.startsWith('.')) {
-    return h.endsWith(p) || h === p.substring(1);
+  // Wildcard pattern: *.example.com matches any subdomain of example.com
+  if (p.startsWith('*.')) {
+    const suffix = p.substring(1); // ".example.com"
+    // Must be a subdomain, not the exact domain
+    return h.endsWith(suffix) && h.length > suffix.length;
   }
   
-  // Hostname is subdomain of pattern
+  // Pattern with leading dot: .example.com matches subdomains only, not exact
+  if (p.startsWith('.')) {
+    // Must be a subdomain (hostname ends with pattern but is longer)
+    return h.endsWith(p);
+  }
+  
+  // Hostname is subdomain of pattern (e.g., "sub.example.com" matches "example.com")
   return h.endsWith('.' + p);
 }
 

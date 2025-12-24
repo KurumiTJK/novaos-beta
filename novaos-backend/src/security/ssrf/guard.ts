@@ -27,6 +27,7 @@ import {
   createCheck,
   SCHEME_DEFAULT_PORTS,
   SUPPORTED_SCHEMES,
+  DEFAULT_BLOCKED_DOMAINS,
 } from './types.js';
 import { parseURL, buildRequestPath } from './url-parser.js';
 import { validateIP } from './ip-validator.js';
@@ -107,7 +108,7 @@ export interface SSRFGuardOptions {
  */
 export const DEFAULT_SSRF_GUARD_OPTIONS: Required<Omit<SSRFGuardOptions, 'pinStore' | 'dnsResolver' | 'policyChecker'>> = {
   allowedPorts: [80, 443],
-  blockedDomains: [],
+  blockedDomains: [...DEFAULT_BLOCKED_DOMAINS],
   allowedDomains: [],
   dnsTimeoutMs: 3000,
   requestTimeoutMs: 30000,
@@ -148,8 +149,25 @@ export class SSRFGuard {
   private readonly policyChecker: PolicyChecker;
   private readonly pinStore: CertificatePinStore;
   
+  /** Localhost entries to filter when allowLocalhost is true */
+  private static readonly LOCALHOST_ENTRIES = new Set([
+    'localhost',
+    'localhost.localdomain',
+    '127.0.0.1',
+    '::1',
+    '0.0.0.0',
+  ]);
+  
   constructor(options: SSRFGuardOptions = {}) {
     this.options = { ...DEFAULT_SSRF_GUARD_OPTIONS, ...options };
+    
+    // Filter localhost from blockedDomains if allowLocalhost is true
+    let effectiveBlockedDomains = [...this.options.blockedDomains];
+    if (this.options.allowLocalhost) {
+      effectiveBlockedDomains = effectiveBlockedDomains.filter(
+        domain => !SSRFGuard.LOCALHOST_ENTRIES.has(domain.toLowerCase())
+      );
+    }
     
     // Initialize DNS resolver
     this.dnsResolver = options.dnsResolver ?? createDNSResolver({
@@ -159,7 +177,7 @@ export class SSRFGuard {
     // Initialize policy checker
     this.policyChecker = options.policyChecker ?? createPolicyChecker({
       allowedPorts: [...this.options.allowedPorts],
-      blockedDomains: [...this.options.blockedDomains],
+      blockedDomains: effectiveBlockedDomains,
       allowedDomains: [...this.options.allowedDomains],
       allowPrivateIPs: this.options.allowPrivateIps,
       allowLocalhost: this.options.allowLocalhost,
@@ -198,9 +216,9 @@ export class SSRFGuard {
       // Step 1: Parse URL
       const parseResult = parseURL(url);
       
-      if (!parseResult.success) {
-        checks.push(createCheck('URL_PARSE', false, parseResult.error));
-        return this.deny('INVALID_URL', parseResult.error, checks, startTime, correlationId);
+      if (!parseResult.success || !parseResult.url) {
+        checks.push(createCheck('URL_PARSE', false, parseResult.error ?? 'Unknown parse error'));
+        return this.deny('INVALID_URL', parseResult.error ?? 'Unknown parse error', checks, startTime, correlationId);
       }
       
       const parsed = parseResult.url;
@@ -266,7 +284,12 @@ export class SSRFGuard {
         ));
         
         // Step 5: Validate resolved IPs
-        const validatedIP = await this.validateResolvedIPs(dnsResult.ipv4Addresses, dnsResult.ipv6Addresses, checks);
+        // Spread to mutable arrays for validateResolvedIPs
+        const validatedIP = await this.validateResolvedIPs(
+          [...dnsResult.ipv4Addresses],
+          [...dnsResult.ipv6Addresses],
+          checks
+        );
         
         if (!validatedIP) {
           // Checks were added by validateResolvedIPs
@@ -340,8 +363,8 @@ export class SSRFGuard {
   quickCheck(url: string): { allowed: boolean; reason?: string } {
     const parseResult = parseURL(url);
     
-    if (!parseResult.success) {
-      return { allowed: false, reason: parseResult.error };
+    if (!parseResult.success || !parseResult.url) {
+      return { allowed: false, reason: parseResult.error ?? 'Unknown parse error' };
     }
     
     const parsed = parseResult.url;
@@ -449,7 +472,7 @@ export class SSRFGuard {
   private buildTransportRequirements(parsed: ParsedURL, connectToIP: string): TransportRequirements {
     const useTLS = parsed.scheme === 'https';
     const defaultPort = SCHEME_DEFAULT_PORTS[parsed.scheme] ?? 80;
-    const port = parsed.port || defaultPort;
+    const port = parsed.port ?? defaultPort;
     
     // Get certificate pins for hostname
     const hostnamePins = this.pinStore.getPins(parsed.hostname);
@@ -472,6 +495,8 @@ export class SSRFGuard {
       allowRedirects: this.options.maxRedirects > 0,
       maxRedirects: this.options.maxRedirects,
       certificatePins: certificatePins.length > 0 ? certificatePins : undefined,
+      headers: { 'Host': parsed.hostname },
+      userAgent: 'NovaOS-SSRF-Safe-Client/1.0',
     };
   }
   

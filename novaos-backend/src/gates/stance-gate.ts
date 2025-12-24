@@ -28,7 +28,7 @@ export class StanceGate {
   async execute(
     state: PipelineState,
     context: PipelineContext
-  ): Promise<GateResult<Stance>> {
+  ): Promise<GateResult<{ stance: Stance }>> {
     const start = Date.now();
     const { intent, risk, verification } = state;
 
@@ -38,7 +38,7 @@ export class StanceGate {
       return {
         gateId: this.gateId,
         status: 'pass',
-        output: stance,
+        output: { stance },
         action: 'continue',
         executionTimeMs: Date.now() - start,
       };
@@ -50,7 +50,7 @@ export class StanceGate {
       return {
         gateId: this.gateId,
         status: 'soft_fail',
-        output: 'shield',
+        output: { stance: 'shield' },
         action: 'continue',
         failureReason: 'Stance determination failed, defaulting to shield',
         executionTimeMs: Date.now() - start,
@@ -116,8 +116,9 @@ export class StanceGate {
     // By this point, we've already excluded critical/high stakes and active interventions
     // ─────────────────────────────────────────────────────────────────────────
     if (intent?.type === 'action' || intent?.type === 'planning') {
-      // Only proceed if no active intervention (stakes already filtered)
-      if (risk?.interventionLevel === 'none') {
+      // Proceed if no active intervention (undefined risk = no intervention)
+      const interventionLevel = risk?.interventionLevel ?? 'none';
+      if (interventionLevel === 'none') {
         return 'sword';
       }
     }

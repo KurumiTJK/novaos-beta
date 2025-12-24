@@ -695,8 +695,8 @@ export function isRedirectSuccess(result: RedirectChainResult): boolean {
  * Create an allowed SSRF decision.
  */
 export function createAllowedDecision(
-  transport: TransportRequirements,
   checks: readonly SSRFCheck[],
+  transport: TransportRequirements,
   durationMs: number,
   requestId?: string
 ): SSRFDecision {
@@ -739,7 +739,7 @@ export function createCheck(
   check: SSRFCheckType,
   passed: boolean,
   details?: string,
-  durationMs?: number
+  durationMs: number = 0
 ): SSRFCheck {
   return { check, passed, details, durationMs };
 }

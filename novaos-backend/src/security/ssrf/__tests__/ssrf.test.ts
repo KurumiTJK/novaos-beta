@@ -29,19 +29,20 @@ describe('URL Parser', () => {
     it('should parse valid HTTP URLs', () => {
       const result = parseURL('http://example.com/path?query=1');
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.url) {
         expect(result.url.scheme).toBe('http');
         expect(result.url.hostname).toBe('example.com');
         expect(result.url.path).toBe('/path');
         expect(result.url.query).toBe('query=1');
-        expect(result.url.port).toBe(0);
+        expect(result.url.port).toBeNull(); // null = default for scheme
+        expect(result.url.effectivePort).toBe(80); // effectivePort resolves the default
       }
     });
 
     it('should parse HTTPS URLs with port', () => {
       const result = parseURL('https://api.example.com:8443/v1/users');
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.url) {
         expect(result.url.scheme).toBe('https');
         expect(result.url.hostname).toBe('api.example.com');
         expect(result.url.port).toBe(8443);
@@ -52,7 +53,7 @@ describe('URL Parser', () => {
     it('should detect IP literals', () => {
       const result = parseURL('http://192.168.1.1/');
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.url) {
         expect(result.url.isIPLiteral).toBe(true);
         expect(result.url.ipType).toBe('ipv4');
       }
@@ -61,7 +62,7 @@ describe('URL Parser', () => {
     it('should detect IPv6 literals', () => {
       const result = parseURL('http://[::1]/');
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.url) {
         expect(result.url.isIPLiteral).toBe(true);
         expect(result.url.ipType).toBe('ipv6');
       }
@@ -70,7 +71,7 @@ describe('URL Parser', () => {
     it('should extract userinfo', () => {
       const result = parseURL('http://user:pass@example.com/');
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.url) {
         expect(result.url.username).toBe('user');
         expect(result.url.password).toBe('pass');
       }
@@ -80,7 +81,7 @@ describe('URL Parser', () => {
       const result = parseURL('ftp://example.com/');
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error).toContain('Unsupported scheme');
+        expect(result.error).toBe('UNSUPPORTED_SCHEME');
       }
     });
 
@@ -421,7 +422,7 @@ describe('Policy Checker', () => {
   describe('full policy check', () => {
     it('should pass valid URLs', () => {
       const parsed = parseURL('https://example.com/api');
-      if (parsed.success) {
+      if (parsed.success && parsed.url) {
         const result = checker.check(parsed.url);
         expect(result.allowed).toBe(true);
       }
@@ -429,7 +430,7 @@ describe('Policy Checker', () => {
 
     it('should block userinfo', () => {
       const parsed = parseURL('https://user:pass@example.com/');
-      if (parsed.success) {
+      if (parsed.success && parsed.url) {
         const result = checker.check(parsed.url);
         expect(result.allowed).toBe(false);
         expect(result.reason).toBe('USERINFO_PRESENT');
@@ -438,7 +439,7 @@ describe('Policy Checker', () => {
 
     it('should block non-standard ports', () => {
       const parsed = parseURL('https://example.com:8080/');
-      if (parsed.success) {
+      if (parsed.success && parsed.url) {
         const result = checker.check(parsed.url);
         expect(result.allowed).toBe(false);
         expect(result.reason).toBe('PORT_NOT_ALLOWED');
@@ -473,6 +474,7 @@ import {
   hasPinsForHostname,
   resetPinStore,
 } from '../cert-pinning.js';
+import type { SPKIPin } from '../types.js';
 
 describe('Certificate Pinning', () => {
   let store: CertificatePinStore;
@@ -507,8 +509,8 @@ describe('Certificate Pinning', () => {
   });
 
   describe('pin store', () => {
-    const testPin = 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' as const;
-    const backupPin = 'sha256/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=' as const;
+    const testPin = 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' as SPKIPin;
+    const backupPin = 'sha256/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=' as SPKIPin;
 
     it('should add and retrieve pins', () => {
       store.addPins({
@@ -576,7 +578,7 @@ describe('Certificate Pinning', () => {
       expect(() => {
         store.addPins({
           hostname: 'example.com',
-          pins: ['invalid-pin' as any],
+          pins: ['invalid-pin' as SPKIPin],
           includeSubdomains: false,
           enforce: true,
         });
@@ -586,13 +588,13 @@ describe('Certificate Pinning', () => {
 
   describe('convenience functions', () => {
     it('pinHostname should add pins', () => {
-      const pin = 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+      const pin = 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' as SPKIPin;
       pinHostname('example.com', [pin]);
       expect(hasPinsForHostname('example.com')).toBe(true);
     });
 
     it('unpinHostname should remove pins', () => {
-      const pin = 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+      const pin = 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' as SPKIPin;
       pinHostname('example.com', [pin]);
       expect(unpinHostname('example.com')).toBe(true);
       expect(hasPinsForHostname('example.com')).toBe(false);
@@ -717,6 +719,8 @@ describe('Type Guards & Factories', () => {
         readTimeoutMs: 30000,
         allowRedirects: true,
         maxRedirects: 5,
+        headers: { 'Host': 'example.com' },
+        userAgent: 'NovaOS-SSRF-Safe-Client/1.0',
       };
 
       const decision = createAllowedDecision([], transport, 100, 'req-123');
@@ -758,6 +762,8 @@ describe('Type Guards & Factories', () => {
         readTimeoutMs: 1000,
         allowRedirects: false,
         maxRedirects: 0,
+        headers: { 'Host': 'example.com' },
+        userAgent: 'Test/1.0',
       }, 0);
       const denied = createDeniedDecision('PRIVATE_IP', 'test', [], 0);
 
@@ -779,6 +785,8 @@ describe('Type Guards & Factories', () => {
         readTimeoutMs: 1000,
         allowRedirects: false,
         maxRedirects: 0,
+        headers: { 'Host': 'example.com' },
+        userAgent: 'Test/1.0',
       }, 0);
 
       expect(isDenied(denied)).toBe(true);

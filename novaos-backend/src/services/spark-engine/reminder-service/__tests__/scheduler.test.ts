@@ -93,7 +93,8 @@ describe('calculateReminderTime', () => {
     const result = calculateReminderTime('2025-06-15', 12, 'UTC');
 
     expect(result).toContain('12:00:00');
-    expect(result).toContain('+00:00');
+    // Accept both 'Z' and '+00:00' as valid UTC representations
+    expect(result.endsWith('Z') || result.includes('+00:00')).toBe(true);
   });
 
   it('should handle edge hours (0 and 23)', () => {
