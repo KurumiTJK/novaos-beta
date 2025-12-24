@@ -102,9 +102,12 @@ export interface ILogger {
   /** Check if a level is enabled */
   isLevelEnabled(level: LogLevel): boolean;
   
-  /** Log with timing (for backward compatibility) */
+  /** Log with duration timing */
   time?(message: string, startTime: number, context?: Record<string, unknown>): void;
 }
+
+// Logger class exported at bottom of file as 'Logger'
+// Use ILogger for type annotations in function signatures
 
 /**
  * Request log data.
@@ -232,7 +235,6 @@ function prettyPrint(entry: Record<string, unknown>): string {
   const time = entry.time as string | undefined;
   const msg = entry.msg as string;
   const component = entry.component as string | undefined;
-  const requestId = entry.requestId as string | undefined;
   
   // Color codes
   const colors: Record<LogLevel, string> = {
@@ -250,8 +252,6 @@ function prettyPrint(entry: Record<string, unknown>): string {
   const levelStr = level.toUpperCase().padEnd(5);
   const timeStr = time ? time.split('T')[1]?.replace('Z', '') ?? '' : '';
   const componentStr = component ? `[${component}]` : '';
-  // Include truncated requestId for correlation
-  const requestIdStr = requestId ? `[${requestId.slice(0, 8)}]` : '';
   
   // Build context string (excluding standard fields)
   const contextFields = { ...entry };
@@ -262,14 +262,13 @@ function prettyPrint(entry: Record<string, unknown>): string {
   delete contextFields.service;
   delete contextFields.env;
   delete contextFields.component;
-  delete contextFields.requestId;
   
   let contextStr = '';
   if (Object.keys(contextFields).length > 0) {
     contextStr = ` ${dim}${JSON.stringify(contextFields)}${reset}`;
   }
   
-  return `${dim}${timeStr}${reset} ${color}${levelStr}${reset} ${requestIdStr}${componentStr} ${msg}${contextStr}`;
+  return `${dim}${timeStr}${reset} ${color}${levelStr}${reset} ${componentStr} ${msg}${contextStr}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -313,8 +312,14 @@ function writeLog(entry: Record<string, unknown>): void {
 /**
  * Create a logger instance.
  */
-function createLoggerImpl(options: LoggerOptions = {}): ILogger {
-  const { component, requestId: optionsRequestId, context: baseContext = {} } = options;
+function createLogger(options: LoggerOptions = {}): ILogger {
+  const { component, requestId, context: baseContext = {} } = options;
+  
+  // Include requestId in base context if provided
+  const fullBaseContext: Record<string, unknown> = { ...baseContext };
+  if (requestId) {
+    fullBaseContext.requestId = requestId;
+  }
   
   const effectiveLevel = getEffectiveLevel();
   const levelNum = LOG_LEVELS[effectiveLevel];
@@ -324,12 +329,7 @@ function createLoggerImpl(options: LoggerOptions = {}): ILogger {
       return;
     }
     
-    // Include requestId in context if provided in options
-    const fullContext = optionsRequestId 
-      ? { requestId: optionsRequestId, ...baseContext, ...context }
-      : { ...baseContext, ...context };
-    
-    const entry = formatLogEntry(level, message, fullContext, component);
+    const entry = formatLogEntry(level, message, { ...fullBaseContext, ...context }, component);
     writeLog(entry);
   };
   
@@ -344,11 +344,7 @@ function createLoggerImpl(options: LoggerOptions = {}): ILogger {
     }
     
     const errorContext = error ? formatError(error) : {};
-    const fullContext = optionsRequestId 
-      ? { requestId: optionsRequestId, ...baseContext, ...context, ...errorContext }
-      : { ...baseContext, ...context, ...errorContext };
-    
-    const entry = formatLogEntry(level, message, fullContext, component);
+    const entry = formatLogEntry(level, message, { ...fullBaseContext, ...context, ...errorContext }, component);
     writeLog(entry);
   };
   
@@ -360,39 +356,65 @@ function createLoggerImpl(options: LoggerOptions = {}): ILogger {
     error: (message, error, context) => logWithError('error', message, error, context),
     fatal: (message, error, context) => logWithError('fatal', message, error, context),
     
+    time: (message: string, startTime: number, context?: Record<string, unknown>): void => {
+      const duration = Date.now() - startTime;
+      log('info', message, { ...context, durationMs: duration });
+    },
+    
     child: (childOptions: LoggerOptions): ILogger => {
-      return createLoggerImpl({
+      return createLogger({
         component: childOptions.component ?? component,
-        requestId: childOptions.requestId ?? optionsRequestId,
-        context: { ...baseContext, ...childOptions.context },
+        requestId: childOptions.requestId ?? requestId,
+        context: { ...fullBaseContext, ...childOptions.context },
       });
     },
     
     isLevelEnabled: (level: LogLevel): boolean => {
       return LOG_LEVELS[level] >= levelNum;
     },
-    
-    // Backward compatibility: time method
-    time: (message: string, startTime: number, context?: Record<string, unknown>): void => {
-      const duration = Date.now() - startTime;
-      log('info', message, { ...context, durationMs: duration });
-    },
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LOGGER CLASS — Backward Compatible
+// PUBLIC API
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Logger class for backward compatibility with `new Logger()` usage.
- * Wraps the functional logger implementation.
+ * Root logger instance.
  */
-export class Logger implements ILogger {
-  private impl: ILogger;
+let rootLogger: ILogger | null = null;
+
+/**
+ * Get the root logger or create a child logger.
+ */
+export function getLogger(options?: LoggerOptions): ILogger {
+  if (!rootLogger) {
+    rootLogger = createLogger();
+  }
+  
+  if (options) {
+    return rootLogger.child(options);
+  }
+  
+  return rootLogger;
+}
+
+/**
+ * Reset the root logger (for testing).
+ */
+export function resetLogger(): void {
+  rootLogger = null;
+}
+
+/**
+ * Logger class for backward compatibility with `new Logger()` syntax.
+ * This wraps the functional createLogger implementation.
+ */
+export class LoggerClass implements ILogger {
+  private readonly impl: ILogger;
   
   constructor(options: LoggerOptions = {}) {
-    this.impl = createLoggerImpl(options);
+    this.impl = createLogger(options);
   }
   
   trace(message: string, context?: Record<string, unknown>): void {
@@ -419,81 +441,21 @@ export class Logger implements ILogger {
     this.impl.fatal(message, error, context);
   }
   
-  child(options: LoggerOptions): Logger {
-    const childLogger = new Logger();
-    childLogger.impl = this.impl.child(options);
-    return childLogger;
+  time(message: string, startTime: number, context?: Record<string, unknown>): void {
+    this.impl.time?.(message, startTime, context);
+  }
+  
+  child(options: LoggerOptions): ILogger {
+    return this.impl.child(options);
   }
   
   isLevelEnabled(level: LogLevel): boolean {
     return this.impl.isLevelEnabled(level);
   }
-  
-  /**
-   * Log with timing information.
-   */
-  time(message: string, startTime: number, context?: Record<string, unknown>): void {
-    if (this.impl.time) {
-      this.impl.time(message, startTime, context);
-    } else {
-      const duration = Date.now() - startTime;
-      this.impl.info(message, { ...context, durationMs: duration });
-    }
-  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// PUBLIC API
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Root logger instance.
- */
-let rootLogger: ILogger | null = null;
-
-/**
- * Get the root logger or create a child logger.
- */
-export function getLogger(options?: LoggerOptions): ILogger {
-  if (!rootLogger) {
-    rootLogger = createLoggerImpl();
-  }
-  
-  if (options) {
-    return rootLogger.child(options);
-  }
-  
-  return rootLogger;
-}
-
-/**
- * Reset the root logger (for testing).
- */
-export function resetLogger(): void {
-  rootLogger = null;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// PRE-CREATED COMPONENT LOGGERS — Backward Compatible
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Pre-created component-specific loggers for convenience.
- * Usage: import { loggers } from './logging/index.js';
- *        loggers.http.info('Request received');
- */
-export const loggers = {
-  get http(): ILogger { return getLogger({ component: 'http' }); },
-  get auth(): ILogger { return getLogger({ component: 'auth' }); },
-  get pipeline(): ILogger { return getLogger({ component: 'pipeline' }); },
-  get storage(): ILogger { return getLogger({ component: 'storage' }); },
-  get verification(): ILogger { return getLogger({ component: 'verification' }); },
-  get web(): ILogger { return getLogger({ component: 'web' }); },
-  get security(): ILogger { return getLogger({ component: 'security' }); },
-  get perf(): ILogger { return getLogger({ component: 'perf' }); },
-  get llm(): ILogger { return getLogger({ component: 'llm' }); },
-  get db(): ILogger { return getLogger({ component: 'db' }); },
-};
+// Export LoggerClass as Logger for `new Logger()` syntax
+export { LoggerClass as Logger };
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // REQUEST LOGGING
@@ -648,3 +610,24 @@ export function createScopedLogger(scope: string): ILogger & { elapsed: () => nu
     elapsed: () => performance.now() - start,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PRE-CONFIGURED COMPONENT LOGGERS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pre-configured loggers for common components.
+ * These are lazily initialized on first access.
+ */
+export const loggers = {
+  get http() { return getLogger({ component: 'http' }); },
+  get auth() { return getLogger({ component: 'auth' }); },
+  get pipeline() { return getLogger({ component: 'pipeline' }); },
+  get storage() { return getLogger({ component: 'storage' }); },
+  get verification() { return getLogger({ component: 'verification' }); },
+  get web() { return getLogger({ component: 'web' }); },
+  get security() { return getLogger({ component: 'security' }); },
+  get llm() { return getLogger({ component: 'llm' }); },
+  get db() { return getLogger({ component: 'db' }); },
+  get perf() { return getLogger({ component: 'perf' }); },
+};

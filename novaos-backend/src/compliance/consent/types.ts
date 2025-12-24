@@ -13,8 +13,8 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { UserId, Timestamp } from '../../../types/branded.js';
-import type { Brand } from '../../../types/branded.js';
+import type { UserId, Timestamp } from '../../types/branded.js';
+import type { Brand } from '../../types/branded.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BRANDED TYPES
@@ -262,7 +262,7 @@ export interface ConsentUpdateResult {
 // CONSENT STORE INTERFACE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { AsyncAppResult } from '../../../types/result.js';
+import type { AsyncAppResult } from '../../types/result.js';
 
 /**
  * Consent store interface.

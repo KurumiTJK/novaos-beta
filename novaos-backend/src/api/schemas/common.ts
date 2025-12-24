@@ -13,6 +13,9 @@ import type {
   ReminderId,
 } from '../../types/branded.js';
 
+// Re-export branded types for use in other modules
+export type { GoalId, QuestId, StepId, SparkId, UserId, ReminderId } from '../../types/branded.js';
+
 // ─────────────────────────────────────────────────────────────────────────────────
 // ID VALIDATION
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -77,30 +80,31 @@ export const IdParamSchema = z.object({
 
 /**
  * Schema for routes with :goalId parameter.
+ * Uses plain IdSchema to avoid declaration file issues with branded types.
  */
 export const GoalIdParamSchema = z.object({
-  goalId: GoalIdSchema,
+  goalId: IdSchema,
 });
 
 /**
  * Schema for routes with :questId parameter.
  */
 export const QuestIdParamSchema = z.object({
-  questId: QuestIdSchema,
+  questId: IdSchema,
 });
 
 /**
  * Schema for routes with :stepId parameter.
  */
 export const StepIdParamSchema = z.object({
-  stepId: StepIdSchema,
+  stepId: IdSchema,
 });
 
 /**
  * Schema for routes with :sparkId parameter.
  */
 export const SparkIdParamSchema = z.object({
-  sparkId: SparkIdSchema,
+  sparkId: IdSchema,
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -209,9 +213,9 @@ export function parseCursor(cursor: string): { id: string; ts?: string } | null 
  */
 export const TitleSchema = z
   .string()
+  .trim()
   .min(1, 'Title is required')
-  .max(500, 'Title must be 500 characters or less')
-  .trim();
+  .max(500, 'Title must be 500 characters or less');
 
 /**
  * Description field.
@@ -249,6 +253,11 @@ export const TimezoneSchema = z
   .max(64)
   .refine(
     (val) => {
+      // IANA timezones always contain '/' (e.g., America/New_York) or are 'UTC'
+      // Reject abbreviations like 'EST', 'PST', etc.
+      if (val !== 'UTC' && !val.includes('/')) {
+        return false;
+      }
       try {
         Intl.DateTimeFormat(undefined, { timeZone: val });
         return true;

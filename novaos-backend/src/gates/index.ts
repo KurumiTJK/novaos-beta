@@ -141,10 +141,20 @@ interface ShieldClassification {
 let openaiClient: OpenAI | null = null;
 
 function getOpenAIClient(): OpenAI | null {
+  // Always try to create client if API key exists and client is null
+  // This ensures the mock is used in tests even after module initialization
   if (!openaiClient && process.env.OPENAI_API_KEY) {
     openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
   return openaiClient;
+}
+
+/**
+ * Reset the OpenAI client singleton (for testing).
+ * Call this in test setup/teardown to ensure fresh client creation.
+ */
+export function resetOpenAIClient(): void {
+  openaiClient = null;
 }
 
 // LLM System Prompt with Few-Shot Examples

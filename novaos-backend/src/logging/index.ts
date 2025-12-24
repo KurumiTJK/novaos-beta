@@ -12,9 +12,16 @@ export {
   // Main API (backward compatible)
   getLogger,
   logRequest,
-  type Logger,
+  Logger,           // Class for `new Logger()` usage
+  type ILogger,     // Interface type
   type LoggerOptions,
   type RequestLogData,
+  
+  // Pre-configured component loggers
+  loggers,
+  
+  // Testing utilities
+  resetLogger,
   
   // Configuration
   configureLogger,

@@ -11,7 +11,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import type { UserId } from '../../../types/branded.js';
+import type { UserId } from '../../types/branded.js';
 import type { ConsentPurpose, IConsentStore, UserConsent } from './types.js';
 import { REQUIRED_PURPOSES, isRequiredPurpose } from './types.js';
 

@@ -5,9 +5,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ConsentStore, createConsentStore } from '../consent/consent-store.js';
-import type { KeyValueStore } from '../../../storage/index.js';
-import type { UserId, Timestamp } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import type { KeyValueStore } from '../../storage/index.js';
+import type { UserId, Timestamp } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import type { ConsentPurpose, UpdateConsentRequest } from '../consent/types.js';
 import { CURRENT_POLICY_VERSION } from '../consent/types.js';
 
@@ -24,11 +24,33 @@ function createMockStore(): KeyValueStore {
     get: vi.fn(async (key: string) => data.get(key) ?? null),
     set: vi.fn(async (key: string, value: string) => {
       data.set(key, value);
+      return 'OK';
+    }),
+    setex: vi.fn(async (key: string, _seconds: number, value: string) => {
+      data.set(key, value);
+      return 'OK';
     }),
     delete: vi.fn(async (key: string) => {
       return data.delete(key);
     }),
     exists: vi.fn(async (key: string) => data.has(key)),
+    expire: vi.fn(async (_key: string, _seconds: number) => {
+      return 1;
+    }),
+    ttl: vi.fn(async (_key: string) => {
+      return -1; // No expiration
+    }),
+    keys: vi.fn(async (pattern: string) => {
+      const prefix = pattern.replace('*', '');
+      return Array.from(data.keys()).filter(k => k.startsWith(prefix));
+    }),
+    mget: vi.fn(async (...keys: string[]) => {
+      return keys.map(k => data.get(k) ?? null);
+    }),
+    mset: vi.fn(async (entries: Record<string, string>) => {
+      Object.entries(entries).forEach(([k, v]) => data.set(k, v));
+      return 'OK';
+    }),
     
     // Set operations
     sadd: vi.fn(async (key: string, ...members: string[]) => {
@@ -49,6 +71,9 @@ function createMockStore(): KeyValueStore {
     }),
     scard: vi.fn(async (key: string) => {
       return sets.get(key)?.size ?? 0;
+    }),
+    sismember: vi.fn(async (key: string, member: string) => {
+      return sets.get(key)?.has(member) ? 1 : 0;
     }),
 
     // Sorted set operations
@@ -77,6 +102,12 @@ function createMockStore(): KeyValueStore {
         .map(([m]) => m);
       const end = stop === -1 ? sorted.length : stop + 1;
       return sorted.slice(start, end);
+    }),
+    zscore: vi.fn(async (key: string, member: string) => {
+      return sortedSets.get(key)?.get(member) ?? null;
+    }),
+    zcard: vi.fn(async (key: string) => {
+      return sortedSets.get(key)?.size ?? 0;
     }),
   } as unknown as KeyValueStore;
 }
@@ -109,7 +140,8 @@ describe('ConsentStore', () => {
 
   beforeEach(() => {
     mockKv = createMockStore();
-    store = createConsentStore(mockKv);
+    // Disable encryption in tests to avoid needing real encryption keys
+    store = createConsentStore(mockKv, { encryptionEnabled: false });
   });
 
   describe('getConsent', () => {

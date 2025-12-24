@@ -177,6 +177,9 @@ export interface SanitizedPromptInput {
   
   /** Resource metadata (sanitized) */
   readonly resourceContext?: SanitizedResourceContext;
+  
+  /** Whether the input should be blocked (convenience accessor) */
+  readonly shouldBlock: boolean;
 }
 
 /**

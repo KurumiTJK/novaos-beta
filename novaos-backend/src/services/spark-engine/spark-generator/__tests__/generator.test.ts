@@ -65,7 +65,8 @@ function createTestStep(options?: {
     order: 3,
     createdAt: new Date().toISOString() as Timestamp,
     updatedAt: new Date().toISOString() as Timestamp,
-    activities: options?.activities ?? [activity],
+    // Check if 'activities' key exists in options to allow explicit undefined
+    activities: options && 'activities' in options ? options.activities : [activity],
     resources: options?.resources ?? [resource],
     scheduledDate: '2024-01-15',
     dayNumber: 3,

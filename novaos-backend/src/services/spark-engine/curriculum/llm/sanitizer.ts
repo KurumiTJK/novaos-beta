@@ -166,7 +166,7 @@ const PATTERNS: readonly PatternDefinition[] = [
     detect: (text) => {
       const patterns = [
         /show\s+(me\s+)?(your|the)\s+(system\s+)?prompt/gi,
-        /reveal\s+(your|the)\s+(system\s+)?prompt/gi,
+        /reveal\s+(your|the)\s+(system\s+)?(prompt|instructions?)/gi,
         /print\s+(your|the)\s+(system\s+)?(prompt|instructions?)/gi,
         /what\s+(is|are)\s+your\s+(system\s+)?(prompt|instructions?|rules?)/gi,
         /repeat\s+(your|the)\s+(system\s+)?(prompt|instructions?)/gi,
@@ -571,6 +571,7 @@ export function sanitizePromptInput(
     userPrompt: userResult.sanitizedText,
     sanitization: combinedResult,
     resourceContext,
+    shouldBlock,  // Expose at top level for easy access
   };
 }
 

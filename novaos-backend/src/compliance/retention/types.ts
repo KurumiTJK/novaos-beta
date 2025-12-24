@@ -13,9 +13,9 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { UserId, Timestamp } from '../../../types/branded.js';
-import type { Brand } from '../../../types/branded.js';
-import type { AsyncAppResult } from '../../../types/result.js';
+import type { UserId, Timestamp } from '../../types/branded.js';
+import type { Brand } from '../../types/branded.js';
+import type { AsyncAppResult } from '../../types/result.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BRANDED TYPES
@@ -490,7 +490,7 @@ export function isPastRetention(
 ): boolean {
   const created = new Date(timestamp);
   const expiration = calculateExpirationDate(created, retentionDays);
-  return new Date() > expiration;
+  return new Date() >= expiration;
 }
 
 /**

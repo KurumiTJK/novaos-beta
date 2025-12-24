@@ -41,14 +41,14 @@ export class ApiError extends Error {
     statusCode: number = 400,
     code: string = 'BAD_REQUEST',
     details?: Record<string, unknown>,
-    isOperational: boolean = true
+    isOperational: boolean = true  // Default to operational (expected errors)
   ) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
     this.code = code;
     this.details = details;
-    this.isOperational = isOperational; // Operational errors are expected and handled
+    this.isOperational = isOperational;
   }
 }
 
@@ -116,7 +116,7 @@ export class RateLimitError extends ApiError {
  */
 export class InternalError extends ApiError {
   constructor(message: string = 'Internal server error') {
-    super(message, 500, 'INTERNAL_ERROR', undefined, false); // Non-operational errors are unexpected
+    super(message, 500, 'INTERNAL_ERROR', undefined, false); // Non-operational
   }
 }
 
@@ -238,7 +238,10 @@ function formatZodError(error: ZodError): { message: string; details: Record<str
 // ERROR SANITIZATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+// Check production mode dynamically (allows tests to change NODE_ENV)
+function isProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
 
 /**
  * Sensitive patterns to redact from error messages.
@@ -265,7 +268,7 @@ function containsSensitiveInfo(message: string): boolean {
  */
 function sanitizeMessage(message: string, statusCode: number): string {
   // Always sanitize 5xx errors in production
-  if (IS_PRODUCTION && statusCode >= 500) {
+  if (isProduction() && statusCode >= 500) {
     return 'An unexpected error occurred';
   }
   
@@ -285,7 +288,7 @@ function sanitizeDetails(
   statusCode: number
 ): Record<string, unknown> | undefined {
   // Never include details for 5xx in production
-  if (IS_PRODUCTION && statusCode >= 500) {
+  if (isProduction() && statusCode >= 500) {
     return undefined;
   }
   
@@ -524,8 +527,8 @@ export function notFoundHandler(
 export function asyncHandler<T extends Request = Request>(
   fn: (req: T, res: Response, next: NextFunction) => Promise<void>
 ) {
-  return (req: T, res: Response, next: NextFunction): void => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+  return (req: T, res: Response, next: NextFunction): Promise<void> => {
+    return Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
 

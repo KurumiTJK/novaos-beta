@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOGGING TESTS — Structured Logging, PII Redaction
 // ═══════════════════════════════════════════════════════════════════════════════
+// FIXED: Spies now target correct console methods (warn, error) instead of just log
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Logger, getLogger, loggers } from '../observability/logging/index.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Logger, getLogger, loggers, resetLogger } from '../logging/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER TESTS
@@ -11,9 +12,20 @@ import { Logger, getLogger, loggers } from '../observability/logging/index.js';
 
 describe('Logger', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
   
   beforeEach(() => {
+    resetLogger(); // Reset singleton for clean tests
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   describe('Basic Logging', () => {
@@ -32,11 +44,11 @@ describe('Logger', () => {
     });
 
     it('should log errors with stack trace', () => {
-      const errorSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       const logger = new Logger();
       logger.error('Error occurred', new Error('Test error'));
       
-      expect(errorSpy).toHaveBeenCalled();
+      // Error uses console.error, not console.log
+      expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
     it('should include duration in time logs', () => {
@@ -92,8 +104,9 @@ describe('Logger', () => {
       const logger = new Logger();
       logger.warn('Warning message');
       
-      expect(consoleSpy).toHaveBeenCalled();
-      const logOutput = consoleSpy.mock.calls[0]?.[0];
+      // Warn uses console.warn, not console.log
+      expect(consoleWarnSpy).toHaveBeenCalled();
+      const logOutput = consoleWarnSpy.mock.calls[0]?.[0];
       expect(logOutput).toContain('WARN');
     });
 
@@ -101,8 +114,9 @@ describe('Logger', () => {
       const logger = new Logger();
       logger.fatal('Fatal message');
       
-      expect(consoleSpy).toHaveBeenCalled();
-      const logOutput = consoleSpy.mock.calls[0]?.[0];
+      // Fatal uses console.error, not console.log
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      const logOutput = consoleErrorSpy.mock.calls[0]?.[0];
       expect(logOutput).toContain('FATAL');
     });
   });
@@ -113,6 +127,10 @@ describe('Logger', () => {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('Logger Singletons', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
   it('should return same root logger instance', () => {
     const logger1 = getLogger();
     const logger2 = getLogger();
@@ -141,11 +159,21 @@ describe('Logger Singletons', () => {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('PII Redaction', () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resetLogger();
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
   // Note: These tests verify redaction happens in metadata
   // The actual redaction logic is tested via the Logger behavior
   
   it('should handle metadata with sensitive keys', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const logger = new Logger();
     
     logger.info('Test', { password: 'secret123' });
@@ -155,7 +183,6 @@ describe('PII Redaction', () => {
   });
 
   it('should handle nested metadata', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const logger = new Logger();
     
     logger.info('Test', { 

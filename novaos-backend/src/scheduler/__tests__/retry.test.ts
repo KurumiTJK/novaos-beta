@@ -296,9 +296,12 @@ describe('retryUntilSuccess', () => {
       maxAttempts: 2,
       strategy: 'none',
     });
+    
+    // Attach rejection handler BEFORE running timers to prevent unhandled rejection
+    const assertion = expect(resultPromise).rejects.toThrow('always fails');
+    
     await vi.runAllTimersAsync();
-
-    await expect(resultPromise).rejects.toThrow('always fails');
+    await assertion;
   });
 });
 

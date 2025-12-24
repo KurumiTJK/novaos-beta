@@ -15,7 +15,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { AsyncAppResult } from '../../../types/result.js';
+import type { AsyncAppResult, AppResult } from '../../../types/result.js';
 import { ok, err, appError } from '../../../types/result.js';
 import { createSparkId, createTimestamp } from '../../../types/branded.js';
 import type { ResourceId } from '../../../types/branded.js';
@@ -148,13 +148,34 @@ export class SparkGenerator implements ISparkGenerator {
   private generateFromStep(
     step: Step,
     escalationLevel: number
-  ): AsyncAppResult<SparkGenerationResult> {
+  ): AppResult<SparkGenerationResult> {
     const variant = getVariantForLevel(escalationLevel);
+
+    // Explicit check for missing/empty activities - use fallback immediately
+    if (!step.activities || step.activities.length === 0) {
+      const fallbackAction = generateFallbackActionWithMetadata(
+        step.title,
+        escalationLevel,
+        this.config
+      );
+
+      const diagnostics: SparkGenerationDiagnostics = {
+        requestedEscalationLevel: escalationLevel,
+        actualEscalationLevel: escalationLevel,
+        escalationClamped: false,
+        activityIndex: -1,
+        hasResource: false,
+        urlSanitized: false,
+        generatedAt: new Date().toISOString(),
+      };
+
+      return ok({ action: fallbackAction, diagnostics });
+    }
 
     // Select activity based on variant
     const selection = selectActivity(step.activities, variant);
 
-    // No activities - use fallback
+    // No suitable activity found - use fallback
     if (!selection) {
       const fallbackAction = generateFallbackActionWithMetadata(
         step.title,
@@ -290,11 +311,17 @@ export function createSparkGeneratorFromLimits(limits: {
   minSparkMinutes?: number;
   maxSparkMinutes?: number;
 }): SparkGenerator {
-  return new SparkGenerator({
-    maxEscalationLevel: limits.maxEscalationLevel,
-    minSparkMinutes: limits.minSparkMinutes,
-    maxSparkMinutes: limits.maxSparkMinutes,
-  });
+  // Only include defined properties to avoid overriding defaults with undefined
+  // Use Object.fromEntries to filter out undefined values
+  const config = Object.fromEntries(
+    Object.entries({
+      maxEscalationLevel: limits.maxEscalationLevel,
+      minSparkMinutes: limits.minSparkMinutes,
+      maxSparkMinutes: limits.maxSparkMinutes,
+    }).filter(([_, v]) => v !== undefined)
+  ) as Partial<SparkGenerationConfig>;
+  
+  return new SparkGenerator(config);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
