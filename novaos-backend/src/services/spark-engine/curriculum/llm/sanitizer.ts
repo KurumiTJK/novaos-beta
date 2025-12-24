@@ -85,6 +85,11 @@ const PATTERNS: readonly PatternDefinition[] = [
     description: 'Attempts to override previous instructions',
     detect: (text) => {
       const patterns = [
+        // ✅ FIX: Added simpler patterns to catch partial injection attempts
+        /\bignore\s+(all\s+)?(previous|prior)\b/gi,
+        /\bdisregard\s+(all\s+)?(previous|prior)\b/gi,
+        /\bforget\s+(all\s+)?(previous|prior)\b/gi,
+        // Full patterns (more specific)
         /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|rules?|guidelines?|prompts?)/gi,
         /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|rules?|guidelines?)/gi,
         /forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|rules?|context)/gi,

@@ -78,27 +78,39 @@ vi.mock('../../core/sword/index.js', () => ({
     deleteGoal: vi.fn(async (id: string) => {
       mockGoals.delete(id);
     }),
+    // ✅ FIX: Capture fromStatus BEFORE mutation
     transitionGoalState: vi.fn(async (id: string, event: string) => {
       const goal = mockGoals.get(id);
       if (!goal) return { success: false, error: 'Goal not found' };
+      
+      // ✅ Capture the original status BEFORE any mutation
+      const fromStatus = goal.status;
       
       const transitions: Record<string, Record<string, string>> = {
         active: { pause: 'paused', complete: 'completed', abandon: 'abandoned' },
         paused: { resume: 'active', abandon: 'abandoned' },
       };
       
-      const newStatus = transitions[goal.status]?.[event];
+      const newStatus = transitions[fromStatus]?.[event];
       if (!newStatus) {
         return { 
           success: false, 
-          error: `Invalid transition: ${event} from ${goal.status}`,
-          allowedEvents: Object.keys(transitions[goal.status] || {}),
+          error: `Invalid transition: ${event} from ${fromStatus}`,
+          allowedEvents: Object.keys(transitions[fromStatus] || {}),
         };
       }
       
+      // Now mutate
       goal.status = newStatus;
       mockGoals.set(id, goal);
-      return { success: true, goal };
+      
+      // ✅ Return explicit from/to fields
+      return { 
+        success: true, 
+        goal,
+        from: fromStatus,
+        to: newStatus,
+      };
     }),
     getQuestsForGoal: vi.fn(async (goalId: string) => {
       return Array.from(mockQuests.values()).filter(q => q.goalId === goalId);

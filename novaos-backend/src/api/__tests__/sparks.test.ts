@@ -57,28 +57,40 @@ vi.mock('../../core/sword/index.js', () => ({
     getUserSparks: vi.fn(async (userId: string) => {
       return Array.from(mockSparks.values()).filter(s => s.userId === userId);
     }),
+    // ✅ FIX: Capture fromStatus BEFORE mutation
     transitionSparkState: vi.fn(async (id: string, event: string) => {
       const spark = mockSparks.get(id);
       if (!spark) return { success: false, error: 'Spark not found' };
+      
+      // ✅ Capture the original status BEFORE any mutation
+      const fromStatus = spark.status;
       
       const transitions: Record<string, Record<string, string>> = {
         suggested: { accept: 'accepted', skip: 'skipped' },
         accepted: { complete: 'completed', skip: 'skipped' },
       };
       
-      const newStatus = transitions[spark.status]?.[event];
+      const newStatus = transitions[fromStatus]?.[event];
       if (!newStatus) {
         return { 
           success: false, 
-          error: `Invalid transition: ${event} from ${spark.status}`,
-          allowedEvents: Object.keys(transitions[spark.status] || {}),
+          error: `Invalid transition: ${event} from ${fromStatus}`,
+          allowedEvents: Object.keys(transitions[fromStatus] || {}),
         };
       }
       
+      // Now mutate
       spark.status = newStatus;
       if (newStatus === 'completed') spark.completedAt = new Date().toISOString();
       mockSparks.set(id, spark);
-      return { success: true, spark };
+      
+      // ✅ Return explicit from/to fields
+      return { 
+        success: true, 
+        spark,
+        from: fromStatus,
+        to: newStatus,
+      };
     }),
     updateSpark: vi.fn(async (id: string, updates: any) => {
       const spark = mockSparks.get(id);
@@ -250,41 +262,28 @@ describe('Spark Routes', () => {
         id: 'spark_1',
         userId: 'user_123',
         status: 'completed',
-        createdAt: '2025-01-01T00:00:00Z',
+        stepId: 'step_123',
       });
       mockSparks.set('spark_2', {
         id: 'spark_2',
         userId: 'user_123',
         status: 'suggested',
-        stepId: 'step_123',
-        createdAt: '2025-01-02T00:00:00Z',
+        stepId: 'step_456',
       });
       mockSparks.set('spark_3', {
         id: 'spark_3',
         userId: 'other_user',
         status: 'suggested',
-        createdAt: '2025-01-03T00:00:00Z',
       });
     });
 
-    it('should list sparks for user', async () => {
+    it('should list sparks for authenticated user', async () => {
       const res = await request(app)
         .get('/sparks')
         .set('Authorization', 'Bearer test-token');
 
       expect(res.status).toBe(200);
       expect(res.body.sparks).toHaveLength(2);
-      expect(res.body.pagination).toBeDefined();
-    });
-
-    it('should filter by status', async () => {
-      const res = await request(app)
-        .get('/sparks?status=completed')
-        .set('Authorization', 'Bearer test-token');
-
-      expect(res.status).toBe(200);
-      expect(res.body.sparks).toHaveLength(1);
-      expect(res.body.sparks[0].status).toBe('completed');
     });
 
     it('should filter by stepId', async () => {

@@ -70,10 +70,18 @@ interface LlmModeClassification {
 
 /**
  * Confirmation patterns — user wants to proceed with the plan.
+ * 
+ * ✅ FIX: Added compound patterns to match "yes, create it", "yes, do it", etc.
  */
 const CONFIRMATION_PATTERNS: RegExp[] = [
+  // Exact single-word confirmations
   /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|let'?s do it|sounds good|looks good|perfect|great|confirm|proceed|create it|start|begin)\.?$/i,
-  /\b(looks good|sounds good|sounds great|that works|i'?m ready|let'?s go|create the plan|create my plan|make it|set it up)\b/i,
+  // ✅ Compound patterns: "yes, create it", "ok, do it", etc.
+  /^(yes|yeah|yep|sure|ok|okay),?\s+(create|do|go|make|start|proceed|let'?s)/i,
+  // Phrase-based confirmations (anywhere in string)
+  // ✅ FIX: Removed "make it" - too ambiguous, conflicts with "make it shorter" modification
+  /\b(looks good|sounds good|sounds great|that works|i'?m ready|let'?s go|create the plan|create my plan|set it up)\b/i,
+  // Emoji confirmations
   /^(👍|✅|✓|yep!|yes!|sure!|ok!|okay!)$/i,
 ];
 
@@ -86,6 +94,9 @@ const MODIFICATION_PATTERNS: RegExp[] = [
   /\b(more|less|fewer) (time|days|hours|weeks)\b/i,
   /\b(can you|could you|please) (change|modify|update|make it)\b/i,
   /\b(i want|i'?d like|prefer) (to change|something different|a different)\b/i,
+  // ✅ FIX: Added pattern for "make it shorter/longer/easier/harder"
+  /\b(make it|shorten|lengthen)\s*(shorter|longer|easier|harder|faster|slower|simpler|less|more)?\b/i,
+  /\b(shorter|longer|easier|harder)\b/i,
 ];
 
 /**
@@ -223,100 +234,85 @@ export class ModeDetector {
       if (this.isModificationRequest(message)) {
         return {
           mode: 'modify',
-          confidence: 0.90,
+          confidence: 0.88,
           detectionMethod: 'modification',
-          reasoning: 'User requesting changes to proposal',
+          reasoning: 'User requested modifications to proposed plan',
           isContinuation: true,
         };
       }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Priority 2: Explicit confirmation (even without state)
-    // ─────────────────────────────────────────────────────────────────────────
-    if (refinementState && this.isStrongConfirmation(message)) {
-      return {
-        mode: 'create',
-        confidence: 0.92,
-        detectionMethod: 'confirmation',
-        reasoning: 'Strong confirmation detected',
-        isContinuation: true,
-      };
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Priority 3: Modification of existing goal
+    // Priority 2: Existing goal modification
     // ─────────────────────────────────────────────────────────────────────────
     if (this.isExistingGoalModification(message)) {
       return {
         mode: 'modify',
-        confidence: 0.88,
+        confidence: 0.85,
         detectionMethod: 'modification',
-        reasoning: 'Modification of existing goal detected',
-        targetGoalId: input.existingGoalId,
+        reasoning: 'User wants to modify an existing goal',
         isContinuation: false,
       };
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Priority 4: Active refinement state → continue refining
+    // Priority 3: Active refinement (answering questions)
     // ─────────────────────────────────────────────────────────────────────────
-    if (refinementState && refinementState.stage === 'clarifying') {
-      // User is answering refinement questions
-      return {
-        mode: 'refine',
-        confidence: 0.90,
-        detectionMethod: 'refinement_state',
-        reasoning: 'Active refinement session - processing response',
-        isContinuation: true,
-      };
+    if (refinementState?.stage === 'clarifying') {
+      // Use keyword heuristics for short responses
+      if (message.length < 100) {
+        const keywordResult = this.classifyWithKeywords(message, refinementState);
+        if (keywordResult.confidence >= 0.7) {
+          return keywordResult;
+        }
+      }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Priority 5: Goal creation patterns
+    // Priority 4: Goal creation intent
     // ─────────────────────────────────────────────────────────────────────────
     if (this.isGoalCreationIntent(message, input.intent)) {
       return {
         mode: 'capture',
         confidence: 0.85,
         detectionMethod: 'keyword',
-        reasoning: 'Goal creation intent detected',
+        reasoning: 'Learning goal creation intent detected',
         isContinuation: false,
       };
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Priority 6: LLM Classification (if enabled and available)
+    // Priority 5: LLM classification (if enabled)
     // ─────────────────────────────────────────────────────────────────────────
-    if (this.openai && this.config.useLlmModeDetection) {
+    if (this.config.useLlmModeDetection && this.openai) {
       const llmResult = await this.classifyWithLlm(message, refinementState);
-      if (llmResult) {
+      if (llmResult && llmResult.confidence >= 0.7) {
         return llmResult;
       }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Priority 7: Keyword-based fallback
+    // Priority 6: Keyword fallback
     // ─────────────────────────────────────────────────────────────────────────
     const keywordResult = this.classifyWithKeywords(message, refinementState);
-    if (keywordResult.confidence > 0.5) {
+    if (keywordResult.confidence >= 0.5) {
       return keywordResult;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Default: Capture mode (fail-open)
+    // Default: Capture mode
     // ─────────────────────────────────────────────────────────────────────────
     return {
       mode: 'capture',
-      confidence: 0.5,
+      confidence: 0.4,
       detectionMethod: 'default',
-      reasoning: 'Default to capture - unable to determine intent',
+      reasoning: 'No strong signals detected, defaulting to capture',
       isContinuation: false,
     };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // PATTERN MATCHING HELPERS
+  // PATTERN MATCHERS
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -324,17 +320,6 @@ export class ModeDetector {
    */
   private isConfirmation(message: string): boolean {
     return CONFIRMATION_PATTERNS.some((pattern) => pattern.test(message));
-  }
-
-  /**
-   * Check if message is a strong/explicit confirmation.
-   */
-  private isStrongConfirmation(message: string): boolean {
-    const strongPatterns = [
-      /^(yes|yeah|yep|sure|ok|okay|confirm|go ahead|do it|create it|let'?s do it)\.?$/i,
-      /^(👍|✅|✓)$/,
-    ];
-    return strongPatterns.some((pattern) => pattern.test(message.trim()));
   }
 
   /**

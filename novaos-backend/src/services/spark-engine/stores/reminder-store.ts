@@ -276,7 +276,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   /**
    * Get due reminders (scheduled time < beforeTime).
    * 
-   * ✅ FIX: Uses exclusive upper bound to return reminders with
+   * ✅ FIX #12: Uses exclusive upper bound to return reminders with
    * scheduledTime STRICTLY LESS than beforeTime (not <=).
    */
   async getDueReminders(beforeTime?: Date): AsyncAppResult<readonly ReminderSchedule[]> {
@@ -287,7 +287,8 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
       // Use sorted set for efficient time-based query
       if (this.extendedStore) {
         const dueKey = this.getDueQueueKey();
-        // ✅ FIX: Use exclusive upper bound with "(" prefix
+        // ✅ FIX #12: Use exclusive upper bound with "(" prefix
+        // This returns reminders where score < cutoffScore (not <=)
         const reminderIds = await this.extendedStore.zrangebyscore(dueKey, '-inf', `(${cutoffScore}`);
 
         if (reminderIds.length === 0) {
@@ -685,7 +686,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
 
   /**
    * Fallback for getDueReminders when sorted sets not available.
-   * ✅ FIX: Uses strict less-than for consistency with sorted set query
+   * ✅ FIX #12: Also uses strict less-than comparison for consistency
    */
   private async getDueRemindersFallback(cutoff: Date): AsyncAppResult<readonly ReminderSchedule[]> {
     try {
@@ -698,7 +699,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
         if (result.ok && result.value !== null) {
           if (result.value.status === 'pending') {
             const scheduledTime = new Date(result.value.scheduledTime).getTime();
-            // ✅ FIX: Use strict less-than for consistency
+            // ✅ FIX #12: Use strict less-than for consistency with sorted set query
             if (scheduledTime < cutoff.getTime()) {
               reminders.push(result.value);
             }

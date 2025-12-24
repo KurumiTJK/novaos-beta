@@ -33,6 +33,8 @@ import { computeIntegrityHash, verifyIntegrity } from '../secure-store.js';
 class MockKeyValueStore implements KeyValueStore {
   private data = new Map<string, { value: string; expiresAt?: number }>();
   private sets = new Map<string, Set<string>>();
+  // ✅ FIX: Add sorted sets map to track scores
+  private sortedSets = new Map<string, Map<string, number>>();
 
   async get(key: string): Promise<string | null> {
     const entry = this.data.get(key);
@@ -113,18 +115,53 @@ class MockKeyValueStore implements KeyValueStore {
     return set ? set.has(member) : false;
   }
 
-  // Sorted set operations (simplified)
+  // ✅ FIX: Proper sorted set operations that track scores
   async zadd(key: string, score: number, member: string): Promise<number> {
-    return this.sadd(key, member);
+    let sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) {
+      sortedSet = new Map();
+      this.sortedSets.set(key, sortedSet);
+    }
+    const isNew = !sortedSet.has(member);
+    sortedSet.set(member, score);
+    return isNew ? 1 : 0;
   }
 
   async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
-    return this.smembers(key);
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return [];
+    
+    // Parse min/max (handle '-inf', '+inf', and exclusive bounds like '(123')
+    const parseScore = (val: number | string): { value: number; exclusive: boolean } => {
+      if (val === '-inf') return { value: -Infinity, exclusive: false };
+      if (val === '+inf' || val === 'inf') return { value: Infinity, exclusive: false };
+      if (typeof val === 'string' && val.startsWith('(')) {
+        return { value: parseFloat(val.slice(1)), exclusive: true };
+      }
+      return { value: typeof val === 'number' ? val : parseFloat(val), exclusive: false };
+    };
+    
+    const minParsed = parseScore(min);
+    const maxParsed = parseScore(max);
+    
+    const results: Array<{ member: string; score: number }> = [];
+    for (const [member, score] of sortedSet.entries()) {
+      const aboveMin = minParsed.exclusive ? score > minParsed.value : score >= minParsed.value;
+      const belowMax = maxParsed.exclusive ? score < maxParsed.value : score <= maxParsed.value;
+      if (aboveMin && belowMax) {
+        results.push({ member, score });
+      }
+    }
+    
+    // Sort by score ascending
+    results.sort((a, b) => a.score - b.score);
+    return results.map(r => r.member);
   }
 
   clear(): void {
     this.data.clear();
     this.sets.clear();
+    this.sortedSets.clear();
   }
 }
 

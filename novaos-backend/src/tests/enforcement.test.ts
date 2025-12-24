@@ -11,82 +11,90 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
 import type { PipelineContext } from '../types/index.js';
+// ✅ FIX: Import resetOpenAIClient to reset singleton for mocking
+import { resetOpenAIClient } from '../gates/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // OPENAI MOCK SETUP
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Create a mock OpenAI chat completion response.
- */
-function createMockResponse(
-  riskLevel: string,
-  category: string,
-  reasoning: string,
-  confidence = 0.95
-) {
-  return {
-    choices: [
-      {
-        message: {
-          content: JSON.stringify({ riskLevel, category, confidence, reasoning }),
+// ✅ FIX: Use vi.hoisted() to define helpers BEFORE mock hoisting
+// vi.mock() is hoisted to the top of the file, so any functions it references
+// must also be hoisted, otherwise they won't exist when the mock factory runs.
+const { createMockResponse, classifyMessage } = vi.hoisted(() => {
+  /**
+   * Create a mock OpenAI chat completion response.
+   */
+  function createMockResponse(
+    riskLevel: string,
+    category: string,
+    reasoning: string,
+    confidence = 0.95
+  ) {
+    return {
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({ riskLevel, category, confidence, reasoning }),
+          },
+          finish_reason: 'stop',
+          index: 0,
         },
-        finish_reason: 'stop',
-        index: 0,
-      },
-    ],
-    id: 'mock-completion',
-    model: 'gpt-4o-mini',
-    object: 'chat.completion',
-    created: Date.now(),
-  };
-}
-
-/**
- * Classify a message based on content patterns.
- * This mimics what the real LLM would return.
- */
-function classifyMessage(content: string) {
-  const lower = content.toLowerCase();
-
-  // CRITICAL + death_risk → Control mode
-  if (
-    /\b(kill\s+myself|end\s+my\s+life|suicide|want\s+to\s+die|ending\s+it\s+all)\b/i.test(content) ||
-    /\b(hurt\s+myself|self[\s-]?harm)\b/i.test(content)
-  ) {
-    return createMockResponse('critical', 'death_risk', 'Suicidal/self-harm intent detected');
+      ],
+      id: 'mock-completion',
+      model: 'gpt-4o-mini',
+      object: 'chat.completion',
+      created: Date.now(),
+    };
   }
 
-  // HIGH + harm_risk → Hard veto
-  if (
-    /\b(make\s+a\s+bomb|build\s+a?\s*bomb|build\s+a?\s*weapon|make\s+explosives?)\b/i.test(content) ||
-    /\b(hack\s+into|break\s+into.*account)\b/i.test(content) ||
-    /\b(groom\s+a?\s*child|harm\s+a?\s*child)\b/i.test(content) ||
-    /\b(kill\s+(someone|him|her|them|people))\b/i.test(content)
-  ) {
-    return createMockResponse('high', 'harm_risk', 'Dangerous/harmful request detected');
+  /**
+   * Classify a message based on content patterns.
+   * This mimics what the real LLM would return.
+   */
+  function classifyMessage(content: string) {
+    // CRITICAL + death_risk → Control mode
+    if (
+      /\b(kill\s+myself|end\s+my\s+life|suicide|want\s+to\s+die|ending\s+it\s+all)\b/i.test(content) ||
+      /\b(hurt\s+myself|self[\s-]?harm)\b/i.test(content)
+    ) {
+      return createMockResponse('critical', 'death_risk', 'Suicidal/self-harm intent detected');
+    }
+
+    // HIGH + harm_risk → Hard veto
+    if (
+      /\b(make\s+a\s+bomb|build\s+a?\s*bomb|build\s+a?\s*weapon|make\s+explosives?)\b/i.test(content) ||
+      /\b(hack\s+into|break\s+into.*account)\b/i.test(content) ||
+      /\b(groom\s+a?\s*child|harm\s+a?\s*child)\b/i.test(content) ||
+      /\b(kill\s+(someone|him|her|them|people))\b/i.test(content)
+    ) {
+      return createMockResponse('high', 'harm_risk', 'Dangerous/harmful request detected');
+    }
+
+    // MEDIUM + reckless_decision → Soft veto
+    // ✅ FIX: Changed \bcrypto\b to \bcrypto to match "cryptocurrency"
+    if (
+      /\b(all\s+(my\s+)?savings|put\s+everything|invest\s+all)\b/i.test(content) &&
+      /\b(crypto|bitcoin|stock|invest)/i.test(content)
+    ) {
+      return createMockResponse('medium', 'reckless_decision', 'Reckless financial decision detected');
+    }
+
+    if (
+      /\b(skip\s+(the\s+)?doctor|self[\s-]?diagnos)\b/i.test(content) ||
+      /\b(diagnosed.*skip|skip.*treatment)\b/i.test(content)
+    ) {
+      return createMockResponse('medium', 'reckless_decision', 'Reckless health decision detected');
+    }
+
+    // Default: safe
+    return createMockResponse('none', 'safe', 'Normal request - no safety concerns');
   }
 
-  // MEDIUM + reckless_decision → Soft veto
-  if (
-    /\b(all\s+(my\s+)?savings|put\s+everything|invest\s+all)\b/i.test(content) &&
-    /\b(crypto|bitcoin|stock|invest)\b/i.test(content)
-  ) {
-    return createMockResponse('medium', 'reckless_decision', 'Reckless financial decision detected');
-  }
+  return { createMockResponse, classifyMessage };
+});
 
-  if (
-    /\b(skip\s+(the\s+)?doctor|self[\s-]?diagnos)\b/i.test(content) ||
-    /\b(diagnosed.*skip|skip.*treatment)\b/i.test(content)
-  ) {
-    return createMockResponse('medium', 'reckless_decision', 'Reckless health decision detected');
-  }
-
-  // Default: safe
-  return createMockResponse('none', 'safe', 'Normal request - no safety concerns');
-}
-
-// Mock OpenAI module
+// Mock OpenAI module - now classifyMessage is available at hoist time
 vi.mock('openai', () => {
   return {
     default: vi.fn().mockImplementation(() => ({
@@ -124,10 +132,14 @@ function createContext(overrides: Partial<PipelineContext> = {}): PipelineContex
 beforeAll(() => {
   // Set mock API key so the Shield gate initializes its OpenAI client
   process.env.OPENAI_API_KEY = 'test-mock-key';
+  // ✅ FIX: Reset singleton to ensure mocked OpenAI client is created fresh
+  resetOpenAIClient();
 });
 
 afterAll(() => {
   delete process.env.OPENAI_API_KEY;
+  // ✅ FIX: Reset singleton after tests complete
+  resetOpenAIClient();
   vi.restoreAllMocks();
 });
 

@@ -547,10 +547,13 @@ export function createSparkRouter(): Router {
       
       const { type, reason, notes } = parseResult.data;
       
+      // ✅ FIX: Capture original status BEFORE transition (object may be mutated in place)
+      const fromStatus = spark.status;
+      
       logger.info('Transitioning spark state', {
         userId,
         sparkId,
-        from: spark.status,
+        from: fromStatus,
         event: type,
         requestId: req.requestId,
       });
@@ -560,9 +563,9 @@ export function createSparkRouter(): Router {
       
       if (!result.success) {
         throw new ValidationError(
-          result.error || `Cannot transition from ${spark.status} with event ${type}`,
+          result.error || `Cannot transition from ${fromStatus} with event ${type}`,
           {
-            currentState: spark.status,
+            currentState: fromStatus,
             event: type,
             allowedEvents: result.allowedEvents,
           }
@@ -572,7 +575,7 @@ export function createSparkRouter(): Router {
       res.json({
         spark: result.spark,
         transition: {
-          from: spark.status,
+          from: fromStatus,  // ✅ FIX: Use captured status, not mutated object
           to: result.spark?.status,
           event: type,
           reason,

@@ -93,17 +93,25 @@ function getQuestionForField(field: RefinementField, topic?: string): string {
 
 /**
  * Parse user level from response.
+ * 
+ * ✅ FIX: Added word-boundary patterns to match "I have some experience"
+ * in addition to start-anchored patterns like "^some experience".
  */
 function parseUserLevel(response: string): UserLevel | null {
   const lower = response.toLowerCase().trim();
 
-  // Direct matches
+  // Direct matches (start-anchored)
   if (/^beginner|^novice|^new|^just start|^no experience|^none|^zero/i.test(lower)) {
     return 'beginner';
   }
-  if (/^intermediate|^some experience|^familiar|^know (the )?basics|^not new/i.test(lower)) {
+  
+  // ✅ FIX: Check start-anchored patterns OR word-boundary patterns
+  if (/^intermediate|^some experience|^familiar|^know (the )?basics|^not new/i.test(lower) ||
+      /\b(have |got |with )?some experience\b/i.test(lower) ||
+      /\bi('m| am) familiar\b/i.test(lower)) {
     return 'intermediate';
   }
+  
   if (/^advanced|^expert|^proficient|^experienced|^very familiar/i.test(lower)) {
     return 'advanced';
   }
@@ -258,41 +266,48 @@ function parseStartDate(response: string): string | null {
     return formatDate(tomorrow);
   }
 
-  // "next week", "next monday"
-  if (/^next\s*week/i.test(lower)) {
-    const nextWeek = new Date(today);
-    nextWeek.setDate(nextWeek.getDate() + 7);
-    return formatDate(nextWeek);
-  }
-
-  // Day of week
-  const dayMatch = lower.match(/^(next\s*)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i);
-  if (dayMatch) {
-    const targetDay = dayMatch[2].toLowerCase();
-    const dayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(targetDay);
-    const currentDay = today.getDay();
-    let daysUntil = dayIndex - currentDay;
-    if (daysUntil <= 0 || dayMatch[1]) {
-      daysUntil += 7;
+  // "next monday", "next week"
+  const nextWeekMatch = lower.match(/next\s+(week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i);
+  if (nextWeekMatch) {
+    const target = nextWeekMatch[1].toLowerCase();
+    if (target === 'week') {
+      const nextWeek = new Date(today);
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      return formatDate(nextWeek);
     }
-    const targetDate = new Date(today);
-    targetDate.setDate(targetDate.getDate() + daysUntil);
-    return formatDate(targetDate);
+    // Find next occurrence of day
+    const dayMap: Record<string, number> = {
+      sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+      thursday: 4, friday: 5, saturday: 6,
+    };
+    const targetDay = dayMap[target];
+    if (targetDay !== undefined) {
+      const currentDay = today.getDay();
+      let daysUntil = targetDay - currentDay;
+      if (daysUntil <= 0) daysUntil += 7;
+      const nextDay = new Date(today);
+      nextDay.setDate(nextDay.getDate() + daysUntil);
+      return formatDate(nextDay);
+    }
   }
 
-  // ISO date (YYYY-MM-DD)
+  // ISO date format (YYYY-MM-DD)
   const isoMatch = lower.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
     return isoMatch[0];
   }
 
-  // US date (MM/DD/YYYY or MM-DD-YYYY)
-  const usMatch = lower.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (usMatch) {
-    const month = usMatch[1].padStart(2, '0');
-    const day = usMatch[2].padStart(2, '0');
-    const year = usMatch[3];
-    return `${year}-${month}-${day}`;
+  // Common date formats
+  const dateMatch = lower.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+  if (dateMatch) {
+    const month = parseInt(dateMatch[1], 10);
+    const day = parseInt(dateMatch[2], 10);
+    let year = dateMatch[3] ? parseInt(dateMatch[3], 10) : today.getFullYear();
+    if (year < 100) year += 2000;
+    
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    }
   }
 
   return null;
@@ -302,90 +317,86 @@ function parseStartDate(response: string): string | null {
  * Format date as YYYY-MM-DD.
  */
 function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
  * Parse active days from response.
  */
-function parseActiveDays(response: string): readonly DayOfWeek[] | null {
+function parseActiveDays(response: string): DayOfWeek[] | null {
   const lower = response.toLowerCase().trim();
 
   // "every day", "daily"
-  if (/every\s*day|daily|all\s*(days|week)/i.test(lower)) {
+  if (/^every\s*day|^daily|^all\s*days/i.test(lower)) {
     return ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
   }
 
-  // "weekdays", "work days"
-  if (/weekday|work\s*day|monday.*(through|to|-).*friday/i.test(lower)) {
+  // "weekdays"
+  if (/^weekdays|^week\s*days|^monday\s*(-|to|through)\s*friday/i.test(lower)) {
     return ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
   }
 
   // "weekends"
-  if (/weekend/i.test(lower)) {
+  if (/^weekends?/i.test(lower)) {
     return ['saturday', 'sunday'];
   }
 
-  // Specific days mentioned
-  const days: DayOfWeek[] = [];
+  // Specific days
   const dayMap: Record<string, DayOfWeek> = {
-    'mon': 'monday',
-    'tue': 'tuesday',
-    'wed': 'wednesday',
-    'thu': 'thursday',
-    'fri': 'friday',
-    'sat': 'saturday',
-    'sun': 'sunday',
-    'monday': 'monday',
-    'tuesday': 'tuesday',
-    'wednesday': 'wednesday',
-    'thursday': 'thursday',
-    'friday': 'friday',
-    'saturday': 'saturday',
-    'sunday': 'sunday',
+    'mon': 'monday', 'monday': 'monday',
+    'tue': 'tuesday', 'tues': 'tuesday', 'tuesday': 'tuesday',
+    'wed': 'wednesday', 'wednesday': 'wednesday',
+    'thu': 'thursday', 'thur': 'thursday', 'thurs': 'thursday', 'thursday': 'thursday',
+    'fri': 'friday', 'friday': 'friday',
+    'sat': 'saturday', 'saturday': 'saturday',
+    'sun': 'sunday', 'sunday': 'sunday',
   };
 
-  for (const [pattern, day] of Object.entries(dayMap)) {
-    if (new RegExp(`\\b${pattern}`, 'i').test(lower) && !days.includes(day)) {
-      days.push(day);
+  const foundDays: DayOfWeek[] = [];
+  for (const [abbr, day] of Object.entries(dayMap)) {
+    if (lower.includes(abbr) && !foundDays.includes(day)) {
+      foundDays.push(day);
     }
   }
 
-  if (days.length > 0) {
-    // Sort by day order
-    const dayOrder: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    return days.sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+  if (foundDays.length > 0) {
+    return foundDays;
   }
 
   return null;
 }
 
 /**
- * Parse reminder preference from response.
+ * Parse reminder preferences from response.
  */
 function parseReminderPreference(response: string): { enabled: boolean; firstHour?: number; lastHour?: number } | null {
   const lower = response.toLowerCase().trim();
 
   // Negative responses
-  if (/^no|^nope|^don'?t|^not|^skip|^none/i.test(lower)) {
+  if (/^no|^nope|^don'?t|^skip|^none|^not now/i.test(lower)) {
     return { enabled: false };
   }
 
   // Positive responses
-  if (/^yes|^yeah|^sure|^please|^ok|^definitely/i.test(lower)) {
-    return { enabled: true };
-  }
+  if (/^yes|^yeah|^sure|^please|^ok|^enable|^set up/i.test(lower)) {
+    // Check for time preferences
+    const morningMatch = lower.match(/morning|(\d{1,2})\s*(am|a\.m\.)/i);
+    const eveningMatch = lower.match(/evening|(\d{1,2})\s*(pm|p\.m\.)/i);
 
-  // Time-based responses
-  const morningMatch = lower.match(/morning|9\s*am|10\s*am/i);
-  const eveningMatch = lower.match(/evening|7\s*pm|8\s*pm|19:|20:/i);
+    let firstHour: number | undefined;
+    let lastHour: number | undefined;
 
-  if (morningMatch || eveningMatch) {
-    return {
-      enabled: true,
-      firstHour: morningMatch ? 9 : 12,
-      lastHour: eveningMatch ? 19 : 17,
-    };
+    if (morningMatch) {
+      firstHour = morningMatch[1] ? parseInt(morningMatch[1], 10) : 9;
+    }
+    if (eveningMatch) {
+      lastHour = eveningMatch[1] ? parseInt(eveningMatch[1], 10) + 12 : 18;
+    }
+
+    return { enabled: true, firstHour, lastHour };
   }
 
   return null;
@@ -396,7 +407,7 @@ function parseReminderPreference(response: string): { enabled: boolean; firstHou
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Manages the multi-turn refinement conversation.
+ * Manages the multi-turn refinement flow for goal creation.
  */
 export class RefinementFlow {
   private readonly config: SwordGateConfig;
@@ -406,34 +417,36 @@ export class RefinementFlow {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // INITIATE
+  // INITIATE REFINEMENT
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Initiate a new refinement session from a goal statement.
+   * Start a new refinement session from a goal statement.
+   * ✅ FIX: Added optional userPreferences parameter to pre-fill inputs
    */
-  initiate(
-    userId: UserId,
-    goalStatement: string,
-    userPreferences?: SwordUserPreferences
-  ): SwordRefinementState {
+  initiate(userId: UserId, goalStatement: string, userPreferences?: SwordUserPreferences): SwordRefinementState {
     const now = createTimestamp();
     const expiresAt = createTimestamp(
       new Date(Date.now() + this.config.refinementTtlSeconds * 1000)
     );
 
-    // Extract topic from goal statement
     const extractedTopic = this.extractTopic(goalStatement);
 
-    // Build initial inputs
+    // ✅ FIX: Pre-fill inputs from user preferences
     const inputs: SwordRefinementInputs = {
       goalStatement,
       extractedTopic,
-      // Pre-fill from user preferences
-      learningStyle: userPreferences?.defaultLearningStyle,
-      activeDays: userPreferences?.preferredDays,
-      dailyTimeCommitment: userPreferences?.defaultDailyMinutes,
     };
+
+    // Apply user preferences if provided
+    if (userPreferences) {
+      if (userPreferences.defaultLearningStyle) {
+        inputs.learningStyle = userPreferences.defaultLearningStyle;
+      }
+      if (userPreferences.defaultDailyMinutes) {
+        inputs.dailyTimeCommitment = userPreferences.defaultDailyMinutes;
+      }
+    }
 
     return {
       userId,
@@ -441,7 +454,7 @@ export class RefinementFlow {
       inputs,
       currentQuestion: 'userLevel',
       answeredQuestions: ['goalStatement'],
-      turnCount: 1,
+      turnCount: 0,
       maxTurns: this.config.maxRefinementTurns,
       createdAt: now,
       updatedAt: now,
@@ -454,18 +467,17 @@ export class RefinementFlow {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Process a user response and update the refinement state.
+   * Process a user response during refinement.
    */
-  processResponse(
-    state: SwordRefinementState,
-    message: string
-  ): SwordRefinementState {
+  processResponse(state: SwordRefinementState, message: string): SwordRefinementState {
+    const now = createTimestamp();
     const currentQuestion = state.currentQuestion;
+
     if (!currentQuestion) {
-      return state;
+      // No current question, return unchanged
+      return { ...state, updatedAt: now };
     }
 
-    const now = createTimestamp();
     const newInputs = { ...state.inputs };
     const answeredQuestions = [...state.answeredQuestions];
     let parsed = false;

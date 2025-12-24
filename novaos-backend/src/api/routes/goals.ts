@@ -374,10 +374,13 @@ export function createGoalRouter(): Router {
       
       const { type, reason } = parseResult.data;
       
+      // ✅ FIX: Capture original status BEFORE transition (object may be mutated in place)
+      const fromStatus = goal.status;
+      
       logger.info('Transitioning goal state', {
         userId,
         goalId,
-        from: goal.status,
+        from: fromStatus,
         event: type,
         requestId: req.requestId,
       });
@@ -387,9 +390,9 @@ export function createGoalRouter(): Router {
       
       if (!result.success) {
         throw new ValidationError(
-          result.error || `Cannot transition from ${goal.status} with event ${type}`,
+          result.error || `Cannot transition from ${fromStatus} with event ${type}`,
           { 
-            currentState: goal.status,
+            currentState: fromStatus,
             event: type,
             allowedEvents: result.allowedEvents,
           }
@@ -399,7 +402,7 @@ export function createGoalRouter(): Router {
       res.json({
         goal: result.goal,
         transition: {
-          from: goal.status,
+          from: fromStatus,  // ✅ FIX: Use captured status, not mutated object
           to: result.goal?.status,
           event: type,
           reason,

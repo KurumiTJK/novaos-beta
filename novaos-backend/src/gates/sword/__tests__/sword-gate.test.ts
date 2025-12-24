@@ -376,7 +376,13 @@ describe('RefinementFlow', () => {
       const state = flow.initiate(TEST_USER_ID, 'Learn Rust');
       const question = flow.getNextQuestion(state);
 
-      expect(question).toContain('experience');
+      // ✅ FIX #6: Check for any valid keyword from userLevel templates
+      // Templates contain: "experience", "familiar", "beginner"
+      const validKeywords = ['experience', 'familiar', 'beginner'];
+      const hasValidKeyword = validKeywords.some(kw => 
+        question?.toLowerCase().includes(kw)
+      );
+      expect(hasValidKeyword).toBe(true);
     });
 
     it('should return null when all required fields filled', () => {

@@ -164,16 +164,95 @@ const UNICODE_ATTACKS = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// HOMOGLYPH NORMALIZATION — Fix #13
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ✅ FIX #13: Expanded homoglyph map for detecting lookalike characters.
+ * Maps visually similar characters to their ASCII equivalents.
+ */
+const HOMOGLYPHS: Record<string, string> = {
+  // Cyrillic → Latin
+  '\u0430': 'a',  // Cyrillic small a
+  '\u0410': 'A',  // Cyrillic capital A
+  '\u0435': 'e',  // Cyrillic small ie
+  '\u0415': 'E',  // Cyrillic capital IE
+  '\u043E': 'o',  // Cyrillic small o
+  '\u041E': 'O',  // Cyrillic capital O
+  '\u0440': 'p',  // Cyrillic small er (looks like p)
+  '\u0420': 'P',  // Cyrillic capital ER
+  '\u0441': 'c',  // Cyrillic small es (looks like c)
+  '\u0421': 'C',  // Cyrillic capital ES
+  '\u0443': 'y',  // Cyrillic small u (looks like y)
+  '\u0423': 'Y',  // Cyrillic capital U
+  '\u0445': 'x',  // Cyrillic small ha (looks like x)
+  '\u0425': 'X',  // Cyrillic capital HA
+  '\u0456': 'i',  // Ukrainian small i ← CRITICAL for "admіn" detection
+  '\u0406': 'I',  // Ukrainian capital I
+  '\u0457': 'i',  // Ukrainian small yi
+  '\u0407': 'I',  // Ukrainian capital YI
+  '\u0454': 'e',  // Ukrainian small ie
+  '\u0404': 'E',  // Ukrainian capital IE
+  '\u0458': 'j',  // Cyrillic small je
+  '\u0408': 'J',  // Cyrillic capital JE
+  '\u043C': 'm',  // Cyrillic small em
+  '\u041C': 'M',  // Cyrillic capital EM
+  '\u043D': 'h',  // Cyrillic small en (can look like h)
+  '\u0442': 't',  // Cyrillic small te (can look like t in some fonts)
+  
+  // Greek → Latin
+  '\u03B1': 'a',  // Greek small alpha
+  '\u0391': 'A',  // Greek capital Alpha
+  '\u03B5': 'e',  // Greek small epsilon
+  '\u0395': 'E',  // Greek capital Epsilon
+  '\u03B9': 'i',  // Greek small iota
+  '\u0399': 'I',  // Greek capital Iota
+  '\u03BF': 'o',  // Greek small omicron
+  '\u039F': 'O',  // Greek capital Omicron
+  '\u03C1': 'p',  // Greek small rho (looks like p)
+  '\u03A1': 'P',  // Greek capital Rho
+  '\u03C5': 'u',  // Greek small upsilon
+  '\u03A5': 'Y',  // Greek capital Upsilon
+  '\u03C7': 'x',  // Greek small chi
+  '\u03A7': 'X',  // Greek capital Chi
+  
+  // Common number/letter substitutions (leetspeak)
+  '0': 'o',
+  '1': 'l',
+  '3': 'e',
+  '4': 'a',
+  '5': 's',
+  '7': 't',
+  '@': 'a',
+  '$': 's',
+};
+
+/**
+ * Normalize homoglyphs to ASCII equivalents for security checking.
+ */
+function normalizeHomoglyphs(text: string): string {
+  let result = text;
+  for (const [glyph, replacement] of Object.entries(HOMOGLYPHS)) {
+    result = result.split(glyph).join(replacement);
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // INAPPROPRIATE CONTENT PATTERNS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Content that should not be in learning goals.
  * Kept minimal to avoid over-blocking legitimate content.
+ * 
+ * ✅ FIX #7: Added explicit "hack into" pattern to catch "hack into someone account"
  */
 const INAPPROPRIATE_PATTERNS: readonly RegExp[] = [
   // Illegal activities
   /\b(how\s+to\s+)?(make|build|create)\s+(a\s+)?(bomb|explosive|weapon)/i,
+  // ✅ FIX #7: Added explicit "hack into" pattern
+  /\bhack\s+into\s+(someone'?s?|a|an?|their)\s*(account|computer|system|server|network|email|phone)/i,
   /\b(hack|break\s+into)\s+(someone'?s?|a)\s+(account|computer|system)/i,
   /\b(steal|forge)\s+(identity|credit\s+card|password)/i,
 
@@ -246,39 +325,39 @@ export class GoalStatementSanitizer {
     if (text.length < this.minLength) {
       return this.reject(
         'too_short',
-        `Goal statement is too short (minimum ${this.minLength} characters)`,
+        `Goal must be at least ${this.minLength} characters`,
         originalLength
       );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Step 2: Unicode normalization and attack detection
-    // ─────────────────────────────────────────────────────────────────────────
-    const unicodeResult = this.sanitizeUnicode(text);
-    if (!unicodeResult.valid) {
-      return this.reject('unicode_attack', unicodeResult.reason!, originalLength);
-    }
-    if (unicodeResult.sanitized !== text) {
-      wasModified = true;
-    }
-    text = unicodeResult.sanitized;
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 3: Control character removal
-    // ─────────────────────────────────────────────────────────────────────────
-    const cleanedControl = text.replace(UNICODE_ATTACKS.CONTROL_CHARS, '');
-    if (cleanedControl !== text) {
-      wasModified = true;
-      text = cleanedControl;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 4: Length check and truncation
+    // Step 2: Length check and truncation
     // ─────────────────────────────────────────────────────────────────────────
     if (text.length > this.config.maxGoalStatementLength) {
       text = text.substring(0, this.config.maxGoalStatementLength);
       wasModified = true;
-      warnings.push(`Truncated to ${this.config.maxGoalStatementLength} characters`);
+      warnings.push(`Goal truncated to ${this.config.maxGoalStatementLength} characters`);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Step 3: Control character removal
+    // ─────────────────────────────────────────────────────────────────────────
+    const controlCleaned = text.replace(UNICODE_ATTACKS.CONTROL_CHARS, '');
+    if (controlCleaned !== text) {
+      text = controlCleaned;
+      wasModified = true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Step 4: Unicode sanitization
+    // ─────────────────────────────────────────────────────────────────────────
+    const unicodeResult = this.sanitizeUnicode(text);
+    if (!unicodeResult.valid) {
+      return this.reject('unicode_attack', unicodeResult.reason ?? 'Invalid Unicode detected', originalLength);
+    }
+    if (unicodeResult.sanitized !== text) {
+      text = unicodeResult.sanitized;
+      wasModified = true;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -425,12 +504,15 @@ export class GoalStatementSanitizer {
 
   /**
    * Check for inappropriate content.
+   * ✅ FIX #13: Now also checks homoglyph-normalized version
    */
   private containsInappropriateContent(text: string): boolean {
     const normalized = text.toLowerCase();
+    // ✅ FIX #13: Also check homoglyph-normalized version
+    const homoglyphNormalized = normalizeHomoglyphs(normalized);
 
     for (const pattern of INAPPROPRIATE_PATTERNS) {
-      if (pattern.test(normalized)) {
+      if (pattern.test(normalized) || pattern.test(homoglyphNormalized)) {
         return true;
       }
     }
@@ -530,3 +612,9 @@ export function sanitizeGoalStatement(
 
   return new GoalStatementSanitizer(config).sanitize(input);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export { normalizeHomoglyphs, HOMOGLYPHS };
