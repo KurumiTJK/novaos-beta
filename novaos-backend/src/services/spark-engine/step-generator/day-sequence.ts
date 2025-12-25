@@ -263,9 +263,10 @@ function validateStepDayNumbers(steps: readonly Step[]): ValidationIssue[] {
   const seenDays = new Map<number, Step[]>();
 
   for (const step of steps) {
-    const existing = seenDays.get(step.dayNumber) ?? [];
+    const dayNum = step.dayNumber ?? 0;
+    const existing = seenDays.get(dayNum) ?? [];
     existing.push(step);
-    seenDays.set(step.dayNumber, existing);
+    seenDays.set(dayNum, existing);
   }
 
   // Check for duplicates
@@ -399,25 +400,28 @@ function validateStepTimeBudgets(
   const underloadThreshold = targetMinutes * (1 - STEP_GENERATION_CONSTRAINTS.UNDERLOAD_TOLERANCE_PERCENT / 100);
 
   for (const step of steps) {
-    if (step.estimatedMinutes > overloadThreshold) {
-      const overloadPercent = Math.round((step.estimatedMinutes / targetMinutes - 1) * 100);
+    const minutes = step.estimatedMinutes ?? 0;
+    const dayNum = step.dayNumber ?? 0;
+    
+    if (minutes > overloadThreshold) {
+      const overloadPercent = Math.round((minutes / targetMinutes - 1) * 100);
       issues.push({
         type: 'overloaded_day',
         severity: 'warning',
-        message: `Day ${step.dayNumber} is ${overloadPercent}% over budget (${step.estimatedMinutes}min vs ${targetMinutes}min)`,
-        dayNumber: step.dayNumber,
+        message: `Day ${dayNum} is ${overloadPercent}% over budget (${minutes}min vs ${targetMinutes}min)`,
+        dayNumber: dayNum,
         stepId: step.id,
         suggestion: 'Split into multiple days or reduce content',
       });
     }
 
-    if (step.estimatedMinutes < underloadThreshold && step.estimatedMinutes > 0) {
-      const underloadPercent = Math.round((1 - step.estimatedMinutes / targetMinutes) * 100);
+    if (minutes < underloadThreshold && minutes > 0) {
+      const underloadPercent = Math.round((1 - minutes / targetMinutes) * 100);
       issues.push({
         type: 'underloaded_day',
         severity: 'info',
-        message: `Day ${step.dayNumber} is ${underloadPercent}% under budget (${step.estimatedMinutes}min vs ${targetMinutes}min)`,
-        dayNumber: step.dayNumber,
+        message: `Day ${dayNum} is ${underloadPercent}% under budget (${minutes}min vs ${targetMinutes}min)`,
+        dayNumber: dayNum,
         stepId: step.id,
         suggestion: 'Add exercises or supplementary content',
       });

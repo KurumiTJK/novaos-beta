@@ -387,7 +387,8 @@ export class ResourceCache {
     // Compute signature
     let signature: string;
     if (this.config.verifyIntegrity) {
-      const sigResult = computeSignature(data, this.integrityConfig);
+      const dataToSign = typeof data === 'string' ? data : JSON.stringify(data);
+      const sigResult = computeSignature(dataToSign, this.integrityConfig);
       if (!sigResult.ok) {
         return err({
           code: 'SERIALIZATION_ERROR',
@@ -590,7 +591,8 @@ export class ResourceCache {
       return true;
     }
     
-    const result = verifySignature(entry.data, entry.signature as HMACSignature, this.integrityConfig);
+    const dataToVerify = typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data);
+    const result = verifySignature(dataToVerify, entry.signature as HMACSignature, this.integrityConfig);
     return result.ok && result.value;
   }
   

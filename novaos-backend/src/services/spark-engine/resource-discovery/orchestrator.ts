@@ -29,6 +29,7 @@ import { incCounter, observeHistogram } from '../../../observability/metrics/ind
 // Types
 import type {
   CanonicalURL,
+  DisplayURL,
   TopicId,
   ResourceProvider,
   RawResourceCandidate,
@@ -44,6 +45,7 @@ import {
   createResourceId,
   createResourceError,
   QUALITY_THRESHOLDS,
+  RESOURCE_TTL,
 } from './types.js';
 
 // Components
@@ -250,7 +252,16 @@ export class ResourceDiscoveryOrchestrator {
    */
   async discover(request: DiscoveryRequest): Promise<Result<DiscoveryResult, OrchestratorError>> {
     const startTime = Date.now();
-    const stats: Partial<DiscoveryStats> = {
+    const stats: {
+      candidatesFound: number;
+      afterDeduplication: number;
+      fromKnownSources: number;
+      enriched: number;
+      verified: number;
+      cacheHits: number;
+      byProvider: Record<string, number>;
+      durationMs?: number;
+    } = {
       candidatesFound: 0,
       afterDeduplication: 0,
       fromKnownSources: 0,
@@ -414,20 +425,22 @@ export class ResourceDiscoveryOrchestrator {
       const sources = registry.getByTopic(topicId);
       
       for (const source of sources.slice(0, maxResults)) {
+        const now = new Date();
         candidates.push({
-          url: source.baseUrl,
-          displayUrl: source.baseUrl,
+          id: createResourceId(`known:${source.id}:${topicId}`),
+          canonicalUrl: source.baseUrl as CanonicalURL,
+          displayUrl: source.baseUrl as unknown as DisplayURL,
           source: {
             type: 'known_source',
-            timestamp: new Date(),
-            confidence: 1.0,
+            sourceId: source.id,
+            discoveredAt: now,
           },
-          discoveredAt: new Date(),
-          rawMetadata: {
-            name: source.name,
-            description: source.description,
-            authority: source.authority,
-          },
+          provider: source.provider ?? 'other',
+          topicIds: [topicId],
+          title: source.name,
+          snippet: source.description,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + RESOURCE_TTL.KNOWN_SOURCE_MS),
         });
       }
     }
@@ -488,7 +501,7 @@ export class ResourceDiscoveryOrchestrator {
     const result: RawResourceCandidate[] = [];
     
     for (const candidate of candidates) {
-      const canonical = candidate.url;
+      const canonical = candidate.canonicalUrl;
       
       // Skip if excluded
       if (excluded.has(canonical)) {
@@ -520,7 +533,7 @@ export class ResourceDiscoveryOrchestrator {
     const results: Array<RawResourceCandidate & { classification: ClassificationResult }> = [];
     
     for (const candidate of candidates) {
-      const classification = this.classifyUrl(candidate.url);
+      const classification = this.classifyUrl(candidate.canonicalUrl);
       results.push({ ...candidate, classification });
     }
     
@@ -653,21 +666,23 @@ export class ResourceDiscoveryOrchestrator {
     const now = new Date();
     
     return {
-      id: createResourceId(`${candidate.classification.provider}:${candidate.url}`),
-      url: candidate.classification.url,
+      id: createResourceId(`${candidate.classification.provider}:${candidate.canonicalUrl}`),
+      canonicalUrl: candidate.canonicalUrl,
       displayUrl: candidate.displayUrl,
       provider: candidate.classification.provider,
-      providerId: candidate.classification.providerId,
+      providerId: candidate.classification.providerId as string | undefined,
       source: candidate.source,
-      discoveredAt: candidate.discoveredAt,
+      candidateCreatedAt: candidate.createdAt,
       enrichedAt: now,
-      title: (candidate.rawMetadata as { name?: string })?.name ?? 'Unknown',
-      description: (candidate.rawMetadata as { description?: string })?.description,
-      providerMetadata: {},
-      topics: candidate.classification.topics.map(t => t.topicId),
+      enrichmentExpiresAt: new Date(now.getTime() + RESOURCE_TTL.ENRICHMENT_MS),
+      title: candidate.title ?? 'Unknown',
+      description: candidate.snippet ?? '',
+      contentType: 'article',
+      format: 'text',
+      difficulty: 'intermediate',
+      metadata: { provider: candidate.classification.provider },
+      topicIds: candidate.topicIds,
       qualitySignals: this.computeQualitySignals(candidate),
-      isFromKnownSource: candidate.classification.knownSource !== null,
-      knownSourceId: candidate.classification.knownSource?.source.id,
     };
   }
   
@@ -687,11 +702,19 @@ export class ResourceDiscoveryOrchestrator {
                   authorityLevel === 'community' ? 0.7 : 0.6;
     }
     
+    const popularity = 0.5;
+    const recency = 0.5;
+    const completeness = 0.5;
+    
     return {
-      popularity: 0.5, // Would come from API (views, stars)
-      recency: 0.5,    // Would compute from publish date
+      popularity,
+      recency,
       authority,
-      completeness: 0.5,
+      completeness,
+      composite: (popularity + recency + authority + completeness) / 4,
+      details: {
+        ageInDays: 0,
+      },
     };
   }
   
@@ -728,7 +751,7 @@ export class ResourceDiscoveryOrchestrator {
       const batchResults = await Promise.all(
         batch.map(async (resource) => {
           // Check cache first
-          const cached = await cache.getVerified(resource.url);
+          const cached = await cache.getVerified(resource.canonicalUrl);
           if (cached.ok) {
             stats.cacheHits = (stats.cacheHits ?? 0) + 1;
             return { verified: cached.value.data, failed: null };
@@ -738,12 +761,12 @@ export class ResourceDiscoveryOrchestrator {
           const result = await this.verifyResource(resource);
           
           if (result.ok) {
-            await cache.setVerified(resource.url, result.value);
+            await cache.setVerified(resource.canonicalUrl, result.value);
             return { verified: result.value, failed: null };
           } else {
             return {
               verified: null,
-              failed: { url: resource.url, error: result.error },
+              failed: { url: resource.canonicalUrl, error: result.error },
             };
           }
         })
@@ -786,7 +809,7 @@ export class ResourceDiscoveryOrchestrator {
         httpStatus: 200,
         responseTimeMs: 0,
         redirectChain: [],
-        finalUrl: enriched.url,
+        finalUrl: enriched.canonicalUrl,
         contentWalls: {
           hasPaywall: false,
           hasLoginWall: false,
@@ -800,11 +823,12 @@ export class ResourceDiscoveryOrchestrator {
       },
       usability: {
         score: 0.7,
-        isRecommended: true,
+        recommended: true,
         issues: [],
         strengths: ['From known source'],
         audienceMatch: 0.8,
-        prerequisitesCoverage: 1.0,
+        prerequisitesCovered: true,
+        missingPrerequisites: [],
       },
     };
   }
@@ -870,7 +894,7 @@ export class ResourceDiscoveryOrchestrator {
     const usability = resource.usability.score;
     
     // Boost for known sources
-    const knownSourceBoost = resource.isFromKnownSource ? 0.1 : 0;
+    const knownSourceBoost = resource.source.type === 'known_source' ? 0.1 : 0;
     
     return quality * 0.6 + usability * 0.4 + knownSourceBoost;
   }
@@ -897,20 +921,23 @@ export class ResourceDiscoveryOrchestrator {
     }
     
     // Create candidate
+    const now = new Date();
+    const classification = this.classifyUrl(url);
     const candidate: RawResourceCandidate = {
-      url: canonResult.canonical,
-      displayUrl: canonResult.display,
+      id: createResourceId(`user:${canonResult.canonical}`),
+      canonicalUrl: canonResult.canonical,
+      displayUrl: canonResult.display as unknown as DisplayURL,
       source: {
         type: 'user_provided',
-        timestamp: new Date(),
-        confidence: 1.0,
+        discoveredAt: now,
       },
-      discoveredAt: new Date(),
-      rawMetadata: {},
+      provider: classification.provider,
+      topicIds: classification.topics.map(t => t.topicId),
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + RESOURCE_TTL.VERIFICATION_MS),
     };
     
     // Classify
-    const classification = this.classifyUrl(url);
     const classified = { ...candidate, classification };
     
     // Enrich

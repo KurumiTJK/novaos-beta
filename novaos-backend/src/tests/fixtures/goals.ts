@@ -201,12 +201,12 @@ export function createTestJourney() {
   ];
   
   const steps = [
-    createTestStep(quests[0].id, { title: 'Day 1: Hello Rust', sequence: 1, status: 'active' }),
-    createTestStep(quests[0].id, { title: 'Day 2: Variables', sequence: 2, status: 'pending' }),
-    createTestStep(quests[0].id, { title: 'Day 3: Functions', sequence: 3, status: 'pending' }),
+    createTestStep(quests[0]!.id, { title: 'Day 1: Hello Rust', sequence: 1, status: 'active' }),
+    createTestStep(quests[0]!.id, { title: 'Day 2: Variables', sequence: 2, status: 'pending' }),
+    createTestStep(quests[0]!.id, { title: 'Day 3: Functions', sequence: 3, status: 'pending' }),
   ];
   
-  const spark = createTestSpark(steps[0].id);
+  const spark = createTestSpark(steps[0]!.id);
   
   return { goal, quests, steps, spark };
 }

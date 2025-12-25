@@ -229,7 +229,7 @@ export class HealthChecker {
       // Use SSRF-safe client for health checks
       const response = await safeFetch(source.healthCheck.url, {
         method: 'HEAD',
-        timeoutMs,
+        timeout: timeoutMs,
         headers: {
           'User-Agent': 'NovaOS-HealthChecker/1.0',
         },
@@ -238,16 +238,17 @@ export class HealthChecker {
       
       // Determine status based on HTTP code and response time
       let status: HealthStatus;
-      if (response.ok) {
+      const statusCode = response.statusCode;
+      if (statusCode >= 200 && statusCode < 300) {
         // Consider degraded if response time is high
         if (responseTimeMs > timeoutMs * 0.8) {
           status = 'degraded';
         } else {
           status = 'healthy';
         }
-      } else if (response.status >= 500) {
+      } else if (statusCode >= 500) {
         status = 'unhealthy';
-      } else if (response.status === 429) {
+      } else if (statusCode === 429) {
         status = 'degraded'; // Rate limited
       } else {
         status = 'unhealthy';
@@ -256,7 +257,7 @@ export class HealthChecker {
       return {
         sourceId: source.id,
         status,
-        httpStatus: response.status,
+        httpStatus: statusCode,
         responseTimeMs,
         checkedAt,
       };

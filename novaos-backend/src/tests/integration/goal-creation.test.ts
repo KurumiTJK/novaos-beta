@@ -79,7 +79,7 @@ describe('Goal Creation Integration', () => {
       });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.title).toBe('Learn Rust Programming');
         expect(result.value.status).toBe('active');
       }
@@ -132,7 +132,7 @@ describe('Goal Creation Integration', () => {
       });
       
       expect(isErr(result)).toBe(true);
-      if (isErr(result)) {
+      if (!result.ok) {
         expect(result.error.code).toBe('LIMIT_EXCEEDED');
       }
     });
@@ -152,7 +152,7 @@ describe('Goal Creation Integration', () => {
       const result = await mockQuestGenerator.generateQuests(goal);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value).toHaveLength(3);
         expect(result.value[0].sequence).toBe(1);
       }
@@ -183,7 +183,7 @@ describe('Goal Creation Integration', () => {
       const result = await mockStepGenerator.generateSteps('quest_123');
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value).toHaveLength(3);
       }
     });
@@ -197,7 +197,7 @@ describe('Goal Creation Integration', () => {
       const result = await mockGoalStore.update(goal.id, { status: 'paused' });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.status).toBe('paused');
       }
     });
@@ -209,7 +209,7 @@ describe('Goal Creation Integration', () => {
       const result = await mockGoalStore.update(goal.id, { status: 'active' });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.status).toBe('active');
       }
     });

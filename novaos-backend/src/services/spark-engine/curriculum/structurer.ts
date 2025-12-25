@@ -125,11 +125,11 @@ function buildUserPrompt(request: CurriculumGenerationRequest): string {
   const resourceList = resources.map((resource, idx) => {
     const index = idx + 1; // 1-based
     const provider = resource.provider ?? 'unknown';
-    const difficulty = resource.qualitySignals?.difficulty ?? 'intermediate';
-    const duration = resource.enrichment?.duration?.estimatedMinutes ?? 30;
-    const topicsStr = resource.matchedTopics?.join(', ') ?? '';
+    const difficulty = resource.difficulty ?? 'intermediate';
+    const duration = resource.estimatedMinutes ?? 30;
+    const topicsStr = resource.topicIds?.join(', ') ?? '';
     
-    return `[${index}] ${resource.enrichment?.title ?? 'Untitled'} (${provider}, ${difficulty}, ~${duration}min)${topicsStr ? ` - Topics: ${topicsStr}` : ''}`;
+    return `[${index}] ${resource.title ?? 'Untitled'} (${provider}, ${difficulty}, ~${duration}min)${topicsStr ? ` - Topics: ${topicsStr}` : ''}`;
   }).join('\n');
   
   // Build preferences section
@@ -177,12 +177,12 @@ Generate a JSON curriculum that organizes these resources into a structured ${da
  */
 function toResourceInputs(resources: readonly VerifiedResource[]): ResourceInput[] {
   return resources.map(resource => ({
-    title: resource.enrichment?.title ?? 'Untitled',
-    description: resource.enrichment?.description ?? '',
+    title: resource.title ?? 'Untitled',
+    description: resource.description ?? '',
     provider: resource.provider ?? 'unknown',
-    estimatedMinutes: resource.enrichment?.duration?.estimatedMinutes ?? 30,
-    difficulty: resource.qualitySignals?.difficulty ?? 'intermediate',
-    topics: resource.matchedTopics ?? [],
+    estimatedMinutes: resource.estimatedMinutes ?? 30,
+    difficulty: resource.difficulty ?? 'intermediate',
+    topics: resource.topicIds ?? [],
   }));
 }
 
@@ -421,7 +421,7 @@ function resolveCurriculum(
         ...assignment,
         resource,
         resourceId: resource.id,
-        title: resource.enrichment?.title ?? 'Untitled',
+        title: resource.title ?? 'Untitled',
         url: resource.canonicalUrl,
       };
     });
@@ -528,7 +528,7 @@ export async function generateCurriculum(
         .setUserPrompt(userPrompt)
         .setResources(resourceInputs)
         .setTemperature(temperature)
-        .setUserId(request.userId)
+        .setUserId(request.userId ?? '')
         .build();
       
       // Execute

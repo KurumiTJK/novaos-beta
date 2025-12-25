@@ -222,6 +222,8 @@ export class SecureTransport {
     options: TransportRequestOptions
   ): Promise<TransportResponse> {
     return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      let connectionTimeMs = 0;
       const isHTTPS = transport.useTLS;
       const httpModule = isHTTPS ? https : http;
       
@@ -269,6 +271,7 @@ export class SecureTransport {
       // Create request
       const req = httpModule.request(requestOptions, (res) => {
         clearTimeout(connectionTimer);
+        connectionTimeMs = Date.now() - startTime;
         
         // Read timeout
         const readTimer = setTimeout(() => {
@@ -312,7 +315,7 @@ export class SecureTransport {
           clearTimeout(readTimer);
           
           // Build evidence
-          const evidence = this.buildEvidence(transport, req, res, totalBytes, truncated);
+          const evidence = this.buildEvidence(transport, req, res, totalBytes, truncated, connectionTimeMs, startTime);
           
           // Verify certificate pins if configured
           if (isHTTPS && transport.certificatePins && transport.certificatePins.length > 0) {
@@ -399,7 +402,9 @@ export class SecureTransport {
     req: http.ClientRequest,
     res: http.IncomingMessage,
     totalBytes: number,
-    truncated: boolean
+    truncated: boolean,
+    connectionTimeMs: number,
+    startTime: number
   ): TransportEvidence {
     const socket = req.socket;
     
@@ -435,6 +440,8 @@ export class SecureTransport {
       tlsVersion,
       certificateChain,
       pinsVerified,
+      connectionTimeMs,
+      totalTimeMs: Date.now() - startTime,
       responseBytes: totalBytes,
       truncated,
     };

@@ -182,7 +182,19 @@ export class StepGenerator implements IStepGenerator {
    */
   async generateSteps(quest: Quest, goal: Goal): AsyncAppResult<readonly Step[]> {
     const startTime = Date.now();
-    const diagnostics: Partial<StepGenerationDiagnostics> = {
+    // Use mutable object for building diagnostics
+    const diagnostics: {
+      resourceCacheHit?: boolean;
+      llmTokensUsed?: number;
+      topicsRequested?: number;
+      discoveryDurationMs?: number;
+      resourcesDiscovered?: number;
+      curriculumDurationMs?: number;
+      resourcesUsed?: number;
+      topicsCovered?: number;
+      stepCreationDurationMs?: number;
+      pipelineDurationMs?: number;
+    } = {
       resourceCacheHit: false,
       llmTokensUsed: 0,
     };
@@ -271,7 +283,18 @@ export class StepGenerator implements IStepGenerator {
     quest: Quest,
     goal: Goal,
     config: StepGenerationConfig,
-    diagnostics: Partial<StepGenerationDiagnostics>
+    diagnostics: {
+      resourceCacheHit?: boolean;
+      llmTokensUsed?: number;
+      topicsRequested?: number;
+      discoveryDurationMs?: number;
+      resourcesDiscovered?: number;
+      curriculumDurationMs?: number;
+      resourcesUsed?: number;
+      topicsCovered?: number;
+      stepCreationDurationMs?: number;
+      pipelineDurationMs?: number;
+    }
   ): Promise<StepGenerationResult> {
     const pipelineStart = Date.now();
 

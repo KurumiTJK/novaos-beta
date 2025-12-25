@@ -20,7 +20,7 @@ export interface KeyValueStore {
   // Hash operations
   hget(key: string, field: string): Promise<string | null>;
   hset(key: string, field: string, value: string): Promise<void>;
-  hgetall(key: string): Promise<Record<string, string>>;
+  hgetall(key: string): Promise<Record<string, string> | null>;
   hdel(key: string, field: string): Promise<boolean>;
   
   // List operations

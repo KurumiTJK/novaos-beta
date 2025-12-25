@@ -496,8 +496,9 @@ export function extractCertificateChain(
     chain.push({
       subject: cert.subject?.CN || '',
       issuer: cert.issuer?.CN || '',
-      validFrom: new Date(cert.valid_from),
-      validTo: new Date(cert.valid_to),
+      validFrom: cert.valid_from,
+      validTo: cert.valid_to,
+      spkiHash: cert.fingerprint256?.replace(/:/g, '') || '',
       fingerprint256: cert.fingerprint256,
       serialNumber: cert.serialNumber,
       raw: cert.raw,

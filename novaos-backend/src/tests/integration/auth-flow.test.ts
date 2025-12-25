@@ -62,7 +62,7 @@ describe('Auth Flow Integration', () => {
       const result = mockTokenService.generateToken(user.id);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.accessToken).toBeDefined();
       }
     });
@@ -82,7 +82,7 @@ describe('Auth Flow Integration', () => {
       const result = err({ code: 'ACCOUNT_LOCKED', message: 'Account is locked' });
       
       expect(isErr(result)).toBe(true);
-      if (isErr(result)) {
+      if (!result.ok) {
         expect(result.error.code).toBe('ACCOUNT_LOCKED');
       }
     });
@@ -159,7 +159,7 @@ describe('Auth Flow Integration', () => {
       const result = ok(newUser);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.email).toBe('test@example.com');
       }
     });

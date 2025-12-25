@@ -278,11 +278,13 @@ class MemoryRedisClient implements RedisStore {
     return newValue;
   }
   
-  async expire(key: string, ttlSeconds: number): Promise<void> {
+  async expire(key: string, ttlSeconds: number): Promise<boolean> {
     const entry = this.data.get(key);
     if (entry) {
       entry.expiresAt = Date.now() + ttlSeconds * 1000;
+      return true;
     }
+    return false;
   }
   
   async keys(pattern: string): Promise<string[]> {
@@ -422,6 +424,78 @@ class MemoryRedisClient implements RedisStore {
     return this.zsets.get(key)?.size ?? 0;
   }
   
+  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+    const zset = this.zsets.get(key);
+    if (!zset) return [];
+    const sorted = [...zset.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m);
+    const end = stop === -1 ? sorted.length : stop + 1;
+    return sorted.slice(start, end);
+  }
+  
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    const zset = this.zsets.get(key);
+    if (!zset) return [];
+    const sorted = [...zset.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m);
+    const end = stop === -1 ? sorted.length : stop + 1;
+    return sorted.slice(start, end);
+  }
+  
+  async zrevrangebyscore(
+    key: string,
+    max: number | string,
+    min: number | string,
+    _options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]> {
+    const zset = this.zsets.get(key);
+    if (!zset) return [];
+    const minVal = min === '-inf' ? -Infinity : Number(min);
+    const maxVal = max === '+inf' ? Infinity : Number(max);
+    return [...zset.entries()]
+      .filter(([_, score]) => score >= minVal && score <= maxVal)
+      .sort((a, b) => b[1] - a[1])
+      .map(([member]) => member);
+  }
+  
+  async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
+    const zset = this.zsets.get(key);
+    if (!zset) return 0;
+    const sorted = [...zset.entries()].sort((a, b) => a[1] - b[1]);
+    const end = stop === -1 ? sorted.length : stop + 1;
+    const toRemove = sorted.slice(start, end);
+    for (const [member] of toRemove) {
+      zset.delete(member);
+    }
+    return toRemove.length;
+  }
+  
+  async zrem(key: string, member: string): Promise<number> {
+    const zset = this.zsets.get(key);
+    if (!zset) return 0;
+    return zset.delete(member) ? 1 : 0;
+  }
+  
+  async zscore(key: string, member: string): Promise<number | null> {
+    return this.zsets.get(key)?.get(member) ?? null;
+  }
+  
+  async exists(key: string): Promise<boolean> {
+    if (this.isExpired(key)) return false;
+    return this.data.has(key) || this.hashes.has(key) || 
+           this.lists.has(key) || this.sets.has(key) || this.zsets.has(key);
+  }
+  
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    const list = this.lists.get(key);
+    if (list) {
+      const end = stop === -1 ? list.length : stop + 1;
+      this.lists.set(key, list.slice(start, end));
+    }
+  }
+  
+  async scard(key: string): Promise<number> {
+    return this.sets.get(key)?.size ?? 0;
+  }
+  
   // Lua script simulations
   async rateLimit(key: string, capacity: number, refillRate: number, tokens = 1): Promise<RateLimitResult> {
     const now = Date.now();
@@ -533,6 +607,7 @@ type IORedisClient = {
   del(...keys: string[]): Promise<number>;
   incr(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
+  exists(...keys: string[]): Promise<number>;
   keys(pattern: string): Promise<string[]>;
   hset(key: string, field: string, value: string): Promise<number>;
   hget(key: string, field: string): Promise<string | null>;
@@ -543,15 +618,23 @@ type IORedisClient = {
   lpush(key: string, ...values: string[]): Promise<number>;
   lpop(key: string): Promise<string | null>;
   lrange(key: string, start: number, stop: number): Promise<string[]>;
+  ltrim(key: string, start: number, stop: number): Promise<string>;
   llen(key: string): Promise<number>;
   sadd(key: string, ...members: string[]): Promise<number>;
   srem(key: string, ...members: string[]): Promise<number>;
   smembers(key: string): Promise<string[]>;
   sismember(key: string, member: string): Promise<number>;
+  scard(key: string): Promise<number>;
   zadd(key: string, score: number, member: string): Promise<number>;
+  zrange(key: string, start: number, stop: number): Promise<string[]>;
+  zrevrange(key: string, start: number, stop: number): Promise<string[]>;
   zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]>;
+  zrevrangebyscore(key: string, max: number | string, min: number | string, ...args: (string | number)[]): Promise<string[]>;
   zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number>;
+  zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
   zcard(key: string): Promise<number>;
+  zrem(key: string, ...members: string[]): Promise<number>;
+  zscore(key: string, member: string): Promise<string | null>;
   evalsha(sha: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
 };
 
@@ -756,8 +839,9 @@ class RedisClient implements RedisStore {
     return this.timed('incr', () => this.requireClient().incr(key));
   }
   
-  async expire(key: string, ttlSeconds: number): Promise<void> {
-    await this.timed('expire', () => this.requireClient().expire(key, ttlSeconds));
+  async expire(key: string, ttlSeconds: number): Promise<boolean> {
+    const result = await this.timed('expire', () => this.requireClient().expire(key, ttlSeconds));
+    return result === 1;
   }
   
   async keys(pattern: string): Promise<string[]> {
@@ -857,6 +941,60 @@ class RedisClient implements RedisStore {
   
   async zcard(key: string): Promise<number> {
     return this.timed('zcard', () => this.requireClient().zcard(key));
+  }
+  
+  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.timed('zrange', () => this.requireClient().zrange(key, start, stop));
+  }
+  
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.timed('zrevrange', () => this.requireClient().zrevrange(key, start, stop));
+  }
+  
+  async zrevrangebyscore(
+    key: string,
+    max: number | string,
+    min: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]> {
+    if (options?.limit) {
+      return this.timed('zrevrangebyscore', () =>
+        this.requireClient().zrevrangebyscore(
+          key, max, min, 'LIMIT', options.limit!.offset, options.limit!.count
+        )
+      );
+    }
+    return this.timed('zrevrangebyscore', () =>
+      this.requireClient().zrevrangebyscore(key, max, min)
+    );
+  }
+  
+  async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
+    return this.timed('zremrangebyrank', () =>
+      this.requireClient().zremrangebyrank(key, start, stop)
+    );
+  }
+  
+  async zrem(key: string, member: string): Promise<number> {
+    return this.timed('zrem', () => this.requireClient().zrem(key, member));
+  }
+  
+  async zscore(key: string, member: string): Promise<number | null> {
+    const result = await this.timed('zscore', () => this.requireClient().zscore(key, member));
+    return result !== null ? Number(result) : null;
+  }
+  
+  async exists(key: string): Promise<boolean> {
+    const result = await this.timed('exists', () => this.requireClient().exists(key));
+    return result === 1;
+  }
+  
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    await this.timed('ltrim', () => this.requireClient().ltrim(key, start, stop));
+  }
+  
+  async scard(key: string): Promise<number> {
+    return this.timed('scard', () => this.requireClient().scard(key));
   }
   
   // ─────────────────────────────────────────────────────────────────────────────

@@ -504,7 +504,7 @@ export function applyFallbackRemediations(
   }
 
   // Re-sort steps by day number
-  steps.sort((a, b) => a.dayNumber - b.dayNumber);
+  steps.sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
 
   return { steps, appliedRemediations };
 }

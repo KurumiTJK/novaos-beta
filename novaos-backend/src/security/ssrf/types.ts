@@ -465,7 +465,7 @@ export interface TransportRequirements {
   readonly certificatePins?: readonly SPKIPin[];
   
   /** Headers to send */
-  readonly headers: Readonly<Record<string, string>>;
+  readonly headers?: Readonly<Record<string, string>>;
   
   /** User agent to use */
   readonly userAgent: string;
@@ -478,7 +478,7 @@ export interface TransportRequirements {
  */
 export interface TransportEvidence {
   /** IP address actually connected to */
-  readonly connectedIP: string;
+  readonly connectedIP?: string;
   
   /** Port actually connected to */
   readonly connectedPort: number;
@@ -528,7 +528,13 @@ export interface CertificateInfo {
   readonly spkiHash: string;
   
   /** Serial number */
-  readonly serialNumber: string;
+  readonly serialNumber?: string;
+
+  /** SHA-256 fingerprint (Node.js format) */
+  readonly fingerprint256?: string;
+
+  /** Raw DER-encoded certificate */
+  readonly raw?: Buffer;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -549,16 +555,16 @@ export interface RedirectHop {
   readonly statusCode: number;
   
   /** Location header value */
-  readonly location: string;
+  readonly location?: string;
   
   /** IP that was connected to */
-  readonly connectedIP: string;
+  readonly connectedIP?: string;
   
   /** SSRF decision for this hop */
   readonly decision: SSRFDecision;
   
   /** Response headers (selected) */
-  readonly headers: Readonly<Record<string, string>>;
+  readonly headers?: Readonly<Record<string, string>>;
   
   /** Time for this hop in ms */
   readonly durationMs: number;
@@ -572,10 +578,10 @@ export interface RedirectChainResult {
   readonly success: boolean;
   
   /** Final URL reached */
-  readonly finalUrl: string;
+  readonly finalUrl?: string;
   
   /** Final SSRF decision */
-  readonly finalDecision: SSRFDecision;
+  readonly finalDecision?: SSRFDecision;
   
   /** All hops in the chain */
   readonly hops: readonly RedirectHop[];
@@ -599,6 +605,11 @@ export type RedirectChainError =
   | 'INVALID_LOCATION'
   | 'SSRF_BLOCKED'
   | 'CONNECTION_ERROR'
+  | 'TOO_MANY_REDIRECTS'
+  | 'MISSING_LOCATION'
+  | 'REDIRECT_TO_BLOCKED'
+  | 'TRANSPORT_ERROR'
+  | 'INVALID_INITIAL_DECISION'
   | 'TIMEOUT';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -684,7 +695,7 @@ export function isSafeIPResult(result: IPValidationResult): boolean {
  * Check if a redirect chain succeeded.
  */
 export function isRedirectSuccess(result: RedirectChainResult): boolean {
-  return result.success && result.finalDecision.allowed;
+  return result.success && result.finalDecision?.allowed === true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

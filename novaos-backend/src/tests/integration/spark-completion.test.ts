@@ -89,7 +89,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkGenerator.generate(step);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.action).toContain('Rust');
         expect(result.value.status).toBe('suggested');
       }
@@ -102,7 +102,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkGenerator.generate(createTestStep(), { escalationLevel: 2 });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.escalationLevel).toBe(2);
         expect(result.value.variant).toBe('minimal');
       }
@@ -128,7 +128,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkStore.update(spark.id, { status: 'accepted' });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.status).toBe('accepted');
       }
     });
@@ -155,7 +155,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkStore.complete(spark.id);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.status).toBe('completed');
         expect(result.value.completedAt).toBeDefined();
       }
@@ -168,7 +168,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockStepStore.updateProgress(step.id, 75);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.progress).toBe(75);
       }
     });
@@ -184,7 +184,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockStepStore.complete(step.id);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.status).toBe('completed');
       }
     });
@@ -206,7 +206,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkStore.skip(spark.id);
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.status).toBe('skipped');
       }
     });
@@ -218,7 +218,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkGenerator.regenerate('step_123', { escalationLevel: 1 });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.escalationLevel).toBe(1);
       }
     });
@@ -232,7 +232,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkGenerator.regenerate('step_123', { escalationLevel: 4 });
       
       expect(isErr(result)).toBe(true);
-      if (isErr(result)) {
+      if (!result.ok) {
         expect(result.error.code).toBe('MAX_ESCALATION_REACHED');
       }
     });
@@ -248,7 +248,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockReminderService.escalate('spark_123');
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.newLevel).toBe(1);
       }
     });
@@ -264,7 +264,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkGenerator.regenerate('step_123', { escalationLevel: 2 });
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value.variant).toBe('reduced');
         expect(result.value.timeEstimate).toBe('5 minutes');
       }
@@ -279,7 +279,7 @@ describe('Spark Completion Integration', () => {
       const result = await mockSparkStore.findActive('user_123');
       
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
+      if (result.ok) {
         expect(result.value).toBeDefined();
       }
     });

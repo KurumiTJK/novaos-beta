@@ -653,6 +653,9 @@ export interface ResourceSelectionCriteria {
   /** Preferred content types */
   readonly preferredContentTypes?: readonly ResourceContentType[];
   
+  /** Preferred providers to prioritize */
+  readonly preferredProviders?: readonly ResourceProvider[];
+  
   /** Maximum total duration in minutes */
   readonly maxTotalMinutes?: number;
   
@@ -886,6 +889,12 @@ export const RESOURCE_TTL = {
   
   /** Known source TTL (30 days) */
   KNOWN_SOURCE_SECONDS: 2592000,
+  
+  /** Millisecond variants for cache operations */
+  CANDIDATE_MS: 3600 * 1000,
+  ENRICHMENT_MS: 86400 * 1000,
+  VERIFICATION_MS: 604800 * 1000,
+  KNOWN_SOURCE_MS: 2592000 * 1000,
 } as const;
 
 /**

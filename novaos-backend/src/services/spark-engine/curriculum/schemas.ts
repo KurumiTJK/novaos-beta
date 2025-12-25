@@ -379,10 +379,11 @@ export function validateResourceIndices(
 ): { valid: boolean; invalidIndices: Array<{ day: number; index: number }> } {
   const invalidIndices: Array<{ day: number; index: number }> = [];
   
-  for (const day of days) {
+  for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+    const day = days[dayIndex]!;
     for (const resource of day.resources) {
       if (resource.index < 1 || resource.index > resourceCount) {
-        invalidIndices.push({ day: (day as { day: number }).day, index: resource.index });
+        invalidIndices.push({ day: dayIndex + 1, index: resource.index });
       }
     }
   }

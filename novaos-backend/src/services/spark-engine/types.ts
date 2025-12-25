@@ -444,8 +444,8 @@ export interface Activity {
   /** Type of activity */
   readonly type: ActivityType;
 
-  /** Resource to use for this activity */
-  readonly resourceId: ResourceId;
+  /** Resource to use for this activity (optional for fallback activities) */
+  readonly resourceId?: ResourceId;
 
   /** Specific section to focus on (e.g., "Chapter 4.1", "0:15:30-0:25:00") */
   readonly section?: string;

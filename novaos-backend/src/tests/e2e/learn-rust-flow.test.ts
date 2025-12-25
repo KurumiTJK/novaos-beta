@@ -66,7 +66,7 @@ const rustQuests = [
 const rustSteps = [
   {
     id: createStepId('step_rust_1'),
-    questId: rustQuests[0].id,
+    questId: rustQuests[0]!.id,
     title: 'Day 1: Hello Rust',
     sequence: 1,
     status: 'active' as const,
@@ -77,7 +77,7 @@ const rustSteps = [
   },
   {
     id: createStepId('step_rust_2'),
-    questId: rustQuests[0].id,
+    questId: rustQuests[0]!.id,
     title: 'Day 2: Variables & Types',
     sequence: 2,
     status: 'pending' as const,
@@ -87,7 +87,7 @@ const rustSteps = [
 const rustSpark = {
   id: createSparkId('spark_rust_1'),
   userId: testUserId,
-  stepId: rustSteps[0].id,
+  stepId: rustSteps[0]!.id,
   action: 'Open The Rust Programming Language book and read the first 5 pages of Chapter 1',
   rationale: 'Starting with fundamentals builds a solid foundation',
   timeEstimate: '10 minutes',
@@ -119,7 +119,7 @@ describe('Learn Rust E2E Flow', () => {
       });
 
       expect(isOk(goalResult)).toBe(true);
-      if (isOk(goalResult)) {
+      if (goalResult.ok) {
         expect(goalResult.value.title).toBe('Learn Rust Programming');
       }
 
@@ -129,19 +129,19 @@ describe('Learn Rust E2E Flow', () => {
       const questsResult = await mockSparkEngine.generateQuests(rustGoal.id);
       
       expect(isOk(questsResult)).toBe(true);
-      if (isOk(questsResult)) {
+      if (questsResult.ok) {
         expect(questsResult.value).toHaveLength(3);
-        expect(questsResult.value[0].title).toBe('Rust Fundamentals');
+        expect(questsResult.value[0]!.title).toBe('Rust Fundamentals');
       }
 
       // Step 3: Generate steps for first quest
       mockSparkEngine.generateSteps.mockResolvedValue(ok(rustSteps));
       
-      const stepsResult = await mockSparkEngine.generateSteps(rustQuests[0].id);
+      const stepsResult = await mockSparkEngine.generateSteps(rustQuests[0]!.id);
       
       expect(isOk(stepsResult)).toBe(true);
-      if (isOk(stepsResult)) {
-        expect(stepsResult.value[0].title).toBe('Day 1: Hello Rust');
+      if (stepsResult.ok) {
+        expect(stepsResult.value[0]!.title).toBe('Day 1: Hello Rust');
       }
     });
 
@@ -149,10 +149,10 @@ describe('Learn Rust E2E Flow', () => {
       // Generate spark
       mockSparkEngine.generateSpark.mockResolvedValue(ok(rustSpark));
       
-      const sparkResult = await mockSparkEngine.generateSpark(rustSteps[0].id);
+      const sparkResult = await mockSparkEngine.generateSpark(rustSteps[0]!.id);
       
       expect(isOk(sparkResult)).toBe(true);
-      if (isOk(sparkResult)) {
+      if (sparkResult.ok) {
         expect(sparkResult.value.action).toContain('Rust Programming Language');
         expect(sparkResult.value.timeEstimate).toBe('10 minutes');
       }
@@ -167,7 +167,7 @@ describe('Learn Rust E2E Flow', () => {
       const completeResult = await mockSparkEngine.completeSpark(rustSpark.id);
       
       expect(isOk(completeResult)).toBe(true);
-      if (isOk(completeResult)) {
+      if (completeResult.ok) {
         expect(completeResult.value.status).toBe('completed');
       }
     });
@@ -195,10 +195,10 @@ describe('Learn Rust E2E Flow', () => {
       
       mockSparkEngine.generateSpark.mockResolvedValue(ok(escalatedSpark));
       
-      const newSparkResult = await mockSparkEngine.generateSpark(rustSteps[0].id, { escalationLevel: 1 });
+      const newSparkResult = await mockSparkEngine.generateSpark(rustSteps[0]!.id, { escalationLevel: 1 });
       
       expect(isOk(newSparkResult)).toBe(true);
-      if (isOk(newSparkResult)) {
+      if (newSparkResult.ok) {
         expect(newSparkResult.value.escalationLevel).toBe(1);
         expect(newSparkResult.value.variant).toBe('reduced');
         expect(newSparkResult.value.timeEstimate).toBe('5 minutes');
@@ -231,7 +231,7 @@ describe('Learn Rust E2E Flow', () => {
       const progressResult = await mockSparkEngine.getProgress(testUserId, rustGoal.id);
       
       expect(isOk(progressResult)).toBe(true);
-      if (isOk(progressResult)) {
+      if (progressResult.ok) {
         expect(progressResult.value.goal.progress).toBe(15);
         expect(progressResult.value.sparks.completedToday).toBe(1);
       }
@@ -256,10 +256,10 @@ describe('Learn Rust E2E Flow', () => {
         message: 'Maximum escalation level (3) reached',
       }));
 
-      const result = await mockSparkEngine.generateSpark(rustSteps[0].id, { escalationLevel: 4 });
+      const result = await mockSparkEngine.generateSpark(rustSteps[0]!.id, { escalationLevel: 4 });
       
       expect(isErr(result)).toBe(true);
-      if (isErr(result)) {
+      if (!result.ok) {
         expect(result.error.code).toBe('MAX_ESCALATION_REACHED');
       }
     });
@@ -270,10 +270,10 @@ describe('Learn Rust E2E Flow', () => {
         message: 'User already has an active spark',
       }));
 
-      const result = await mockSparkEngine.generateSpark(rustSteps[0].id);
+      const result = await mockSparkEngine.generateSpark(rustSteps[0]!.id);
       
       expect(isErr(result)).toBe(true);
-      if (isErr(result)) {
+      if (!result.ok) {
         expect(result.error.code).toBe('SPARK_ALREADY_ACTIVE');
       }
     });
