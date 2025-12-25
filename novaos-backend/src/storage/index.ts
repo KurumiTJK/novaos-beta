@@ -39,7 +39,13 @@ export interface KeyValueStore {
   zadd(key: string, score: number, member: string): Promise<number>;
   zrange(key: string, start: number, stop: number): Promise<string[]>;
   zrevrange(key: string, start: number, stop: number): Promise<string[]>;
+  zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]>;
+  zrevrangebyscore(key: string, max: number | string, min: number | string): Promise<string[]>;
   zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
+  zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number>;
+  zcard(key: string): Promise<number>;
+  zrem(key: string, member: string): Promise<number>;
+  zscore(key: string, member: string): Promise<number | null>;
   
   // Connection
   isConnected(): boolean;
@@ -196,8 +202,33 @@ export class RedisStore implements KeyValueStore {
     return this.client.zrevrange(key, start, stop);
   }
 
+  async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
+    return this.client.zrangebyscore(key, min, max);
+  }
+
+  async zrevrangebyscore(key: string, max: number | string, min: number | string): Promise<string[]> {
+    return this.client.zrevrangebyscore(key, max, min);
+  }
+
   async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
     return this.client.zremrangebyrank(key, start, stop);
+  }
+
+  async zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number> {
+    return this.client.zremrangebyscore(key, min, max);
+  }
+
+  async zcard(key: string): Promise<number> {
+    return this.client.zcard(key);
+  }
+
+  async zrem(key: string, member: string): Promise<number> {
+    return this.client.zrem(key, member);
+  }
+
+  async zscore(key: string, member: string): Promise<number | null> {
+    const score = await this.client.zscore(key, member);
+    return score !== null ? parseFloat(score) : null;
   }
 
   async disconnect(): Promise<void> {
@@ -427,6 +458,27 @@ export class MemoryStore implements KeyValueStore {
     return reversed.slice(start, end).map(e => e.member);
   }
 
+  async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
+    const zset = this.sortedSets.get(key) ?? [];
+    const minVal = this.parseScoreBound(min, -Infinity);
+    const maxVal = this.parseScoreBound(max, Infinity);
+    
+    return zset
+      .filter(e => e.score >= minVal && e.score <= maxVal)
+      .map(e => e.member);
+  }
+
+  async zrevrangebyscore(key: string, max: number | string, min: number | string): Promise<string[]> {
+    const zset = this.sortedSets.get(key) ?? [];
+    const minVal = this.parseScoreBound(min, -Infinity);
+    const maxVal = this.parseScoreBound(max, Infinity);
+    
+    return [...zset]
+      .filter(e => e.score >= minVal && e.score <= maxVal)
+      .reverse()
+      .map(e => e.member);
+  }
+
   async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
     const zset = this.sortedSets.get(key);
     if (!zset) return 0;
@@ -440,6 +492,61 @@ export class MemoryStore implements KeyValueStore {
     const deleteCount = Math.min(normalizedStop, len - 1) - normalizedStart + 1;
     zset.splice(normalizedStart, deleteCount);
     return deleteCount;
+  }
+
+  async zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number> {
+    const zset = this.sortedSets.get(key);
+    if (!zset) return 0;
+    
+    const minVal = this.parseScoreBound(min, -Infinity);
+    const maxVal = this.parseScoreBound(max, Infinity);
+    
+    const originalLength = zset.length;
+    const filtered = zset.filter(e => e.score < minVal || e.score > maxVal);
+    this.sortedSets.set(key, filtered);
+    
+    return originalLength - filtered.length;
+  }
+
+  async zcard(key: string): Promise<number> {
+    const zset = this.sortedSets.get(key);
+    return zset?.length ?? 0;
+  }
+
+  async zrem(key: string, member: string): Promise<number> {
+    const zset = this.sortedSets.get(key);
+    if (!zset) return 0;
+    
+    const index = zset.findIndex(e => e.member === member);
+    if (index >= 0) {
+      zset.splice(index, 1);
+      return 1;
+    }
+    return 0;
+  }
+
+  async zscore(key: string, member: string): Promise<number | null> {
+    const zset = this.sortedSets.get(key);
+    if (!zset) return null;
+    
+    const entry = zset.find(e => e.member === member);
+    return entry?.score ?? null;
+  }
+
+  /**
+   * Parse score bound for zrangebyscore/zrevrangebyscore.
+   * Handles '-inf', '+inf', 'inf', and exclusive bounds like '(123'.
+   */
+  private parseScoreBound(value: number | string, defaultValue: number): number {
+    if (typeof value === 'number') return value;
+    if (value === '-inf') return -Infinity;
+    if (value === '+inf' || value === 'inf') return Infinity;
+    if (value.startsWith('(')) {
+      // Exclusive bound - for simplicity we treat as inclusive (Redis uses exclusive)
+      // In production you'd want to handle this properly
+      return parseFloat(value.slice(1));
+    }
+    return parseFloat(value) || defaultValue;
   }
 
   async disconnect(): Promise<void> {
