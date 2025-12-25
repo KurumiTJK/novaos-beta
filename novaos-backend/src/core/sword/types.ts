@@ -142,6 +142,16 @@ export type StepType =
   | 'verification' // Something to check/confirm
   | 'milestone';   // Checkpoint/celebration
 
+export type ActionType = 
+  | 'read'         // Reading/watching content
+  | 'write'        // Writing/creating content
+  | 'practice'     // Hands-on practice
+  | 'review'       // Reviewing previous material
+  | 'exercise'     // Completing exercises
+  | 'project'      // Working on a project
+  | 'discuss'      // Discussion/collaboration
+  | 'reflect';     // Reflection/journaling
+
 export interface Step {
   id: string;
   questId: string;
@@ -150,6 +160,7 @@ export interface Step {
   title: string;
   description?: string;
   type: StepType;
+  actionType?: ActionType;  // More specific action classification
   
   // Status
   status: StepStatus;
@@ -157,8 +168,13 @@ export interface Step {
   
   // Timing
   estimatedMinutes?: number;
+  actualMinutes?: number;  // How long it actually took
   createdAt: string;
   completedAt?: string;
+  
+  // Day-based scheduling
+  dayNumber?: number;      // Day in the learning sequence
+  scheduledDate?: string;  // ISO date for when this step is scheduled
   
   // Spark generation
   sparkPrompt?: string;  // Hint for generating spark
@@ -166,6 +182,7 @@ export interface Step {
   
   // Completion
   completionNotes?: string;
+  skipReason?: string;     // Why it was skipped
   verificationRequired: boolean;
 }
 
@@ -185,20 +202,32 @@ export type SparkStatus =
   | 'skipped'      // User skipped it
   | 'expired';     // Too old, no longer relevant
 
+export type SparkVariant = 
+  | 'standard'     // Normal spark
+  | 'reduced'      // Reduced scope (escalation level 1)
+  | 'minimal'      // Minimal scope (escalation level 2)
+  | 'micro';       // Micro-action (escalation level 3)
+
 export interface Spark {
   id: string;
   userId: string;
-  stepId?: string;  // May be generated without a step
+  stepId?: string;   // May be generated without a step
   questId?: string;
+  goalId?: string;   // Direct goal reference for quick lookups
   
   // Core
   action: string;           // The specific action (imperative, < 100 chars)
   rationale: string;        // Why this action (1-2 sentences)
   estimatedMinutes: number; // Should be small (2-15 min typical)
+  actualMinutes?: number;   // How long it actually took
   
   // Design principles
   frictionLevel: 'minimal' | 'low' | 'medium';  // How easy to start
   reversible: boolean;      // Can it be undone?
+  
+  // Escalation
+  escalationLevel?: number;  // 0-3, higher = simpler spark
+  variant?: SparkVariant;    // Type of spark based on escalation
   
   // Status
   status: SparkStatus;
@@ -207,6 +236,11 @@ export interface Spark {
   createdAt: string;
   expiresAt: string;        // Sparks are time-limited
   completedAt?: string;
+  scheduledFor?: string;    // When the user plans to do this
+  
+  // Completion tracking
+  completionNotes?: string; // Notes from completing the spark
+  skipReason?: string;      // Why the user skipped this spark
   
   // Follow-up
   nextSparkHint?: string;   // What might come next
@@ -285,10 +319,13 @@ export interface CreateStepRequest {
   title: string;
   description?: string;
   type?: StepType;
+  actionType?: ActionType;
   estimatedMinutes?: number;
   sparkPrompt?: string;
   verificationRequired?: boolean;
   order?: number;
+  dayNumber?: number;
+  scheduledDate?: string;
 }
 
 export interface GenerateSparkRequest {
@@ -298,12 +335,20 @@ export interface GenerateSparkRequest {
   context?: string;  // Additional context for generation
   maxMinutes?: number;
   frictionLevel?: 'minimal' | 'low' | 'medium';
+  escalationLevel?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // EVENTS (for state machine)
 // ─────────────────────────────────────────────────────────────────────────────────
 
+// String event types for convenience (used by routes)
+export type GoalEventType = 'START' | 'PAUSE' | 'RESUME' | 'COMPLETE' | 'ABANDON' | 'UPDATE_PROGRESS';
+export type QuestEventType = 'START' | 'BLOCK' | 'UNBLOCK' | 'COMPLETE' | 'SKIP' | 'UPDATE_PROGRESS';
+export type StepEventType = 'START' | 'COMPLETE' | 'SKIP';
+export type SparkEventType = 'ACCEPT' | 'COMPLETE' | 'SKIP' | 'EXPIRE';
+
+// Full event objects with optional payload
 export type GoalEvent = 
   | { type: 'START' }
   | { type: 'PAUSE'; reason?: string }
@@ -330,3 +375,50 @@ export type SparkEvent =
   | { type: 'COMPLETE' }
   | { type: 'SKIP'; reason?: string }
   | { type: 'EXPIRE' };
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// HELPER: Convert string event to event object
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export function toGoalEvent(eventType: GoalEventType | GoalEvent, payload?: Record<string, unknown>): GoalEvent {
+  if (typeof eventType === 'object') return eventType;
+  switch (eventType) {
+    case 'START': return { type: 'START' };
+    case 'PAUSE': return { type: 'PAUSE', reason: payload?.reason as string };
+    case 'RESUME': return { type: 'RESUME' };
+    case 'COMPLETE': return { type: 'COMPLETE' };
+    case 'ABANDON': return { type: 'ABANDON', reason: (payload?.reason as string) ?? 'No reason provided' };
+    case 'UPDATE_PROGRESS': return { type: 'UPDATE_PROGRESS', progress: (payload?.progress as number) ?? 0 };
+  }
+}
+
+export function toQuestEvent(eventType: QuestEventType | QuestEvent, payload?: Record<string, unknown>): QuestEvent {
+  if (typeof eventType === 'object') return eventType;
+  switch (eventType) {
+    case 'START': return { type: 'START' };
+    case 'BLOCK': return { type: 'BLOCK', reason: (payload?.reason as string) ?? 'Blocked', blockedBy: payload?.blockedBy as string[] };
+    case 'UNBLOCK': return { type: 'UNBLOCK' };
+    case 'COMPLETE': return { type: 'COMPLETE' };
+    case 'SKIP': return { type: 'SKIP', reason: (payload?.reason as string) ?? 'Skipped' };
+    case 'UPDATE_PROGRESS': return { type: 'UPDATE_PROGRESS', progress: (payload?.progress as number) ?? 0 };
+  }
+}
+
+export function toStepEvent(eventType: StepEventType | StepEvent, payload?: Record<string, unknown>): StepEvent {
+  if (typeof eventType === 'object') return eventType;
+  switch (eventType) {
+    case 'START': return { type: 'START' };
+    case 'COMPLETE': return { type: 'COMPLETE', notes: payload?.notes as string };
+    case 'SKIP': return { type: 'SKIP', reason: payload?.reason as string };
+  }
+}
+
+export function toSparkEvent(eventType: SparkEventType | SparkEvent, payload?: Record<string, unknown>): SparkEvent {
+  if (typeof eventType === 'object') return eventType;
+  switch (eventType) {
+    case 'ACCEPT': return { type: 'ACCEPT' };
+    case 'COMPLETE': return { type: 'COMPLETE' };
+    case 'SKIP': return { type: 'SKIP', reason: payload?.reason as string };
+    case 'EXPIRE': return { type: 'EXPIRE' };
+  }
+}
