@@ -387,8 +387,8 @@ export class DeletionRequestStore extends SecureStore<DataDeletionRequest, Delet
   ): AsyncAppResult<void> {
     try {
       const tokenKey = DataSubjectKeys.verificationToken(token);
-      // Token expires in 7 days
-      await this.store.set(tokenKey, requestId, { ttl: 7 * 24 * 60 * 60 });
+      // Token expires in 7 days (pass TTL as number directly)
+      await this.store.set(tokenKey, requestId, 7 * 24 * 60 * 60);
       return ok(undefined);
     } catch (error) {
       return err(

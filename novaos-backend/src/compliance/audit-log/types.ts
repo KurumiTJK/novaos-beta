@@ -620,7 +620,7 @@ export function getDefaultSeverity(action: AuditAction): AuditSeverity {
  * Get category from action.
  */
 export function getCategoryFromAction(action: AuditAction): AuditCategory {
-  const prefix = action.split('.')[0];
+  const prefix = action.split('.')[0] ?? 'system';
   const categoryMap: Record<string, AuditCategory> = {
     consent: 'consent',
     data: 'dataAccess',

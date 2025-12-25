@@ -277,7 +277,18 @@ export class DataExportHandler implements IDataExportService {
     const now = createTimestamp();
     const categoriesToExport = categories ?? [...ALL_EXPORT_CATEGORIES];
 
-    const exportData: DataExport['categories'] = {};
+    // Use mutable object for building, then cast at the end
+    const exportData: {
+      goals?: ExportedCategory<Goal>;
+      quests?: ExportedCategory<Quest>;
+      steps?: ExportedCategory<Step>;
+      sparks?: ExportedCategory<Spark>;
+      reminders?: ExportedCategory<ReminderSchedule>;
+      consent?: ExportedCategory<ConsentRecord>;
+      auditLog?: ExportedCategory<AuditLogEntry>;
+      profile?: ExportedCategory<UserProfile>;
+      preferences?: ExportedCategory<UserPreferences>;
+    } = {};
     const recordCounts: Record<ExportCategory, number> = {} as Record<ExportCategory, number>;
     let earliestTimestamp: Date | null = null;
     let latestTimestamp: Date | null = null;
@@ -453,13 +464,16 @@ export class DataExportHandler implements IDataExportService {
     // Calculate totals
     const totalRecords = Object.values(recordCounts).reduce((sum, count) => sum + (count || 0), 0);
 
-    // Build summary
+    // Build summary (use explicit Date references to avoid closure narrowing issues)
+    const earliestStr = earliestTimestamp ? earliestTimestamp.toISOString() : now;
+    const latestStr = latestTimestamp ? latestTimestamp.toISOString() : now;
+    
     const summary: ExportSummary = {
       totalRecords,
       recordsPerCategory: recordCounts,
       dataRange: {
-        earliest: (earliestTimestamp?.toISOString() ?? now) as Timestamp,
-        latest: (latestTimestamp?.toISOString() ?? now) as Timestamp,
+        earliest: earliestStr as Timestamp,
+        latest: latestStr as Timestamp,
       },
       fileSizeBytes: this.estimateExportSize(exportData),
     };
@@ -512,7 +526,7 @@ export class DataExportHandler implements IDataExportService {
     for (const [category, exported] of Object.entries(dataExport.categories)) {
       if (!exported || exported.count === 0) continue;
 
-      const csv = this.arrayToCsv(exported.data as readonly Record<string, unknown>[]);
+      const csv = this.arrayToCsv(exported.data as unknown as readonly Record<string, unknown>[]);
       csvFiles.set(category as ExportCategory, csv);
     }
 

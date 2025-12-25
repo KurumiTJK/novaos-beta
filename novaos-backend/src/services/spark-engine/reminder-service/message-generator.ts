@@ -239,7 +239,7 @@ function selectTemplate<T>(templates: readonly T[], seed: string): T {
     hash = hash & hash; // Convert to 32-bit integer
   }
   const index = Math.abs(hash) % templates.length;
-  return templates[index];
+  return templates[index]!;
 }
 
 /**

@@ -239,7 +239,7 @@ export class ExportRequestStore extends SecureStore<DataExportRequest, ExportReq
   ): AsyncAppResult<void> {
     try {
       const tokenKey = DataSubjectKeys.exportToken(token);
-      await this.store.set(tokenKey, requestId, { ttl: expiresInSeconds });
+      await this.store.set(tokenKey, requestId, expiresInSeconds);
       return ok(undefined);
     } catch (error) {
       return err(

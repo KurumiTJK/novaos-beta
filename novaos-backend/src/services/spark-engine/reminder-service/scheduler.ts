@@ -144,7 +144,7 @@ export function isQuietDay(
   }
 
   const dt = DateTime.fromISO(date, { zone: timezone });
-  const dayOfWeek = WEEKDAY_MAP[dt.weekday];
+  const dayOfWeek = WEEKDAY_MAP[dt.weekday]!;
 
   return quietDays.includes(dayOfWeek);
 }

@@ -150,10 +150,8 @@ export class GoalRateLimiter implements IGoalRateLimiter {
       // Increment active goal count
       pipeline.incr(userActiveGoalCountKey(userId));
 
-      // Set cooldown
-      pipeline.set(creationCooldownKey(userId), Date.now().toString(), {
-        EX: this.config.cooldownTtlSeconds,
-      });
+      // Set cooldown (use positional args for EX option)
+      pipeline.set(creationCooldownKey(userId), Date.now().toString(), 'EX', this.config.cooldownTtlSeconds);
 
       await pipeline.exec();
 

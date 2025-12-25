@@ -234,7 +234,13 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
           
           itemsProcessed++;
           
-          const deadline = goal.deadline ? new Date(goal.deadline).getTime() : null;
+          // Access optional properties safely (may not be in base type)
+          const goalWithOptionals = goal as typeof goal & {
+            deadline?: string;
+            lastActivityAt?: string;
+          };
+          
+          const deadline = goalWithOptionals.deadline ? new Date(goalWithOptionals.deadline).getTime() : null;
           const daysUntilDeadline = deadline ? Math.ceil((deadline - now) / oneDay) : undefined;
           
           let checkInType: GoalCheckin['checkInType'] | null = null;
@@ -243,8 +249,8 @@ export const goalDeadlineCheckinsHandler: JobHandler = async (context: JobContex
             checkInType = 'deadline_approaching';
           } else if (goal.progress >= 50 && goal.progress < 100) {
             checkInType = 'milestone';
-          } else if (goal.lastActivityAt) {
-            const lastActivity = new Date(goal.lastActivityAt).getTime();
+          } else if (goalWithOptionals.lastActivityAt) {
+            const lastActivity = new Date(goalWithOptionals.lastActivityAt).getTime();
             if (now - lastActivity > oneWeek) {
               checkInType = 'stalled';
             }
