@@ -29,9 +29,6 @@ export type {
   
   // Store interface
   IConsentStore,
-  
-  // Error codes
-  ConsentErrorCode,
 } from './types.js';
 
 export {
@@ -40,6 +37,8 @@ export {
   REQUIRED_PURPOSES,
   OPTIONAL_PURPOSES,
   CURRENT_POLICY_VERSION,
+  
+  // Error codes (exported as value, not type - it's an enum)
   ConsentErrorCode,
   
   // Type guards

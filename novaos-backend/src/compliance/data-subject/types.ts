@@ -18,16 +18,16 @@ import type {
   SparkId,
   ReminderId,
   Timestamp,
-} from '../../../types/branded.js';
-import type { Brand } from '../../../types/branded.js';
-import type { AsyncAppResult } from '../../../types/result.js';
+} from '../../types/branded.js';
+import type { Brand } from '../../types/branded.js';
+import type { AsyncAppResult } from '../../types/result.js';
 import type {
   Goal,
   Quest,
   Step,
   Spark,
   ReminderSchedule,
-} from '../../../services/spark-engine/types.js';
+} from '../../services/spark-engine/types.js';
 import type { UserConsent, ConsentRecord } from '../consent/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════

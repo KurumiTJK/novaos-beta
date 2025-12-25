@@ -40,14 +40,13 @@ export type {
   // Service interfaces
   IDataExportService,
   IDataDeletionService,
-  
-  // Error codes
-  DataSubjectErrorCode,
 } from './types.js';
 
 export {
   // Constants
   ALL_EXPORT_CATEGORIES,
+  
+  // Error codes (exported as value, not type - it's an enum)
   DataSubjectErrorCode,
   
   // Factory functions

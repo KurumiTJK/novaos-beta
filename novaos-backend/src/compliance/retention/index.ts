@@ -30,9 +30,6 @@ export type {
   
   // Service interface
   IRetentionEnforcer,
-  
-  // Error codes
-  RetentionErrorCode,
 } from './types.js';
 
 export {
@@ -40,6 +37,8 @@ export {
   ALL_RETENTION_CATEGORIES,
   DEFAULT_RETENTION_POLICIES,
   DEFAULT_ENFORCER_CONFIG,
+  
+  // Error codes (exported as value, not type - it's an enum)
   RetentionErrorCode,
   
   // Factory functions

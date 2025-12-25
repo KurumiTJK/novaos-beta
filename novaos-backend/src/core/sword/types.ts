@@ -143,10 +143,16 @@ export type StepType =
   | 'milestone';   // Checkpoint/celebration
 
 export type ActionType = 
+  // Primary action types (used by routes)
+  | 'do'           // General action/task
+  | 'learn'        // Learning new material
+  | 'decide'       // Making a decision
+  | 'create'       // Creating something
+  | 'review'       // Reviewing previous material
+  // Extended action types (used by curriculum)
   | 'read'         // Reading/watching content
   | 'write'        // Writing/creating content
   | 'practice'     // Hands-on practice
-  | 'review'       // Reviewing previous material
   | 'exercise'     // Completing exercises
   | 'project'      // Working on a project
   | 'discuss'      // Discussion/collaboration
@@ -183,6 +189,7 @@ export interface Step {
   // Completion
   completionNotes?: string;
   skipReason?: string;     // Why it was skipped
+  skipNotes?: string;      // Alias for skipReason (route compatibility)
   verificationRequired: boolean;
 }
 
@@ -241,6 +248,8 @@ export interface Spark {
   // Completion tracking
   completionNotes?: string; // Notes from completing the spark
   skipReason?: string;      // Why the user skipped this spark
+  skipNotes?: string;       // Alias for skipReason (route compatibility)
+  satisfactionRating?: number; // User satisfaction (1-5)
   
   // Follow-up
   nextSparkHint?: string;   // What might come next

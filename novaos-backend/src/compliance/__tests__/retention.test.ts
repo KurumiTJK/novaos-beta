@@ -13,7 +13,7 @@ import {
   createRetentionEnforcer,
 } from '../retention/enforcer.js';
 import type { CategoryRegistry, CandidateFinder, CategoryProcessor } from '../retention/enforcer.js';
-import type { KeyValueStore } from '../../../storage/index.js';
+import type { KeyValueStore } from '../../storage/index.js';
 import type { Timestamp } from '../../types/branded.js';
 import { createTimestamp } from '../../types/branded.js';
 import type { RetentionPolicy, RetentionCategory } from '../retention/types.js';

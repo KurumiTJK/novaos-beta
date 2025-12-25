@@ -88,8 +88,19 @@ export {
 // REMINDER SERVICE ACCESSOR
 // ─────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Reminder service interface (subset of actual service for type safety)
+ */
+export interface IReminderServiceAccessor {
+  getUserConfig(userId: string): Promise<unknown>;
+  setUserConfig(userId: string, config: unknown): Promise<void>;
+  deleteUserConfig(userId: string): Promise<void>;
+  scheduleReminders?(sparkId: string, goalId: string): Promise<void>;
+  cancelReminders?(sparkId: string): Promise<void>;
+}
+
 // Lazy import and singleton management
-let reminderServiceInstance: unknown = null;
+let reminderServiceInstance: IReminderServiceAccessor | null = null;
 let reminderServiceModule: unknown = null;
 
 /**
@@ -97,13 +108,13 @@ let reminderServiceModule: unknown = null;
  * Creates the service on first call.
  * Returns null if the service cannot be created.
  */
-export async function getReminderService(): Promise<unknown> {
+export async function getReminderService(): Promise<IReminderServiceAccessor | null> {
   if (!reminderServiceInstance) {
     try {
       if (!reminderServiceModule) {
         reminderServiceModule = await import('../../services/spark-engine/reminder-service/index.js');
       }
-      const mod = reminderServiceModule as { createReminderService: () => unknown };
+      const mod = reminderServiceModule as { createReminderService: () => IReminderServiceAccessor };
       reminderServiceInstance = mod.createReminderService();
     } catch {
       return null;

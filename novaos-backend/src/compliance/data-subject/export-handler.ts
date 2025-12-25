@@ -12,9 +12,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { v4 as uuidv4 } from 'uuid';
-import { ok, err, type AsyncAppResult } from '../../../types/result.js';
-import type { UserId, Timestamp } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import { ok, err, type AsyncAppResult } from '../../types/result.js';
+import type { UserId, Timestamp } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import type {
   DataExportRequest,
   DataExport,
@@ -34,7 +34,7 @@ import {
   createExportRequestId,
 } from './types.js';
 import type { ExportRequestStore } from './export-store.js';
-import type { Goal, Quest, Step, Spark, ReminderSchedule } from '../../../services/spark-engine/types.js';
+import type { Goal, Quest, Step, Spark, ReminderSchedule } from '../../services/spark-engine/types.js';
 import type { ConsentRecord } from '../consent/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -11,9 +11,9 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { ok, err, type AsyncAppResult } from '../../../types/result.js';
-import type { UserId, Timestamp } from '../../../types/branded.js';
-import { createTimestamp } from '../../../types/branded.js';
+import { ok, err, type AsyncAppResult } from '../../types/result.js';
+import type { UserId, Timestamp } from '../../types/branded.js';
+import { createTimestamp } from '../../types/branded.js';
 import type {
   DataDeletionRequest,
   DeletionRequestId,

@@ -34,13 +34,10 @@ export type {
   
   // Logger interface
   IAuditLogger,
-  
-  // Error codes
-  AuditErrorCode,
 } from './types.js';
 
 export {
-  // Error codes
+  // Error codes (exported as value, not type - it's an enum)
   AuditErrorCode,
   
   // Factory functions

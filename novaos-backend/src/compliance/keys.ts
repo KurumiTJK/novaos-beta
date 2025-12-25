@@ -12,10 +12,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { buildKey, buildPattern } from '../infrastructure/redis/keys.js';
-import type { UserId, AuditId } from '../../../types/branded.js';
-import type { ExportRequestId, DeletionRequestId, ArchiveId } from '../data-subject/types.js';
-import type { RetentionJobId } from '../retention/types.js';
-import type { ConsentHistoryId } from '../consent/types.js';
+import type { UserId, AuditId } from '../types/branded.js';
+import type { ExportRequestId, DeletionRequestId, ArchiveId } from './data-subject/types.js';
+import type { RetentionJobId } from './retention/types.js';
+import type { ConsentHistoryId } from './consent/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // NAMESPACE
