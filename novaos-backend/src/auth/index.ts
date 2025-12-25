@@ -25,7 +25,7 @@ export interface UserPayload {
   createdAt: number;
 }
 
-export interface AuthenticatedRequest extends Request {
+export interface AuthenticatedRequest extends Omit<Request, 'user'> {
   user?: UserPayload;
   userId?: string;
 }

@@ -37,6 +37,7 @@ import type {
   UpdateGoalParams,
   TodayResult,
   PathProgress,
+  ReminderConfig,
 } from './types.js';
 
 import type {
@@ -152,7 +153,7 @@ export class SparkEngine implements ISparkEngine {
         ? { ...existing.learningConfig, ...updates.learningConfig }
         : existing.learningConfig,
       reminderConfig: updates.reminderConfig
-        ? { ...existing.reminderConfig, ...updates.reminderConfig }
+        ? ({ ...existing.reminderConfig, ...updates.reminderConfig } as ReminderConfig)
         : existing.reminderConfig,
       updatedAt: now,
     };
@@ -234,7 +235,7 @@ export class SparkEngine implements ISparkEngine {
 
     // Schedule reminders for first day if there are steps
     if (stepsResult.value.length > 0) {
-      const firstStep = stepsResult.value[0];
+      const firstStep = stepsResult.value[0]!;
 
       // Generate initial spark
       const sparkResult = await this.sparkGenerator.generateSpark(firstStep, 0);
@@ -563,11 +564,8 @@ export class SparkEngine implements ISparkEngine {
 
     // Estimate completion
     const remainingSteps = allSteps.filter((s) => s.status === 'pending');
-    const estimatedCompletionDate =
-      remainingSteps.length > 0 &&
-      remainingSteps[remainingSteps.length - 1].scheduledDate
-        ? remainingSteps[remainingSteps.length - 1].scheduledDate!
-        : null;
+    const lastRemainingStep = remainingSteps.length > 0 ? remainingSteps[remainingSteps.length - 1] : undefined;
+    const estimatedCompletionDate = lastRemainingStep?.scheduledDate ?? null;
 
     return ok({
       goalId,

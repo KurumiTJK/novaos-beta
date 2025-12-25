@@ -18,7 +18,7 @@
 
 import { getLogger } from '../../../../observability/logging/index.js';
 import { incCounter, observeHistogram } from '../../../../observability/metrics/index.js';
-import { ssrfSafeFetch, type SSRFSafeFetchOptions } from '../../../../security/ssrf/index.js';
+import { safeFetch } from '../../../../security/ssrf/index.js';
 import type { KnownSource, HealthStatus } from './registry.js';
 import { getKnownSourcesRegistry } from './registry.js';
 
@@ -227,32 +227,14 @@ export class HealthChecker {
     
     try {
       // Use SSRF-safe client for health checks
-      const fetchOptions: SSRFSafeFetchOptions = {
+      const response = await safeFetch(source.healthCheck.url, {
         method: 'HEAD',
         timeoutMs,
         headers: {
           'User-Agent': 'NovaOS-HealthChecker/1.0',
         },
-        // Health checks are for known, pre-verified sources
-        allowPrivateIPs: false,
-        maxRedirects: 3,
-      };
-      
-      const result = await ssrfSafeFetch(source.healthCheck.url, fetchOptions);
+      });
       const responseTimeMs = Date.now() - startTime;
-      
-      if (!result.ok) {
-        // SSRF client returned an error (blocked, timeout, etc.)
-        return {
-          sourceId: source.id,
-          status: 'unhealthy',
-          responseTimeMs,
-          error: result.error.message,
-          checkedAt,
-        };
-      }
-      
-      const response = result.value;
       
       // Determine status based on HTTP code and response time
       let status: HealthStatus;

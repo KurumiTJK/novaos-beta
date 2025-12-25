@@ -39,8 +39,18 @@ export interface KeyValueStore {
   zadd(key: string, score: number, member: string): Promise<number>;
   zrange(key: string, start: number, stop: number): Promise<string[]>;
   zrevrange(key: string, start: number, stop: number): Promise<string[]>;
-  zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]>;
-  zrevrangebyscore(key: string, max: number | string, min: number | string): Promise<string[]>;
+  zrangebyscore(
+    key: string, 
+    min: number | string, 
+    max: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]>;
+  zrevrangebyscore(
+    key: string, 
+    max: number | string, 
+    min: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]>;
   zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
   zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number>;
   zcard(key: string): Promise<number>;
@@ -202,11 +212,27 @@ export class RedisStore implements KeyValueStore {
     return this.client.zrevrange(key, start, stop);
   }
 
-  async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
+  async zrangebyscore(
+    key: string, 
+    min: number | string, 
+    max: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]> {
+    if (options?.limit) {
+      return this.client.zrangebyscore(key, min, max, 'LIMIT', options.limit.offset, options.limit.count);
+    }
     return this.client.zrangebyscore(key, min, max);
   }
 
-  async zrevrangebyscore(key: string, max: number | string, min: number | string): Promise<string[]> {
+  async zrevrangebyscore(
+    key: string, 
+    max: number | string, 
+    min: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]> {
+    if (options?.limit) {
+      return this.client.zrevrangebyscore(key, max, min, 'LIMIT', options.limit.offset, options.limit.count);
+    }
     return this.client.zrevrangebyscore(key, max, min);
   }
 
@@ -458,25 +484,45 @@ export class MemoryStore implements KeyValueStore {
     return reversed.slice(start, end).map(e => e.member);
   }
 
-  async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
+  async zrangebyscore(
+    key: string, 
+    min: number | string, 
+    max: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]> {
     const zset = this.sortedSets.get(key) ?? [];
     const minVal = this.parseScoreBound(min, -Infinity);
     const maxVal = this.parseScoreBound(max, Infinity);
     
-    return zset
+    let result = zset
       .filter(e => e.score >= minVal && e.score <= maxVal)
       .map(e => e.member);
+    
+    if (options?.limit) {
+      result = result.slice(options.limit.offset, options.limit.offset + options.limit.count);
+    }
+    return result;
   }
 
-  async zrevrangebyscore(key: string, max: number | string, min: number | string): Promise<string[]> {
+  async zrevrangebyscore(
+    key: string, 
+    max: number | string, 
+    min: number | string,
+    options?: { limit?: { offset: number; count: number } }
+  ): Promise<string[]> {
     const zset = this.sortedSets.get(key) ?? [];
     const minVal = this.parseScoreBound(min, -Infinity);
     const maxVal = this.parseScoreBound(max, Infinity);
     
-    return [...zset]
+    let result = [...zset]
       .filter(e => e.score >= minVal && e.score <= maxVal)
       .reverse()
       .map(e => e.member);
+    
+    if (options?.limit) {
+      result = result.slice(options.limit.offset, options.limit.offset + options.limit.count);
+    }
+    return result;
   }
 
   async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {

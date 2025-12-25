@@ -490,9 +490,9 @@ export class JobRunner extends EventEmitter {
       };
 
       if (consecutiveFailures >= this.config.maxConsecutiveFailures) {
-        await fireCritical(`scheduler_job_${job.id}_critical`, message, details);
+        await fireCritical(`scheduler_job_${job.id}_critical`, message, {});
       } else {
-        await fireWarning(`scheduler_job_${job.id}_failed`, message, details);
+        await fireWarning(`scheduler_job_${job.id}_failed`, message, {});
       }
     } catch (error) {
       logger.error('Failed to send alert',

@@ -527,7 +527,7 @@ export class SwordGate {
         firstReminderHour: inputs.firstReminderHour ?? 9,
         lastReminderHour: inputs.lastReminderHour ?? 21,
         intervalHours: 4,
-        channels: ['push'],
+        channels: { email: false, sms: false, push: true },
         shrinkSparksOnEscalation: true,
         maxRemindersPerDay: 3,
         quietDays: [],
@@ -551,7 +551,6 @@ export class SwordGate {
         title: proposedQuest.title,
         description: proposedQuest.description,
         order: proposedQuest.order,
-        topicIds: proposedQuest.topics.map((t) => t),
         estimatedDays: proposedQuest.estimatedDays,
       });
 
@@ -580,7 +579,7 @@ export class SwordGate {
    */
   private buildInput(state: PipelineState, context: PipelineContext): SwordGateInput {
     return {
-      userId: state.input.userId,
+      userId: state.input.userId as UserId,
       message: state.input.message,
       conversationHistory: [], // Could be populated from context
       intent: state.intent,
@@ -651,7 +650,7 @@ export class SwordGate {
   private getTomorrowDate(): string {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+    return tomorrow.toISOString().split('T')[0] ?? '';
   }
 
   /**

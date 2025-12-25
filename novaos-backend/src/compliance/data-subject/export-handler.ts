@@ -464,9 +464,9 @@ export class DataExportHandler implements IDataExportService {
     // Calculate totals
     const totalRecords = Object.values(recordCounts).reduce((sum, count) => sum + (count || 0), 0);
 
-    // Build summary (use explicit Date references to avoid closure narrowing issues)
-    const earliestStr = earliestTimestamp ? earliestTimestamp.toISOString() : now;
-    const latestStr = latestTimestamp ? latestTimestamp.toISOString() : now;
+    // Build summary (use explicit type assertions to avoid closure narrowing issues)
+    const earliestStr = earliestTimestamp ? (earliestTimestamp as Date).toISOString() : now;
+    const latestStr = latestTimestamp ? (latestTimestamp as Date).toISOString() : now;
     
     const summary: ExportSummary = {
       totalRecords,

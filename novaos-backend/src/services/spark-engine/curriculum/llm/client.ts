@@ -244,7 +244,7 @@ export class SecureLLMClient {
       const result = await this.executeWithProtection(request, startTime);
       
       if (!result.ok) {
-        return result.value as SecureLLMResponse<T>;
+        return result.error as SecureLLMResponse<T>;
       }
       
       const providerResponse = result.value;
