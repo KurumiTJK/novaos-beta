@@ -44,6 +44,17 @@ import { createUserId, createTimestamp } from '../types/branded.js';
 import { ok, err, type AsyncAppResult } from '../types/result.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// SPARKENGINE BOOTSTRAP — Complete Wiring
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { storeManager } from '../storage/index.js';
+import type { ISparkEngine } from '../services/spark-engine/index.js';
+import { 
+  bootstrapSparkEngine,
+  type SparkEngineBootstrapResult,
+} from './spark-engine-bootstrap.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -147,6 +158,9 @@ export class ExecutionPipeline {
   // SwordGate components (lazy initialized)
   private swordGate: SwordGate | null = null;
   private refinementStore: IRefinementStore | null = null;
+  
+  // SparkEngine bootstrap result (lazy initialized)
+  private sparkEngineBootstrap: SparkEngineBootstrapResult | null = null;
 
   constructor(config: PipelineConfig = {}) {
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
@@ -176,27 +190,55 @@ export class ExecutionPipeline {
   }
 
   /**
+   * Lazy initialization of SparkEngine via bootstrap.
+   * Creates all dependencies on first use.
+   */
+  private getSparkEngine(): ISparkEngine {
+    if (!this.sparkEngineBootstrap) {
+      console.log('[PIPELINE] Bootstrapping SparkEngine...');
+      
+      // Get the underlying KeyValueStore from the global storeManager
+      const kvStore = storeManager.getStore();
+      
+      // Bootstrap SparkEngine with all dependencies
+      this.sparkEngineBootstrap = bootstrapSparkEngine(kvStore, {
+        encryptionEnabled: true,
+        useStubStepGenerator: true,
+        useStubReminderService: true,
+      });
+      
+      console.log('[PIPELINE] SparkEngine bootstrapped:', this.sparkEngineBootstrap.status);
+    }
+    return this.sparkEngineBootstrap.sparkEngine;
+  }
+
+  /**
    * Lazy initialization of SwordGate.
-   * Creates the gate on first use to avoid initialization overhead.
+   * Creates the gate on first use with full SparkEngine wiring.
    */
   private getSwordGate(): SwordGate {
     if (!this.swordGate) {
       // Create in-memory refinement store
+      // TODO: Replace with Redis-backed RefinementStore for production persistence
       this.refinementStore = new InMemoryRefinementStore();
       
-      // Initialize SwordGate
+      // Get or create SparkEngine via bootstrap
+      const sparkEngine = this.getSparkEngine();
+      
+      // Initialize SwordGate with full SparkEngine
       this.swordGate = new SwordGate(
         this.refinementStore,
         {
           useLlmModeDetection: !this.useMock && !!process.env.OPENAI_API_KEY,
         },
         {
+          sparkEngine,  // ← NOW WIRED via bootstrap!
           openaiApiKey: process.env.OPENAI_API_KEY,
-          // sparkEngine and rateLimiter can be added later for full functionality
+          // rateLimiter can be added later
         }
       );
       
-      console.log('[PIPELINE] SwordGate initialized');
+      console.log('[PIPELINE] SwordGate initialized with SparkEngine');
     }
     return this.swordGate;
   }

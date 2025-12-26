@@ -420,6 +420,31 @@ export class SwordGate {
       }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // GRACEFUL FALLBACK: If SparkEngine isn't available, show success with
+    // plan details but note that persistence isn't available.
+    // This allows the refinement flow to complete in dev/testing environments.
+    // ─────────────────────────────────────────────────────────────────────────
+    if (!this.sparkEngine) {
+      console.warn('[SWORD_GATE] SparkEngine not available - using graceful fallback');
+      
+      // Clean up refinement state
+      await this.refinementStore.delete(input.userId);
+      
+      const proposal = currentState.lastProposedPlan;
+      const inputs = currentState.inputs;
+      
+      // Build a summary response
+      const summary = this.buildFallbackSummary(inputs, proposal);
+      
+      return {
+        mode: 'create',
+        responseMessage: summary,
+        suppressModelGeneration: true,
+        // Note: createdGoal is undefined since we couldn't persist
+      };
+    }
+
     // Create the goal
     const createResult = await this.createGoalFromProposal(
       input.userId,
@@ -451,6 +476,35 @@ export class SwordGate {
       responseMessage: createResult.value.summary,
       suppressModelGeneration: true,
     };
+  }
+
+  /**
+   * Build a summary when SparkEngine isn't available.
+   * Provides a positive completion message with plan details.
+   */
+  private buildFallbackSummary(
+    inputs: SwordRefinementInputs,
+    proposal: LessonPlanProposal
+  ): string {
+    const lines: string[] = [
+      `✅ Your learning plan for "${inputs.goalStatement}" is ready!`,
+      '',
+      `📅 **Duration:** ${inputs.totalDuration} (${inputs.totalDays} days)`,
+      `⏱️ **Daily commitment:** ${inputs.dailyTimeCommitment} minutes`,
+      `📊 **Level:** ${inputs.userLevel}`,
+      '',
+      `**Your ${proposal.quests.length} section${proposal.quests.length > 1 ? 's' : ''}:**`,
+    ];
+
+    for (const quest of proposal.quests) {
+      lines.push(`  ${quest.order}. ${quest.title} (${quest.estimatedDays} days)`);
+    }
+
+    lines.push('');
+    lines.push('🚧 *Note: Goal persistence requires SparkEngine integration.*');
+    lines.push('*Your plan details are shown above but not saved to the database.*');
+
+    return lines.join('\n');
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
