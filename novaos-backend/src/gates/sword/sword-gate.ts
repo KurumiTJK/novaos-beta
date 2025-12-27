@@ -211,6 +211,13 @@ export class SwordGate {
         }
       }
 
+      // ─── CANCEL DETECTION ───
+      // Check if user wants to exit the sword flow entirely
+      if (this.isCancelRequest(input.message) && (refinementState || exploreState)) {
+        console.log('[SWORD_GATE] Cancel detected, clearing sessions');
+        return this.handleCancel(input, refinementState, exploreState, startTime);
+      }
+
       // Detect mode (Phase 14A: pass explore state)
       const modeResult = await this.modeDetector.detect(input, refinementState, exploreState);
       console.log(`[SWORD_GATE] Mode detected: ${modeResult.mode} (${modeResult.detectionMethod})`);
@@ -1152,6 +1159,76 @@ export class SwordGate {
     return `✅ Created "${goal.title}" with ${quests.length} sections. ` +
       `Your first lesson will be ready ${goal.learningConfig?.startDate ?? 'tomorrow'}. ` +
       `I'll send you reminders to help you stay on track!`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CANCEL HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Detect if user wants to cancel/exit the sword flow.
+   */
+  private isCancelRequest(message: string): boolean {
+    const lower = message.toLowerCase().trim();
+    
+    // Direct cancel commands
+    const cancelPatterns = [
+      /^cancel$/,
+      /^exit$/,
+      /^quit$/,
+      /^stop$/,
+      /^nevermind$/,
+      /^never\s*mind$/,
+      /^forget\s*(it|this)?$/,
+      /^(i\s+)?(don'?t|do\s*not)\s+want\s+(this|to|a)\s*(plan|lesson|anymore)?/,
+      /^(let'?s?\s+)?cancel\s*(this|the)?\s*(plan|lesson|goal)?$/,
+      /^(i\s+)?(want\s+to\s+)?exit(\s+this)?$/,
+      /^(i\s+)?(want\s+to\s+)?stop(\s+this)?$/,
+      /^(go\s+)?back(\s+to\s+(normal|chat(ting)?|main))?$/,
+      /^(return\s+to\s+)?(normal|regular)\s*(chat(ting)?|mode)?$/,
+      /^(i\s+)?changed?\s+my\s+mind$/,
+      /^abort$/,
+      /^end\s*(this)?$/,
+    ];
+    
+    return cancelPatterns.some(pattern => pattern.test(lower));
+  }
+
+  /**
+   * Handle cancel request - clear sessions and return to normal chat.
+   */
+  private async handleCancel(
+    input: SwordGateInput,
+    refinementState: SwordRefinementState | null,
+    exploreState: ExploreState | null,
+    startTime: number
+  ): Promise<GateResult<SwordGateOutput>> {
+    // Clear refinement state
+    if (refinementState) {
+      await this.refinementStore.delete(input.userId);
+      console.log('[SWORD_GATE] Cleared refinement state');
+    }
+    
+    // Clear explore state
+    if (exploreState) {
+      await this.exploreStore.delete(input.userId);
+      console.log('[SWORD_GATE] Cleared explore state');
+    }
+    
+    // Return gate result that doesn't suppress model generation
+    // This allows normal chat to resume
+    // Use 'capture' mode since we're returning to initial state
+    return {
+      gateId: this.gateId,
+      status: 'pass',
+      output: {
+        mode: 'capture',
+        responseMessage: "No problem! I've cancelled the learning plan. What else can I help you with?",
+        suppressModelGeneration: false, // Allow normal LLM response to take over
+      },
+      action: 'proceed',
+      executionTimeMs: Date.now() - startTime,
+    };
   }
 }
 
