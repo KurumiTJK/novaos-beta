@@ -407,7 +407,7 @@ export class ExploreFlow {
   /**
    * Handle user requesting to skip exploration.
    */
-  private handleSkip(
+  private async handleSkip(
     state: ExploreState,
     message: string
   ): AsyncAppResult<ExploreFlowOutput> {
@@ -443,7 +443,7 @@ export class ExploreFlow {
   /**
    * Build skip result for initially clear goals.
    */
-  private buildSkipResult(
+  private async buildSkipResult(
     initialStatement: string,
     clarity: ClarityDetectionResult,
     reason: ExploreTransitionReason

@@ -59,6 +59,8 @@ export type ResourceSourceType =
   | 'youtube_api'       // YouTube Data API search
   | 'github_api'        // GitHub API search
   | 'web_search'        // General web search
+  | 'tavily_search'     // Tavily API search
+  | 'google_cse'        // Google Custom Search Engine
   | 'user_provided'     // User submitted URL
   | 'curated_list';     // Manually curated list
 
@@ -101,10 +103,12 @@ export type ResourceProvider =
   | 'python_docs'
   | 'npm'
   | 'crates_io'
+  | 'crates'           // Alias for crates_io
   | 'pypi'
   | 'medium'
   | 'dev_to'
   | 'official_docs'
+  | 'other'            // Catchall for other providers
   | 'unknown';
 
 /**
@@ -186,6 +190,32 @@ export interface RawResourceCandidate {
   
   /** Expiration time for this candidate */
   readonly expiresAt: Date;
+  
+  /** Optional metadata from API search */
+  readonly metadata?: {
+    readonly query?: string;
+    readonly resultPosition?: number;
+    readonly score?: number;
+    // YouTube-specific
+    readonly channelTitle?: string;
+    readonly videoId?: string;
+    readonly duration?: number;
+    readonly viewCount?: number;
+    readonly publishedAt?: string;
+    readonly thumbnailUrl?: string;
+    // GitHub-specific
+    readonly stars?: number;
+    readonly forks?: number;
+    readonly language?: string;
+    readonly owner?: string;
+    readonly topics?: readonly string[];
+    readonly updatedAt?: string;
+    // Web search-specific
+    readonly publishedDate?: string;
+    readonly displayLink?: string;
+    readonly formattedUrl?: string;
+    readonly htmlSnippet?: string;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -240,10 +270,10 @@ export interface GitHubMetadata {
 }
 
 /**
- * Generic web page metadata.
+ * Web page metadata (for general web content).
  */
 export interface WebPageMetadata {
-  readonly provider: 'unknown' | 'mdn' | 'stackoverflow' | 'medium' | 'dev_to' | 'official_docs';
+  readonly provider: Exclude<ResourceProvider, 'youtube' | 'github'>;
   readonly title: string;
   readonly description?: string;
   readonly author?: string;
@@ -895,6 +925,9 @@ export const RESOURCE_TTL = {
   ENRICHMENT_MS: 86400 * 1000,
   VERIFICATION_MS: 604800 * 1000,
   KNOWN_SOURCE_MS: 2592000 * 1000,
+  
+  /** API search result TTL (same as candidate) */
+  API_SEARCH_MS: 3600 * 1000,
 } as const;
 
 /**

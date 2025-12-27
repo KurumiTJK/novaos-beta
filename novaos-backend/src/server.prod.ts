@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import express from 'express';
-import { createRouter, errorHandler } from './api/routes.js';
+import { createRouterAsync, errorHandler } from './api/routes.js';
 import { createHealthRouter } from './api/routes/health.js';
 import { 
   requestMiddleware,
@@ -128,17 +128,7 @@ app.get('/', (_req, res) => {
 // API ROUTES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-// Create and mount main API router
-const apiRouter = createRouter({
-  requireAuth: REQUIRE_AUTH || NODE_ENV === 'production',
-  providerConfig: {
-    preferredProvider: USE_MOCK ? 'mock' : PREFERRED_PROVIDER,
-    openaiApiKey: OPENAI_API_KEY,
-    geminiApiKey: GEMINI_API_KEY,
-  },
-} as Parameters<typeof createRouter>[0]);
-
-app.use('/api/v1', apiRouter);
+// Router is created asynchronously in startup() function
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ERROR HANDLING
@@ -248,6 +238,21 @@ async function startup() {
   logger.info(`  Input Sanitization: enabled`);
   logger.info(`  Rate Limiting: enabled`);
   logger.info('─────────────────────────────────────────────────────────────────────────');
+  
+  // Create and mount API router (async)
+  try {
+    const apiRouter = await createRouterAsync({
+      requireAuth: REQUIRE_AUTH || NODE_ENV === 'production',
+      preferredProvider: USE_MOCK ? 'mock' : PREFERRED_PROVIDER,
+      openaiApiKey: OPENAI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY,
+    });
+    app.use('/api/v1', apiRouter);
+    logger.info('API router mounted');
+  } catch (error) {
+    logger.error('Failed to create API router:', error);
+    throw error;
+  }
   
   // Start server
   server = app.listen(PORT, () => {

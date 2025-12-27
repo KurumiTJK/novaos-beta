@@ -608,6 +608,11 @@ export function sanitizeGoalStatement(
     maxTotalDays: 365,
     useLlmModeDetection: false,
     llmModel: 'gpt-4o-mini',
+    // Phase 14A explore config
+    enableExplore: false,
+    maxExploreTurns: 5,
+    exploreClarityThreshold: 0.7,
+    exploreTtlSeconds: 3600,
   };
 
   return new GoalStatementSanitizer(config).sanitize(input);

@@ -493,13 +493,13 @@ export class WebSearchEnricher {
   private extractDeprecationSubject(title: string, text: string): string {
     // Try to extract from title
     const titleMatch = title.match(/^([^:|\-–]+)/);
-    if (titleMatch) {
+    if (titleMatch && titleMatch[1]) {
       return titleMatch[1].trim().substring(0, 50);
     }
 
     // Fall back to first significant phrase
     const phraseMatch = text.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/);
-    if (phraseMatch) {
+    if (phraseMatch && phraseMatch[1]) {
       return phraseMatch[1].substring(0, 50);
     }
 

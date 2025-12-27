@@ -32,6 +32,7 @@ import type {
   DisplayURL,
   TopicId,
   ResourceProvider,
+  ResourceContentType,
   RawResourceCandidate,
   EnrichedResource,
   VerifiedResource,
@@ -39,6 +40,7 @@ import type {
   ResourceError,
   QualitySignals,
   ResourceSelectionCriteria,
+  ProviderMetadata,
 } from './types.js';
 import {
   createCanonicalURL,
@@ -773,7 +775,7 @@ export class ResourceDiscoveryOrchestrator {
           metadata: {
             stars: item.stargazers_count,
             forks: item.forks_count,
-            language: item.language,
+            language: item.language ?? undefined,
             topics: item.topics,
             owner: item.owner.login,
             updatedAt: item.updated_at,
@@ -1048,7 +1050,7 @@ export class ResourceDiscoveryOrchestrator {
         return 'npm';
       }
       if (hostname.includes('crates.io')) {
-        return 'crates';
+        return 'crates_io';
       }
       if (hostname.includes('pypi.org')) {
         return 'pypi';
@@ -1057,9 +1059,9 @@ export class ResourceDiscoveryOrchestrator {
         return 'mdn';
       }
       
-      return 'other';
+      return 'unknown';
     } catch {
-      return 'other';
+      return 'unknown';
     }
   }
   
@@ -1144,17 +1146,21 @@ export class ResourceDiscoveryOrchestrator {
       // Known source lookup failed, continue without it
     }
     
+    // Handle provider result safely
+    const provider: ResourceProvider = providerResult?.provider ?? 'unknown';
+    const providerId: string | undefined = providerResult?.providerId ?? (providerResult as any)?.id;
+    
     // Calculate confidence
     const confidence = this.calculateClassificationConfidence(
-      providerResult,
+      { provider, providerId },
       topicMatches,
       knownSource
     );
     
     return {
       url: canonical,
-      provider: providerResult.provider,
-      providerId: providerResult.id,
+      provider,
+      providerId,
       topics: topicMatches,
       knownSource,
       confidence,
@@ -1165,7 +1171,7 @@ export class ResourceDiscoveryOrchestrator {
    * Calculate classification confidence.
    */
   private calculateClassificationConfidence(
-    _providerResult: { provider: ResourceProvider; id: unknown },
+    _providerResult: { provider: ResourceProvider; providerId?: string },
     topicMatches: readonly TopicMatchResult[],
     knownSource: KnownSourceMatch | null
   ): number {
@@ -1178,7 +1184,7 @@ export class ResourceDiscoveryOrchestrator {
     
     // Boost for topic matches
     if (topicMatches.length > 0) {
-      const avgTopicConfidence = topicMatches.reduce((sum, m) => sum + m.confidence, 0) / topicMatches.length;
+      const avgTopicConfidence = topicMatches.reduce((sum: number, m) => sum + Number(m.confidence), 0) / topicMatches.length;
       confidence += avgTopicConfidence * 0.2;
     }
     
@@ -1247,13 +1253,13 @@ export class ResourceDiscoveryOrchestrator {
     candidate: RawResourceCandidate & { classification: ClassificationResult }
   ): Promise<EnrichedResource | null> {
     const now = new Date();
+    const expiresAt = new Date(now.getTime() + RESOURCE_TTL.ENRICHMENT_MS);
     
     // Build base enriched resource
     const base: EnrichedResource = {
       id: candidate.id,
       canonicalUrl: candidate.canonicalUrl,
       displayUrl: candidate.displayUrl,
-      url: candidate.canonicalUrl,
       title: candidate.title ?? 'Untitled',
       description: candidate.snippet ?? '',
       source: candidate.source,
@@ -1261,15 +1267,15 @@ export class ResourceDiscoveryOrchestrator {
       providerId: candidate.classification.providerId
         ? String(candidate.classification.providerId)
         : undefined,
-      topics: candidate.classification.topics.map(t => ({
-        id: t.topicId,
-        name: t.topicId.split(':').pop() ?? t.topicId,
-      })),
+      topicIds: candidate.topicIds,
       contentType: this.inferContentType(candidate.classification.provider),
+      format: 'text',
       difficulty: 'beginner',
       estimatedMinutes: this.inferDuration(candidate.classification.provider),
+      metadata: this.createDefaultMetadata(candidate),
       candidateCreatedAt: candidate.createdAt,
       enrichedAt: now,
+      enrichmentExpiresAt: expiresAt,
       qualitySignals: this.computeInitialQuality(candidate),
     };
     
@@ -1277,9 +1283,66 @@ export class ResourceDiscoveryOrchestrator {
   }
   
   /**
+   * Create default metadata based on provider type.
+   */
+  private createDefaultMetadata(
+    candidate: RawResourceCandidate & { classification: ClassificationResult }
+  ): ProviderMetadata {
+    const provider = candidate.classification.provider;
+    const title = candidate.title ?? 'Untitled';
+    const now = new Date();
+    
+    // Safely extract providerId as string
+    const providerId = candidate.classification.providerId;
+    const providerIdStr = typeof providerId === 'string' ? providerId : '';
+    
+    // YouTube gets YouTubeMetadata
+    if (provider === 'youtube') {
+      return {
+        provider: 'youtube',
+        videoId: providerIdStr,
+        channelId: '',
+        channelTitle: '',
+        duration: 0,
+        viewCount: 0,
+        publishedAt: now,
+        hasClosedCaptions: false,
+        isLiveBroadcast: false,
+      };
+    }
+    
+    // GitHub gets GitHubMetadata
+    if (provider === 'github') {
+      return {
+        provider: 'github',
+        owner: '',
+        repo: title,
+        stars: 0,
+        forks: 0,
+        openIssues: 0,
+        watchers: 0,
+        language: undefined,
+        topics: [],
+        createdAt: now,
+        updatedAt: now,
+        isArchived: false,
+        isFork: false,
+        hasReadme: false,
+      };
+    }
+    
+    // Everything else gets WebPageMetadata
+    return {
+      provider: provider as Exclude<ResourceProvider, 'youtube' | 'github'>,
+      title,
+      description: candidate.snippet,
+    };
+  }
+  
+  /**
    * Infer content type from provider.
    */
-  private inferContentType(provider: ResourceProvider): string {
+  private inferContentType(provider: ResourceProvider): ResourceContentType {
     switch (provider) {
       case 'youtube':
         return 'video';
@@ -1287,6 +1350,7 @@ export class ResourceDiscoveryOrchestrator {
         return 'repository';
       case 'npm':
       case 'crates':
+      case 'crates_io':
       case 'pypi':
         return 'documentation';
       case 'stackoverflow':
@@ -1327,7 +1391,9 @@ export class ResourceDiscoveryOrchestrator {
     
     // Boost for known sources
     if (candidate.classification.knownSource) {
-      authority = 0.8 + (candidate.classification.knownSource.authority === 'official' ? 0.2 : 0);
+      // Safely check for authority property
+      const ks = candidate.classification.knownSource as { authority?: string };
+      authority = 0.8 + (ks.authority === 'official' ? 0.2 : 0);
     }
     
     // Use metadata if available
@@ -1343,6 +1409,10 @@ export class ResourceDiscoveryOrchestrator {
       authority,
       completeness: 0.6,
       composite: (popularity + 0.7 + authority + 0.6) / 4,
+      details: {
+        ageInDays: 0,
+        starCount: metadata?.stars,
+      },
     };
   }
   

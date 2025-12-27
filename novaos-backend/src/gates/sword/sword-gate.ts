@@ -71,6 +71,7 @@ import {
 
 // Phase 14A: Import explore components
 import type { ExploreState } from './explore/types.js';
+import { buildExploreContext } from './explore/types.js';
 import { ExploreStore, createExploreStore } from './explore/explore-store.js';
 import { ExploreFlow, createExploreFlow } from './explore/explore-flow.js';
 import { ClarityDetector, createClarityDetector } from './explore/clarity-detector.js';
@@ -150,11 +151,11 @@ export class SwordGate {
       maxTurns: this.config.maxExploreTurns,
       exploreTtlSeconds: this.config.exploreTtlSeconds,
     });
-    this.exploreFlow = createExploreFlow(options.openaiApiKey, {
+    this.exploreFlow = createExploreFlow({
       maxTurns: this.config.maxExploreTurns,
       clarityThreshold: this.config.exploreClarityThreshold,
-    });
-    this.clarityDetector = createClarityDetector(options.openaiApiKey);
+    }, options.openaiApiKey);
+    this.clarityDetector = createClarityDetector({}, options.openaiApiKey);
 
     this.sparkEngine = options.sparkEngine;
     this.rateLimiter = options.rateLimiter;
@@ -197,6 +198,29 @@ export class SwordGate {
       const modeResult = await this.modeDetector.detect(input, refinementState, exploreState);
       console.log(`[SWORD_GATE] Mode detected: ${modeResult.mode} (${modeResult.detectionMethod})`);
 
+      // ★ Handle exit command - clear all state and return to normal
+      if (modeResult.exitSession) {
+        return {
+          gateId: this.gateId,
+          status: 'pass',
+          output: await this.handleExitSession(input),
+          action: 'continue',
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+
+      // ★ Handle skip command - advance to next step or create with defaults
+      if (modeResult.skipStep) {
+        const output = await this.handleSkipStep(input, refinementState, exploreState, modeResult);
+        return {
+          gateId: this.gateId,
+          status: 'pass',
+          output,
+          action: this.determineAction(output),
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+
       // Execute mode-specific handler
       const output = await this.executeMode(input, refinementState, exploreState, modeResult);
 
@@ -218,6 +242,132 @@ export class SwordGate {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // ★ SESSION CONTROL HANDLERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Handle exit command - clear all sword session state.
+   */
+  private async handleExitSession(input: SwordGateInput): Promise<SwordGateOutput> {
+    console.log(`[SWORD_GATE] Exiting session for user ${input.userId}`);
+
+    // Clear explore state
+    if (this.config.enableExplore) {
+      await this.exploreStore.delete(input.userId);
+    }
+
+    // Clear refinement state
+    await this.refinementStore.delete(input.userId);
+
+    return {
+      mode: 'capture',
+      responseMessage: 'No problem! Let me know if you want to create a learning plan later.',
+      suppressModelGeneration: false, // Allow normal conversation to continue
+    };
+  }
+
+  /**
+   * Handle skip command - advance to next step or create with defaults.
+   */
+  private async handleSkipStep(
+    input: SwordGateInput,
+    refinementState: SwordRefinementState | null,
+    exploreState: ExploreState | null,
+    modeResult: { mode: SwordGateMode; bypassExplore?: boolean }
+  ): Promise<SwordGateOutput> {
+    console.log(`[SWORD_GATE] Skipping step for user ${input.userId}`);
+
+    // If in explore phase, skip to refine
+    if (exploreState && !this.isExploreTerminal(exploreState)) {
+      console.log('[SWORD_GATE] Skipping explore → refine');
+      
+      // Mark explore as skipped
+      await this.exploreStore.skip(input.userId);
+      
+      // Extract whatever goal we have (or use the initial statement)
+      const goalStatement = exploreState.crystallizedGoal || 
+                           exploreState.initialStatement || 
+                           input.message;
+      
+      // Sanitize and start refinement
+      const sanitizeResult = this.sanitizer.sanitize(goalStatement);
+      if (!sanitizeResult.valid) {
+        return {
+          mode: 'capture',
+          responseMessage: 'I couldn\'t understand that goal. What would you like to learn?',
+          suppressModelGeneration: true,
+        };
+      }
+      
+      // Initiate refinement flow
+      const newState = this.refinementFlow.initiate(
+        input.userId,
+        sanitizeResult.sanitized!,
+        input.userPreferences
+      );
+      
+      // Save refinement state
+      const saveResult = await this.refinementStore.save(newState);
+      if (!saveResult.ok) {
+        return {
+          mode: 'capture',
+          responseMessage: 'Failed to start refinement. Please try again.',
+          suppressModelGeneration: true,
+        };
+      }
+      
+      // Get first question
+      const nextQuestion = this.refinementFlow.getNextQuestion(newState);
+      
+      return {
+        mode: 'refine',
+        nextQuestion: nextQuestion ?? undefined,
+        responseMessage: `Got it! Let me help you create a plan for "${sanitizeResult.topic}". ${nextQuestion || 'What is your current skill level?'}`,
+        suppressModelGeneration: true,
+      };
+    }
+
+    // If in refine phase, skip to suggest with defaults
+    if (refinementState && refinementState.stage !== 'complete') {
+      console.log('[SWORD_GATE] Skipping refine → suggest');
+      
+      // Fill in defaults for missing fields
+      const filledInputs = this.fillDefaults(refinementState.inputs);
+      
+      // Generate proposal with defaults
+      const proposalResult = await this.planGenerator.generate(filledInputs);
+      
+      if (!proposalResult.ok) {
+        return {
+          mode: 'capture',
+          responseMessage: 'I had trouble generating a plan. Let me try a simpler approach.',
+          suppressModelGeneration: true,
+        };
+      }
+      
+      const proposal = proposalResult.value;
+      
+      // Store proposal and update state to confirming
+      await this.refinementStore.startConfirming(input.userId, proposal);
+      
+      return {
+        mode: 'suggest',
+        proposedPlan: proposal,
+        confirmationRequired: true,
+        responseMessage: this.buildProposalResponse(proposal),
+        suppressModelGeneration: true,
+      };
+    }
+
+    // No active step to skip
+    return {
+      mode: 'capture',
+      responseMessage: 'What would you like to learn?',
+      suppressModelGeneration: true,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // MODE HANDLERS
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -228,7 +378,13 @@ export class SwordGate {
     input: SwordGateInput,
     refinementState: SwordRefinementState | null,
     exploreState: ExploreState | null,
-    modeResult: { mode: SwordGateMode; bypassExplore?: boolean; bypassReason?: string }
+    modeResult: { 
+      mode: SwordGateMode; 
+      bypassExplore?: boolean; 
+      bypassReason?: string;
+      exitSession?: boolean;
+      skipStep?: boolean;
+    }
   ): Promise<SwordGateOutput> {
     const { mode, bypassExplore, bypassReason } = modeResult;
 
@@ -277,7 +433,7 @@ export class SwordGate {
    */
   private async handleCaptureWithExplore(input: SwordGateInput): Promise<SwordGateOutput> {
     // Check clarity of the goal statement
-    const clarityResult = await this.clarityDetector.detect(input.message);
+    const clarityResult = await this.clarityDetector.assess(input.message);
 
     // If goal is clear enough, skip explore
     if (clarityResult.isClear) {
@@ -301,7 +457,10 @@ export class SwordGate {
    */
   private async handleExploreStart(input: SwordGateInput): Promise<SwordGateOutput> {
     // Start exploration flow
-    const result = await this.exploreFlow.startExploration(input.userId, input.message);
+    const result = await this.exploreFlow.process({
+      message: input.message,
+      currentState: null,
+    });
 
     if (!result.ok) {
       console.error('[SWORD_GATE] Failed to start exploration:', result.error);
@@ -311,10 +470,19 @@ export class SwordGate {
 
     const { state, response } = result.value;
 
+    // ★ FIX: Set userId before saving (exploreFlow returns empty userId)
+    const stateWithUser: ExploreState = { 
+      ...state, 
+      userId: input.userId,
+      initialStatement: input.message,  // Ensure initial statement is set
+    };
+
     // Save explore state
-    const saveResult = await this.exploreStore.save(state);
+    const saveResult = await this.exploreStore.save(stateWithUser);
     if (!saveResult.ok) {
       console.error('[SWORD_GATE] Failed to save explore state:', saveResult.error);
+    } else {
+      console.log(`[SWORD_GATE] Explore state saved for user ${input.userId}`);
     }
 
     return {
@@ -350,7 +518,10 @@ export class SwordGate {
 
     // Check for skip request
     if (this.clarityDetector.isSkipRequest(input.message)) {
-      const skipResult = await this.exploreFlow.handleSkip(exploreState, input.message);
+      const skipResult = await this.exploreFlow.process({
+        message: input.message,
+        currentState: exploreState,
+      });
       if (skipResult.ok) {
         await this.exploreStore.skip(input.userId);
         return this.handleExploreToRefine(input, skipResult.value.state);
@@ -359,12 +530,16 @@ export class SwordGate {
 
     // Check for confirmation of proposed goal
     if (exploreState.stage === 'proposing' && this.clarityDetector.isConfirmation(input.message)) {
-      await this.exploreStore.updateStage(input.userId, 'confirmed');
+      const goalToConfirm = exploreState.crystallizedGoal ?? exploreState.candidateGoals[exploreState.candidateGoals.length - 1] ?? exploreState.initialStatement;
+      await this.exploreStore.crystallizeGoal(input.userId, goalToConfirm);
       return this.handleExploreToRefine(input, exploreState);
     }
 
     // Continue exploration
-    const result = await this.exploreFlow.continueExploration(exploreState, input.message);
+    const result = await this.exploreFlow.process({
+      message: input.message,
+      currentState: exploreState,
+    });
 
     if (!result.ok) {
       console.error('[SWORD_GATE] Exploration continue failed:', result.error);
@@ -404,7 +579,7 @@ export class SwordGate {
     exploreState: ExploreState
   ): Promise<SwordGateOutput> {
     // Build explore context for refinement
-    const context = this.exploreStore.buildContext(exploreState);
+    const context = buildExploreContext(exploreState);
 
     // Get crystallized goal or synthesize one
     const goalStatement = exploreState.crystallizedGoal ?? exploreState.initialStatement;

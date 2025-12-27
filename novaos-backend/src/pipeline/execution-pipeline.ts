@@ -40,9 +40,14 @@ import {
 import { SwordGate, type SwordGateOutput } from '../gates/sword/index.js';
 import type { IResourceDiscoveryService } from '../gates/sword/lesson-plan-generator.js';
 import type { IRefinementStore, RefinementState } from '../services/spark-engine/store/types.js';
+import type { TopicId } from '../services/spark-engine/resource-discovery/types.js';
 import type { UserId, Timestamp } from '../types/branded.js';
 import { createUserId, createTimestamp } from '../types/branded.js';
 import { ok, err, type AsyncAppResult } from '../types/result.js';
+
+// Phase 14A: Import ExploreStore for session checking
+import { ExploreStore, createExploreStore } from '../gates/sword/explore/explore-store.js';
+import type { ExploreState } from '../gates/sword/explore/types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SPARKENGINE BOOTSTRAP — Complete Wiring
@@ -167,6 +172,7 @@ export class ExecutionPipeline {
   // SwordGate components (lazy initialized)
   private swordGate: SwordGate | null = null;
   private refinementStore: IRefinementStore | null = null;
+  private exploreStore: ExploreStore | null = null;
   
   // SparkEngine bootstrap result (lazy initialized)
   private sparkEngineBootstrap: SparkEngineBootstrapResult | null = null;
@@ -299,9 +305,11 @@ export class ExecutionPipeline {
    */
   private getSwordGate(): SwordGate {
     if (!this.swordGate) {
-      // Create in-memory refinement store
-      // TODO: Replace with Redis-backed RefinementStore for production persistence
-      this.refinementStore = new InMemoryRefinementStore();
+      // Create in-memory refinement store if it doesn't exist
+      // ★ FIX: Don't overwrite if already created by checkActive* methods
+      if (!this.refinementStore) {
+        this.refinementStore = new InMemoryRefinementStore();
+      }
       
       // Get or create SparkEngine via bootstrap
       const sparkEngine = this.getSparkEngine();
@@ -352,7 +360,7 @@ export class ExecutionPipeline {
           console.log('[RESOURCE_ADAPTER] Discovering resources for topics:', request.topics);
           
           const result = await orchestrator.discover({
-            topics: request.topics.map(t => ({ id: t as any, name: t.split(':').pop() ?? t })),
+            topics: request.topics as TopicId[],
             maxResults: request.maxResults ?? 50,
             includeTypes: request.contentTypes as any[],
           });
@@ -371,17 +379,17 @@ export class ExecutionPipeline {
               resources: resources.map(r => ({
                 id: r.id,
                 title: r.title,
-                url: r.url,
+                url: r.displayUrl,
                 canonicalUrl: r.canonicalUrl,
                 provider: r.providerId ?? 'unknown',
                 contentType: r.contentType,
-                topics: r.topics.map(t => typeof t === 'string' ? t : t.id),
+                topics: [...r.topicIds] as string[],
                 estimatedMinutes: r.estimatedMinutes,
                 difficulty: r.difficulty,
                 quality: r.qualitySignals ? { score: r.qualitySignals.composite } : undefined,
               })),
               topicsCovered: resources
-                .flatMap(r => r.topics.map(t => typeof t === 'string' ? t : t.id))
+                .flatMap(r => [...r.topicIds] as string[])
                 .filter((v, i, a) => a.indexOf(v) === i),
               gaps: [],
             },
@@ -398,6 +406,64 @@ export class ExecutionPipeline {
         }
       },
     };
+  }
+
+  /**
+   * Check if user has an active sword session (explore OR refinement).
+   * This is used to route follow-up messages back to SwordGate
+   * even if they don't match the initial learning intent pattern.
+   */
+  private async checkActiveSwordSession(userId: string): Promise<boolean> {
+    // Check for active explore session first
+    const hasExplore = await this.checkActiveExplore(userId);
+    if (hasExplore) {
+      return true;
+    }
+    
+    // Then check for active refinement session
+    return this.checkActiveRefinement(userId);
+  }
+
+  /**
+   * Check if user has an active explore session.
+   */
+  private async checkActiveExplore(userId: string): Promise<boolean> {
+    // Ensure stores are initialized
+    if (!this.refinementStore) {
+      this.refinementStore = new InMemoryRefinementStore();
+    }
+    
+    // Lazily create explore store (same backing store as refinement)
+    if (!this.exploreStore) {
+      this.exploreStore = createExploreStore(this.refinementStore, {
+        maxTurns: 10,
+        exploreTtlSeconds: 3600,
+      });
+    }
+    
+    try {
+      const result = await this.exploreStore.get(userId as UserId);
+      
+      if (result.ok && result.value !== null) {
+        const exploreState = result.value;
+        // Check if explore is not in terminal state
+        const isTerminal = exploreState.stage === 'confirmed' || exploreState.stage === 'skipped';
+        
+        if (!isTerminal) {
+          console.log(`[PIPELINE] Active explore session found for user ${userId}, stage: ${exploreState.stage}`);
+          return true;
+        } else {
+          console.log(`[PIPELINE] Explore session is terminal for user ${userId}, stage: ${exploreState.stage}`);
+        }
+      } else {
+        console.log(`[PIPELINE] No explore session found for user ${userId}`);
+      }
+      
+      return false;
+    } catch (error) {
+      console.error(`[PIPELINE] Error checking explore state for ${userId}:`, error);
+      return false;
+    }
   }
 
   /**
@@ -549,38 +615,51 @@ export class ExecutionPipeline {
     // ═══════════════════════════════════════════════════════════════════════════
     //
     // Route to SwordGate if:
-    //   1. User has an ACTIVE refinement session (multi-turn flow), OR
-    //   2. This is a NEW learning intent (stance=sword + domain=education)
+    //   1. User has an ACTIVE sword session (explore OR refinement), OR
+    //   2. This is a NEW learning intent (detected by intent OR pattern)
     //
-    // This ensures follow-up messages like "i am new" or "beginner" are
+    // This ensures follow-up messages like "sure" or "skip" are
     // routed back to SwordGate even if they don't match the education intent.
     //
-    // SwordGate handles: capture → refine → suggest → create
+    // SwordGate handles: explore → capture → refine → suggest → create
     // If suppressModelGeneration is true, return SwordGate's response directly.
     //
     // ═══════════════════════════════════════════════════════════════════════════
     
-    // Check 1: Does user have an ACTIVE refinement session?
-    const hasActiveRefinement = context.userId 
-      ? await this.checkActiveRefinement(context.userId)
+    // Check 1: Does user have an ACTIVE sword session (explore OR refinement)?
+    const hasActiveSwordSession = context.userId 
+      ? await this.checkActiveSwordSession(context.userId)
       : false;
     
     // Check 2: Is this a NEW learning intent?
-    const isLearningIntent = 
+    // Check both intent classification AND keyword patterns for robustness
+    const isLearningIntentByClassifier = 
       state.intent?.primaryDomain === 'education' &&
       (state.intent?.type === 'action' || state.intent?.type === 'planning');
+    
+    // ★ Pattern-based learning intent detection (catches "i want to learn X")
+    const learningPatterns = [
+      /\b(i want to learn|teach me|help me learn|i'?d like to learn|learn how to)\b/i,
+      /\b(create a (learning )?plan|make a (learning )?plan|set up a plan)\b/i,
+      /\b(new goal|start learning|begin learning|get started with)\b/i,
+      /\b(master|become proficient|get better at|improve my)\b/i,
+    ];
+    const isLearningIntentByPattern = learningPatterns.some(p => p.test(state.userMessage));
+    
+    const isNewLearningIntent = isLearningIntentByClassifier || 
+      (state.intent?.primaryDomain === 'education' && isLearningIntentByPattern);
     
     // Route to SwordGate if EITHER condition is true
     const shouldUseSwordGate = 
       this.enableSwordGate &&
       context.userId &&
-      (hasActiveRefinement || (state.stance === 'sword' && isLearningIntent));
+      (hasActiveSwordSession || isNewLearningIntent);
     
     if (shouldUseSwordGate) {
       try {
-        const routeReason = hasActiveRefinement 
-          ? 'active refinement session' 
-          : 'education + action intent';
+        const routeReason = hasActiveSwordSession 
+          ? 'active sword session' 
+          : isLearningIntentByPattern ? 'learning pattern detected' : 'education + action intent';
         console.log(`[PIPELINE] Routing to SwordGate (${routeReason})`);
         
         // Build a compatible state object for SwordGate
