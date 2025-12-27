@@ -169,428 +169,10 @@ export interface ICurriculumService {
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// NOTE: CapabilityStage is now imported from capability-generator.ts
-// The 5-stage competence model is generated dynamically for ANY topic.
-
-/**
- * STATIC CACHE: Common topic progressions for instant response.
- * These are pre-built for popular topics to avoid LLM latency.
- * The CapabilityGenerator is used for all other topics.
- */
-const CAPABILITY_PROGRESSIONS: Record<string, readonly CapabilityStage[]> = {
-  'rust': [
-    {
-      title: 'Build & Run Your First Program',
-      capability: 'Create, compile, and run a Rust program that takes input and produces output',
-      artifact: 'CLI tool that greets a user by name (cargo new → cargo run)',
-      designedFailure: 'Ownership error when trying to use a moved String',
-      transfer: 'Modify the greeting to read from a file instead of stdin',
-      topics: ['cargo', 'main', 'println', 'stdin', 'String'],
-    },
-    {
-      title: 'Own Your Data',
-      capability: 'Predict and fix ownership/borrowing errors without compiler hints',
-      artifact: 'Function that processes a Vec without cloning unnecessarily',
-      designedFailure: 'Dangling reference from returning borrowed data',
-      transfer: 'Refactor existing code to eliminate all .clone() calls',
-      topics: ['ownership', 'borrowing', 'references', 'lifetimes'],
-    },
-    {
-      title: 'Model Real Data',
-      capability: 'Design structs and enums that make invalid states unrepresentable',
-      artifact: 'Type system that prevents invalid state transitions',
-      designedFailure: 'Runtime bug from allowing invalid state',
-      transfer: 'Model a different domain using the same patterns',
-      topics: ['structs', 'enums', 'pattern-matching', 'Option', 'Result'],
-    },
-    {
-      title: 'Handle Failure Gracefully',
-      capability: 'Propagate and transform errors through a call stack',
-      artifact: 'Application with custom error types and ? operator throughout',
-      designedFailure: 'Unwrap panic in production path',
-      transfer: 'Add error handling to an existing panic-prone codebase',
-      topics: ['Result', 'Option', 'error-handling', 'thiserror', 'anyhow'],
-    },
-    {
-      title: 'Ship a Real Tool',
-      capability: 'Build, test, document, and publish a crate others can use',
-      artifact: 'Published crate on crates.io with tests, docs, and CI',
-      designedFailure: 'Breaking change without semver bump',
-      transfer: 'Contribute a fix to an existing open-source Rust project',
-      topics: ['testing', 'documentation', 'ci-cd', 'publishing', 'semver'],
-    },
-  ],
-
-  'python': [
-    {
-      title: 'Automate a Manual Task',
-      capability: 'Write a script that replaces a repetitive manual process',
-      artifact: 'Script that processes files in a directory and produces a report',
-      designedFailure: 'Script crashes on unexpected file format',
-      transfer: 'Adapt the script to work with a different data source',
-      topics: ['files', 'os', 'pathlib', 'csv', 'json'],
-    },
-    {
-      title: 'Structure Your Code',
-      capability: 'Organize code into functions and modules that others can understand',
-      artifact: 'Refactored script with clear module boundaries and docstrings',
-      designedFailure: 'Circular import error',
-      transfer: 'Explain your code structure to someone else and incorporate feedback',
-      topics: ['functions', 'modules', 'packages', 'docstrings', 'imports'],
-    },
-    {
-      title: 'Debug Like a Detective',
-      capability: 'Systematically find and fix bugs in unfamiliar code',
-      artifact: 'Fixed bug in a codebase you didnt write, with explanation',
-      designedFailure: 'Silent data corruption from type coercion',
-      transfer: 'Debug a different type of bug (logic vs runtime vs performance)',
-      topics: ['debugging', 'pdb', 'logging', 'exceptions', 'testing'],
-    },
-    {
-      title: 'Build a Data Pipeline',
-      capability: 'Extract, transform, and load data reliably with error recovery',
-      artifact: 'Pipeline that handles failures gracefully and is idempotent',
-      designedFailure: 'Partial failure leaves data inconsistent',
-      transfer: 'Add a new data source to your existing pipeline',
-      topics: ['pandas', 'requests', 'databases', 'error-handling', 'idempotency'],
-    },
-    {
-      title: 'Deploy and Monitor',
-      capability: 'Package, deploy, and maintain a Python application in production',
-      artifact: 'Running service with logging, monitoring, and alerting',
-      designedFailure: 'Memory leak discovered via monitoring',
-      transfer: 'Respond to a production incident and write a post-mortem',
-      topics: ['packaging', 'docker', 'logging', 'monitoring', 'deployment'],
-    },
-  ],
-
-  'javascript': [
-    {
-      title: 'Make Something Interactive',
-      capability: 'Build a UI that responds to user actions in real-time',
-      artifact: 'Interactive widget (calculator, quiz, or form validator)',
-      designedFailure: 'Event handler memory leak from not removing listeners',
-      transfer: 'Add keyboard shortcuts to your existing UI',
-      topics: ['dom', 'events', 'querySelector', 'addEventListener'],
-    },
-    {
-      title: 'Fetch and Display Data',
-      capability: 'Load data from an API and handle loading/error/success states',
-      artifact: 'App that fetches, displays, and refreshes external data',
-      designedFailure: 'UI shows stale data after failed refresh',
-      transfer: 'Add caching and optimistic updates',
-      topics: ['fetch', 'promises', 'async-await', 'error-handling', 'loading-states'],
-    },
-    {
-      title: 'Manage Complex State',
-      capability: 'Organize application state so changes are predictable and debuggable',
-      artifact: 'App with undo/redo and state persistence across sessions',
-      designedFailure: 'State mutation bug causing inconsistent UI',
-      transfer: 'Add time-travel debugging to your state management',
-      topics: ['state-management', 'immutability', 'reducers', 'localStorage'],
-    },
-    {
-      title: 'Test Your Assumptions',
-      capability: 'Write tests that catch bugs before users do',
-      artifact: 'Test suite with unit, integration, and E2E tests',
-      designedFailure: 'Flaky test that passes/fails randomly',
-      transfer: 'Add tests to untested legacy code',
-      topics: ['jest', 'testing-library', 'cypress', 'mocking', 'tdd'],
-    },
-    {
-      title: 'Ship to Real Users',
-      capability: 'Deploy, measure, and iterate on a production application',
-      artifact: 'Deployed app with analytics, error tracking, and CI/CD',
-      designedFailure: 'JavaScript error in production affecting 10% of users',
-      transfer: 'A/B test a feature and make a data-driven decision',
-      topics: ['bundling', 'deployment', 'analytics', 'error-tracking', 'ci-cd'],
-    },
-  ],
-
-  'web development': [
-    {
-      title: 'Build a Static Site',
-      capability: 'Create a multi-page website with consistent styling and navigation',
-      artifact: 'Personal portfolio or landing page deployed to the web',
-      designedFailure: 'Layout breaks on mobile devices',
-      transfer: 'Rebuild the same site using a different CSS approach',
-      topics: ['html', 'css', 'responsive', 'deployment', 'accessibility'],
-    },
-    {
-      title: 'Add Dynamic Behavior',
-      capability: 'Make pages interactive without a framework',
-      artifact: 'Site feature that responds to user input (form, filter, or animation)',
-      designedFailure: 'JavaScript error prevents form submission',
-      transfer: 'Add the same feature to a different page structure',
-      topics: ['javascript', 'dom', 'events', 'forms', 'validation'],
-    },
-    {
-      title: 'Connect to a Backend',
-      capability: 'Build a full-stack feature that persists user data',
-      artifact: 'Feature where users can create, read, update, and delete data',
-      designedFailure: 'Race condition causes data loss',
-      transfer: 'Add authentication to your existing CRUD feature',
-      topics: ['fetch', 'rest-api', 'database', 'crud', 'authentication'],
-    },
-    {
-      title: 'Handle Scale and Failure',
-      capability: 'Build features that work under load and recover from errors',
-      artifact: 'Feature with loading states, error boundaries, and retry logic',
-      designedFailure: 'API timeout causes infinite loading spinner',
-      transfer: 'Add offline support to your feature',
-      topics: ['error-handling', 'loading-states', 'caching', 'offline', 'performance'],
-    },
-    {
-      title: 'Ship and Maintain',
-      capability: 'Deploy, monitor, and iterate on a production web application',
-      artifact: 'Production app with CI/CD, monitoring, and documentation',
-      designedFailure: 'Deployment breaks a feature for subset of users',
-      transfer: 'Write runbook for handling common production issues',
-      topics: ['ci-cd', 'monitoring', 'documentation', 'deployment', 'maintenance'],
-    },
-  ],
-
-  'full-stack web development': [
-    {
-      title: 'Build End-to-End',
-      capability: 'Create a feature that spans UI, API, and database',
-      artifact: 'Working feature: user submits form → API saves → page updates',
-      designedFailure: 'Data saved but UI shows error (partial failure)',
-      transfer: 'Build same feature with different tech stack',
-      topics: ['frontend', 'backend', 'database', 'api', 'integration'],
-    },
-    {
-      title: 'Secure Your Stack',
-      capability: 'Implement authentication that actually protects user data',
-      artifact: 'Auth system with registration, login, sessions, and protected routes',
-      designedFailure: 'JWT stored in localStorage stolen via XSS',
-      transfer: 'Add OAuth provider to existing auth system',
-      topics: ['authentication', 'authorization', 'jwt', 'sessions', 'security'],
-    },
-    {
-      title: 'Debug Across Boundaries',
-      capability: 'Trace and fix bugs that span frontend, backend, and database',
-      artifact: 'Fixed cross-cutting bug with documented root cause analysis',
-      designedFailure: 'Timezone bug causes data to appear on wrong day',
-      transfer: 'Add distributed tracing to your application',
-      topics: ['debugging', 'logging', 'tracing', 'devtools', 'monitoring'],
-    },
-    {
-      title: 'Optimize for Reality',
-      capability: 'Make your application fast and reliable under real conditions',
-      artifact: 'Performance improvements measured with before/after metrics',
-      designedFailure: 'N+1 query discovered under load',
-      transfer: 'Optimize a different bottleneck (network, render, memory)',
-      topics: ['performance', 'caching', 'database-optimization', 'profiling', 'cdn'],
-    },
-    {
-      title: 'Own Your System',
-      capability: 'Deploy, monitor, and maintain a system you can be on-call for',
-      artifact: 'Production system with alerts, runbooks, and incident response',
-      designedFailure: 'Wake up to alert, diagnose, and resolve without help',
-      transfer: 'Hand off your system to another developer with documentation',
-      topics: ['devops', 'monitoring', 'alerting', 'incident-response', 'documentation'],
-    },
-  ],
-
-  'back-end web development': [
-    {
-      title: 'Build an API',
-      capability: 'Create a REST API that another developer can use correctly',
-      artifact: 'Documented API with consistent responses and error handling',
-      designedFailure: 'Inconsistent error format breaks client integration',
-      transfer: 'Add versioning to your API without breaking existing clients',
-      topics: ['rest', 'express', 'routing', 'error-handling', 'documentation'],
-    },
-    {
-      title: 'Persist Data Correctly',
-      capability: 'Design a database schema that supports your features without corruption',
-      artifact: 'Schema with migrations, constraints, and documented relationships',
-      designedFailure: 'Missing foreign key allows orphaned records',
-      transfer: 'Add a new feature requiring schema migration',
-      topics: ['sql', 'schema-design', 'migrations', 'constraints', 'normalization'],
-    },
-    {
-      title: 'Handle Concurrent Access',
-      capability: 'Build features that work correctly when multiple users act simultaneously',
-      artifact: 'Feature that handles race conditions with optimistic locking',
-      designedFailure: 'Double-submit causes duplicate records',
-      transfer: 'Add rate limiting to prevent abuse',
-      topics: ['concurrency', 'transactions', 'locking', 'idempotency', 'rate-limiting'],
-    },
-    {
-      title: 'Integrate External Services',
-      capability: 'Build reliable integrations that handle third-party failures gracefully',
-      artifact: 'Integration with retry logic, circuit breaker, and fallbacks',
-      designedFailure: 'Third-party timeout causes cascade failure',
-      transfer: 'Add a new external service to your existing integration pattern',
-      topics: ['integrations', 'retry', 'circuit-breaker', 'queues', 'webhooks'],
-    },
-    {
-      title: 'Scale and Operate',
-      capability: 'Run a backend service that stays up and performs under load',
-      artifact: 'Service with health checks, metrics, and horizontal scaling',
-      designedFailure: 'Memory leak causes gradual degradation',
-      transfer: 'Perform a zero-downtime deployment with database migration',
-      topics: ['scaling', 'containers', 'health-checks', 'metrics', 'deployment'],
-    },
-  ],
-
-  'cybersecurity': [
-    {
-      title: 'Understand the Threat Landscape',
-      capability: 'Identify and classify common attack vectors and vulnerabilities',
-      artifact: 'Threat model for a sample application with ranked risks',
-      designedFailure: 'Miss a critical vulnerability category in your assessment',
-      transfer: 'Create a threat model for a different system architecture',
-      topics: ['threat-modeling', 'vulnerabilities', 'attack-vectors', 'risk-assessment'],
-    },
-    {
-      title: 'Defend the Network',
-      capability: 'Configure firewalls and IDS/IPS to detect and block attacks',
-      artifact: 'Working firewall rules and IDS alerts for common attack patterns',
-      designedFailure: 'Overly permissive rule allows lateral movement',
-      transfer: 'Audit and harden an existing firewall configuration',
-      topics: ['firewalls', 'ids', 'ips', 'network-security', 'packet-filtering'],
-    },
-    {
-      title: 'Secure Systems and Endpoints',
-      capability: 'Harden operating systems and detect endpoint compromises',
-      artifact: 'Hardening checklist applied to a test system with before/after scan',
-      designedFailure: 'Default credentials left on a service',
-      transfer: 'Create a hardening guide for a different OS or platform',
-      topics: ['hardening', 'endpoints', 'patch-management', 'antivirus', 'edr'],
-    },
-    {
-      title: 'Respond to Incidents',
-      capability: 'Detect, investigate, and contain a security incident',
-      artifact: 'Incident report with timeline, root cause, and remediation steps',
-      designedFailure: 'Evidence destroyed by improper response procedure',
-      transfer: 'Run a tabletop exercise for a different incident type',
-      topics: ['incident-response', 'forensics', 'containment', 'recovery', 'post-mortem'],
-    },
-    {
-      title: 'Build a Security Program',
-      capability: 'Design and implement security policies and monitoring',
-      artifact: 'Security policy document with monitoring dashboard',
-      designedFailure: 'Alert fatigue causes real threat to be ignored',
-      transfer: 'Present security posture to stakeholders and get buy-in',
-      topics: ['security-policy', 'monitoring', 'compliance', 'siem', 'metrics'],
-    },
-  ],
-};
-
-/**
- * Get capability-based progression for a topic.
- */
-/**
- * Topic aliases for matching variations to canonical progressions.
- */
-const TOPIC_ALIASES: Record<string, string> = {
-  // Backend variations
-  'backend': 'back-end web development',
-  'backend coding': 'back-end web development',
-  'backend development': 'back-end web development',
-  'back-end': 'back-end web development',
-  'back-end coding': 'back-end web development',
-  'server-side': 'back-end web development',
-  'server side': 'back-end web development',
-  'api development': 'back-end web development',
-  
-  // Frontend variations
-  'frontend': 'web development',
-  'frontend coding': 'web development',
-  'front-end': 'web development',
-  'front-end coding': 'web development',
-  'client-side': 'web development',
-  
-  // Full-stack variations
-  'fullstack': 'full-stack web development',
-  'full stack': 'full-stack web development',
-  'fullstack coding': 'full-stack web development',
-  'full-stack coding': 'full-stack web development',
-  
-  // Generic coding
-  'coding': 'web development',
-  'programming': 'python',
-  'code': 'web development',
-  'learn to code': 'web development',
-  'how to code': 'web development',
-  
-  // Language variations
-  'js': 'javascript',
-  'py': 'python',
-  'ts': 'typescript',
-  'node': 'javascript',
-  'nodejs': 'javascript',
-  
-  // Cybersecurity variations
-  'cybersecurity': 'cybersecurity',
-  'cyber security': 'cybersecurity',
-  'security': 'cybersecurity',
-  'infosec': 'cybersecurity',
-  'information security': 'cybersecurity',
-  'network security': 'cybersecurity',
-  'firewall': 'cybersecurity',
-  'firewalls': 'cybersecurity',
-  'intrusion detection': 'cybersecurity',
-  'ids': 'cybersecurity',
-  'ips': 'cybersecurity',
-  'ethical hacking': 'cybersecurity',
-  'penetration testing': 'cybersecurity',
-  'pentest': 'cybersecurity',
-  'security analyst': 'cybersecurity',
-  'soc': 'cybersecurity',
-  'threat detection': 'cybersecurity',
-  'vulnerability': 'cybersecurity',
-  'vulnerabilities': 'cybersecurity',
-  'protect systems': 'cybersecurity',
-  'protecting systems': 'cybersecurity',
-  'system protection': 'cybersecurity',
-};
-
-/**
- * Get capability-based progression for a topic.
- */
-function getCapabilityProgression(topic: string): readonly CapabilityStage[] | null {
-  const normalized = topic.toLowerCase().trim()
-    .replace(/^learn\s+(to\s+)?/i, '')  // Remove "learn" / "learn to" prefix
-    .replace(/^how\s+to\s+/i, '')       // Remove "how to" prefix
-    .trim();
-  
-  // Direct match
-  if (CAPABILITY_PROGRESSIONS[normalized]) {
-    console.log(`[CAPABILITY] Direct match: "${normalized}"`);
-    return CAPABILITY_PROGRESSIONS[normalized];
-  }
-  
-  // Check aliases
-  if (TOPIC_ALIASES[normalized] && CAPABILITY_PROGRESSIONS[TOPIC_ALIASES[normalized]]) {
-    console.log(`[CAPABILITY] Alias match: "${normalized}" -> "${TOPIC_ALIASES[normalized]}"`);
-    return CAPABILITY_PROGRESSIONS[TOPIC_ALIASES[normalized]];
-  }
-  
-  // Partial match on keys
-  for (const [key, progression] of Object.entries(CAPABILITY_PROGRESSIONS)) {
-    if (normalized.includes(key) || key.includes(normalized)) {
-      console.log(`[CAPABILITY] Partial key match: "${key}" in "${normalized.substring(0, 30)}..."`);
-      return progression;
-    }
-  }
-  
-  // Partial match on aliases
-  for (const [alias, canonical] of Object.entries(TOPIC_ALIASES)) {
-    if (normalized.includes(alias) || alias.includes(normalized)) {
-      if (CAPABILITY_PROGRESSIONS[canonical]) {
-        console.log(`[CAPABILITY] Partial alias match: "${alias}" -> "${canonical}"`);
-        return CAPABILITY_PROGRESSIONS[canonical];
-      }
-    }
-  }
-  
-  console.log(`[CAPABILITY] No match for: "${normalized.substring(0, 50)}..."`);
-  return null;
-}
+// NOTE: CapabilityStage is imported from capability-generator.ts
+// The 5-stage competence model is generated DYNAMICALLY via LLM for ANY topic.
+// This provides full resilience layer (consequence + recovery) for every stage.
+// The CapabilityGenerator has its own fallback for when LLM is unavailable.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LEGACY TOPIC PROGRESSIONS (for topics without capability-based versions)
@@ -860,7 +442,7 @@ export class LessonPlanGenerator {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Step 2: Generate capability-based progression (DYNAMIC)
+    // Step 2: Generate capability-based progression (DYNAMIC via LLM)
     // ─────────────────────────────────────────────────────────────────────────
     const topic = inputs.extractedTopic ?? inputs.goalStatement;
     console.log(`[LESSON_PLAN] Generating capability progression for: "${topic.substring(0, 50)}..."`);
@@ -873,7 +455,7 @@ export class LessonPlanGenerator {
     
     if (!capabilityResult.ok) {
       console.warn('[LESSON_PLAN] Capability generation failed:', capabilityResult.error);
-      // Continue with fallback - the generator already provides fallback stages
+      // Continue with empty stages - buildCapabilityProposal will use legacy fallback
     }
     
     const stages = capabilityResult.ok ? capabilityResult.value : [];
@@ -999,7 +581,7 @@ export class LessonPlanGenerator {
     // If no stages (shouldn't happen - generator has fallback), use legacy fallback
     if (stages.length === 0) {
       console.warn('[LESSON_PLAN] No stages provided, using legacy fallback');
-      const topicIds = extractTopicIds(inputs.goalStatement, inputs.extractedTopic);
+      const topicIds = extractTopicIds(inputs.goalStatement ?? '', inputs.extractedTopic);
       return this.buildFallbackProposal(inputs, topicIds, resourceCount, gaps);
     }
 
@@ -1012,8 +594,20 @@ export class LessonPlanGenerator {
       // Distribute extra days to earlier stages
       const daysForStage = baseDaysPerStage + (index < extraDays ? 1 : 0);
       
+      // Use the stage title directly - LLM is prompted to generate topic-specific titles
+      // Only clean up if it's a raw stage name (REPRODUCE, MODIFY, etc.)
+      const rawStageNamePattern = /^(REPRODUCE|MODIFY|DIAGNOSE|DESIGN|SHIP)(\s*[-:]|$)/i;
+      let stageTitle = stage.title;
+      
+      if (rawStageNamePattern.test(stageTitle)) {
+        // LLM returned raw stage name, clean it up minimally
+        stageTitle = stageTitle.replace(rawStageNamePattern, '').trim() || `Stage ${index + 1}`;
+      }
+      
+      const title = `Week ${index + 1}: ${stageTitle}`;
+      
       return {
-        title: `Stage ${index + 1}: ${stage.title}`,
+        title,
         description: this.formatCapabilityDescription(stage),
         topics: stage.topics,
         estimatedDays: daysForStage,
@@ -1055,19 +649,10 @@ export class LessonPlanGenerator {
     const weeksCount = Math.ceil(totalDays / 7);
     const topic = inputs.extractedTopic ?? inputs.goalStatement ?? '';
 
-    console.log(`[LESSON_PLAN] Building proposal for topic: "${topic.substring(0, 50)}..."`);
+    console.log(`[LESSON_PLAN] Building fallback proposal for topic: "${topic.substring(0, 50)}..."`);
 
-    // ★ FIRST: Try capability-based progressions (preferred)
-    const capabilityProgression = getCapabilityProgression(topic);
-    
-    if (capabilityProgression) {
-      console.log(`[LESSON_PLAN] Found capability progression with ${capabilityProgression.length} stages`);
-    } else {
-      console.log(`[LESSON_PLAN] No capability progression found, trying legacy...`);
-    }
-    
-    // ★ FALLBACK: Try legacy topic progressions
-    const legacyProgression = capabilityProgression ? null : getTopicProgression(topic);
+    // Try legacy topic progressions (simple title/description format)
+    const legacyProgression = getTopicProgression(topic);
 
     // Generate quest structure
     const quests: ProposedQuest[] = [];
@@ -1079,47 +664,8 @@ export class LessonPlanGenerator {
 
       const progressionIndex = week - 1;
 
-      // ★ CAPABILITY-BASED: Full competence model
-      if (capabilityProgression) {
-        const stage = capabilityProgression[progressionIndex];
-        
-        if (stage) {
-          // Format description with full capability model
-          const description = this.formatCapabilityDescription(stage);
-          
-          quests.push({
-            title: `Stage ${week}: ${stage.title}`,
-            description,
-            topics: stage.topics,
-            estimatedDays: daysInWeek,
-            order: week,
-          });
-        } else if (progressionIndex >= capabilityProgression.length) {
-          // Extended timeline beyond progression
-          const isLastWeek = week === weeksCount;
-          const lastStage = capabilityProgression[capabilityProgression.length - 1];
-          
-          if (isLastWeek) {
-            quests.push({
-              title: `Stage ${week}: Ship & Defend`,
-              description: `**Capability:** Deploy your work and defend your decisions to others.\n**Artifact:** Production deployment with documentation and handoff.\n**Challenge:** Present your work and handle critical feedback.\n**Transfer:** Mentor someone else through their first deployment.`,
-              topics: ['deployment', 'documentation', 'review'],
-              estimatedDays: daysInWeek,
-              order: week,
-            });
-          } else {
-            quests.push({
-              title: `Stage ${week}: Expand & Integrate`,
-              description: `**Capability:** Apply your skills to a new problem domain.\n**Artifact:** Working solution in an unfamiliar context.\n**Challenge:** Constraints you haven't encountered before.\n**Transfer:** Combine multiple techniques from earlier stages.`,
-              topics: lastStage?.topics ?? topicIds.slice(0, 3) as string[],
-              estimatedDays: daysInWeek,
-              order: week,
-            });
-          }
-        }
-      }
-      // ★ LEGACY: Topic-based progressions
-      else if (legacyProgression) {
+      // LEGACY: Topic-based progressions
+      if (legacyProgression) {
         const progressionItem = legacyProgression[progressionIndex];
         
         if (progressionItem) {
@@ -1153,7 +699,7 @@ export class LessonPlanGenerator {
           }
         }
       }
-      // ★ GENERIC FALLBACK: Use improved generic titles
+      // GENERIC FALLBACK: Use improved generic titles
       else {
         quests.push({
           title: this.generateQuestTitle(week, weeksCount, topic),
@@ -1188,7 +734,10 @@ export class LessonPlanGenerator {
    * Includes:
    * - Capability: What learner CAN DO after (verb-based)
    * - Artifact: What they must PRODUCE (inspectable, falsifiable)
-   * - Challenge: Designed failure to expose and recover from
+   * - RESILIENCE LAYER:
+   *   - Challenge: How to BREAK the system (adversary/stressor)
+   *   - Consequence: What HAPPENS when it breaks (observable impact)
+   *   - Recovery: How to DETECT, FIX, and PREVENT recurrence
    * - Transfer: How to apply in new context without scaffolding
    * - Consideration: What you're gaining vs trading off (only prominent if warning)
    */
@@ -1197,8 +746,17 @@ export class LessonPlanGenerator {
       `**Capability:** ${stage.capability}`,
       `**Artifact:** ${stage.artifact}`,
       `**Challenge:** ${stage.designedFailure}`,
-      `**Transfer:** ${stage.transfer}`,
     ];
+    
+    // Add resilience layer if present
+    if (stage.consequence) {
+      lines.push(`**Consequence:** ${stage.consequence}`);
+    }
+    if (stage.recovery) {
+      lines.push(`**Recovery:** ${stage.recovery}`);
+    }
+    
+    lines.push(`**Transfer:** ${stage.transfer}`);
 
     // Add consideration - the tradeoff awareness layer
     // Only show prominently if there's a warning, otherwise subtle

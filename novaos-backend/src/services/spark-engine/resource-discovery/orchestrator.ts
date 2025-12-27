@@ -32,6 +32,8 @@ import type {
   DisplayURL,
   TopicId,
   ResourceProvider,
+  ResourceContentType,
+  ResourceFormat,
   RawResourceCandidate,
   EnrichedResource,
   VerifiedResource,
@@ -757,7 +759,7 @@ export class ResourceDiscoveryOrchestrator {
           metadata: {
             stars: item.stargazers_count,
             forks: item.forks_count,
-            language: item.language,
+            language: item.language ?? undefined,
             topics: item.topics,
             owner: item.owner.login,
             updatedAt: item.updated_at,
@@ -1105,8 +1107,8 @@ export class ResourceDiscoveryOrchestrator {
     const canonResult = canonicalizeURL(url);
     const canonical = canonResult?.canonical ?? createCanonicalURL(url);
     
-    // Detect provider
-    const providerResult = detectProvider(url);
+    // Detect provider (handle null case)
+    const providerResult = detectProvider(url) ?? { provider: 'unknown' as const, providerId: undefined };
     
     // Topic matching is done at candidate level (already have topicIds)
     // No need to match URL to topics here
@@ -1133,7 +1135,7 @@ export class ResourceDiscoveryOrchestrator {
     return {
       url: canonical,
       provider: providerResult.provider,
-      providerId: providerResult.id,
+      providerId: providerResult.providerId,
       topics: topicMatches,
       knownSource,
       confidence,
@@ -1144,7 +1146,7 @@ export class ResourceDiscoveryOrchestrator {
    * Calculate classification confidence.
    */
   private calculateClassificationConfidence(
-    _providerResult: { provider: ResourceProvider; id: unknown },
+    _providerResult: { provider: ResourceProvider; providerId?: unknown },
     topicMatches: readonly TopicMatchResult[],
     knownSource: KnownSourceMatch | null
   ): number {
@@ -1157,7 +1159,7 @@ export class ResourceDiscoveryOrchestrator {
     
     // Boost for topic matches
     if (topicMatches.length > 0) {
-      const avgTopicConfidence = topicMatches.reduce((sum, m) => sum + m.confidence, 0) / topicMatches.length;
+      const avgTopicConfidence = topicMatches.reduce((sum: number, m) => sum + Number(m.confidence), 0) / topicMatches.length;
       confidence += avgTopicConfidence * 0.2;
     }
     
@@ -1232,7 +1234,6 @@ export class ResourceDiscoveryOrchestrator {
       id: candidate.id,
       canonicalUrl: candidate.canonicalUrl,
       displayUrl: candidate.displayUrl,
-      url: candidate.canonicalUrl,
       title: candidate.title ?? 'Untitled',
       description: candidate.snippet ?? '',
       source: candidate.source,
@@ -1240,15 +1241,15 @@ export class ResourceDiscoveryOrchestrator {
       providerId: candidate.classification.providerId
         ? String(candidate.classification.providerId)
         : undefined,
-      topics: candidate.classification.topics.map(t => ({
-        id: t.topicId,
-        name: t.topicId.split(':').pop() ?? t.topicId,
-      })),
+      topicIds: candidate.topicIds,
       contentType: this.inferContentType(candidate.classification.provider),
+      format: this.inferFormat(candidate.classification.provider),
       difficulty: 'beginner',
       estimatedMinutes: this.inferDuration(candidate.classification.provider),
+      metadata: (candidate as any).metadata ?? {},
       candidateCreatedAt: candidate.createdAt,
       enrichedAt: now,
+      enrichmentExpiresAt: new Date(now.getTime() + RESOURCE_TTL.ENRICHMENT_MS),
       qualitySignals: this.computeInitialQuality(candidate),
     };
     
@@ -1258,7 +1259,7 @@ export class ResourceDiscoveryOrchestrator {
   /**
    * Infer content type from provider.
    */
-  private inferContentType(provider: ResourceProvider): string {
+  private inferContentType(provider: ResourceProvider): ResourceContentType {
     switch (provider) {
       case 'youtube':
         return 'video';
@@ -1266,11 +1267,15 @@ export class ResourceDiscoveryOrchestrator {
         return 'repository';
       case 'npm':
       case 'crates':
+      case 'crates_io':
       case 'pypi':
-        return 'documentation';
+        return 'package';
       case 'stackoverflow':
         return 'article';
       case 'mdn':
+      case 'rust_docs':
+      case 'python_docs':
+      case 'official_docs':
         return 'documentation';
       default:
         return 'article';
@@ -1296,6 +1301,29 @@ export class ResourceDiscoveryOrchestrator {
   }
   
   /**
+   * Infer resource format from provider.
+   */
+  private inferFormat(provider: ResourceProvider): ResourceFormat {
+    switch (provider) {
+      case 'youtube':
+        return 'video';
+      case 'github':
+      case 'npm':
+      case 'crates':
+      case 'crates_io':
+      case 'pypi':
+      case 'stackoverflow':
+      case 'mdn':
+      case 'rust_docs':
+      case 'python_docs':
+      case 'official_docs':
+        return 'text';
+      default:
+        return 'text';
+    }
+  }
+  
+  /**
    * Compute initial quality signals.
    */
   private computeInitialQuality(
@@ -1303,16 +1331,20 @@ export class ResourceDiscoveryOrchestrator {
   ): QualitySignals {
     let popularity = 0.5;
     let authority = 0.5;
+    let starCount: number | undefined;
     
     // Boost for known sources
     if (candidate.classification.knownSource) {
-      authority = 0.8 + (candidate.classification.knownSource.authority === 'official' ? 0.2 : 0);
+      // Check if knownSource has an authority property
+      const ks = candidate.classification.knownSource as { authority?: string };
+      authority = 0.8 + (ks.authority === 'official' ? 0.2 : 0);
     }
     
     // Use metadata if available
     const metadata = (candidate as any).metadata;
     if (metadata?.stars) {
       // GitHub stars
+      starCount = metadata.stars;
       popularity = Math.min(0.9, 0.3 + Math.log10(metadata.stars + 1) / 5);
     }
     
@@ -1322,6 +1354,10 @@ export class ResourceDiscoveryOrchestrator {
       authority,
       completeness: 0.6,
       composite: (popularity + 0.7 + authority + 0.6) / 4,
+      details: {
+        starCount,
+        ageInDays: 0, // Unknown at this stage
+      },
     };
   }
   

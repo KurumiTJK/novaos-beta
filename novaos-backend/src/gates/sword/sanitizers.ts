@@ -613,6 +613,10 @@ export function sanitizeGoalStatement(
     maxExploreTurns: 5,
     exploreClarityThreshold: 0.7,
     exploreTtlSeconds: 3600,
+    // Phase 14B view config
+    viewDefaultUpcomingDays: 7,
+    viewMaxGoalsToList: 20,
+    viewIncludeProgressInList: true,
   };
 
   return new GoalStatementSanitizer(config).sanitize(input);

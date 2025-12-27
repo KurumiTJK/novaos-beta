@@ -77,10 +77,16 @@ export interface Consideration {
 /**
  * A single stage in the capability-based progression.
  * 
- * Now includes CONSIDERATION — a tradeoff-aware layer that:
- * - Shows what you're gaining vs trading off
- * - Only becomes prominent when there's a significant risk
- * - Lets the learner decide if the tradeoff is acceptable for their situation
+ * Now includes:
+ * - CONSIDERATION — tradeoff awareness (what you gain vs sacrifice)
+ * - RESILIENCE LAYER — consequence and recovery (what breaks and how to fix it)
+ * 
+ * The resilience layer ensures learners experience:
+ * 1. A way to break the system (designedFailure)
+ * 2. A visible consequence of that break (consequence)
+ * 3. A required recovery or adaptation (recovery)
+ * 
+ * Skills are forged when things go wrong, not when they go right.
  */
 export interface CapabilityStage {
   /** Short title (2-5 words) */
@@ -92,8 +98,14 @@ export interface CapabilityStage {
   /** Inspectable, falsifiable output that proves competence */
   artifact: string;
   
-  /** Specific mistake to make and recover from */
+  /** Specific mistake to make — the adversary/stressor */
   designedFailure: string;
+  
+  /** What happens when it breaks — visible impact the learner can observe */
+  consequence: string;
+  
+  /** How to detect, fix, and prevent recurrence — where expertise lives */
+  recovery: string;
   
   /** Apply skill in new context without scaffolding */
   transfer: string;
@@ -141,45 +153,49 @@ export interface CapabilityGeneratorConfig {
  * Build the system prompt for capability generation.
  */
 function buildSystemPrompt(): string {
-  return `You are an expert instructional designer who creates learning progressions with built-in tradeoff awareness.
+  return `You are an expert instructional designer who creates learning progressions for ANY topic.
 
-Your job is to generate a 5-stage learning path that:
-1. Develops real capability (what learners CAN DO)
-2. Surfaces what they're gaining AND trading off at each stage
-3. Warns them when a tradeoff is significant enough to matter
+CRITICAL REQUIREMENT — TOPIC-SPECIFIC TITLES:
+Every stage title MUST be unique to the topic. Generic stage names are FORBIDDEN.
 
-THE CONSIDERATION LAYER (Key Innovation)
-Each stage should surface:
-- What the learner GAINS by completing this stage
-- What they're TRADING OFF or deferring
-- How significant the tradeoff is (info/caution/warning)
-- If 'warning': a checkpoint question to make them consciously decide
+❌ FORBIDDEN TITLES (never use these patterns):
+- "[Topic] Fundamentals" / "[Topic] Basics"
+- "Adapting & Customizing" / "Modify & Adapt"
+- "Debugging & Problem-Solving" / "Debug & Diagnose"
+- "Building From Scratch" / "Design From Requirements"
+- "Deploying & Real-World Application" / "Ship & Defend"
 
-This is NOT a menu of choices. It's awareness of implicit tradeoffs.
+✅ REQUIRED TITLE STYLE (domain-specific, evocative):
+- Cooking: "Master Your Mise en Place", "Build Flavor Intuition", "Rescue Kitchen Disasters", "Create Original Recipes", "Host a Dinner Party"
+- Guitar: "Play Your First Song", "Smooth Chord Transitions", "Fix Buzzing & Timing", "Write Your Own Riffs", "Perform for an Audience"
+- Photography: "Nail Exposure Basics", "Compose Compelling Shots", "Fix Bad Lighting", "Develop Your Style", "Build a Portfolio"
+- Rust: "Build & Run Your First Program", "Own Your Data", "Model Real Data", "Handle Failure Gracefully", "Ship a Real Tool"
 
-Think of it as a Shield: protect from blind spots without being annoying.
-- 'info': Already obvious, just noting it
-- 'caution': Easy to overlook, worth mentioning
-- 'warning': Could derail progress if ignored, needs conscious acknowledgment
+The title should make someone immediately know what topic this is about.
 
-SEVERITY GUIDELINES:
-- 'info': The tradeoff is minor or temporary (e.g., "trading off speed for understanding")
-- 'caution': The tradeoff could cause friction later (e.g., "skipping tests now means debugging later")
-- 'warning': The tradeoff could fundamentally undermine the goal (e.g., "building without security basics")
-
-The 5 stages:
+THE 5-STAGE COMPETENCE MODEL:
 1. REPRODUCE: Create basic outcome unaided
-2. MODIFY: Adapt existing work under constraints
+2. MODIFY: Adapt existing work under constraints  
 3. DIAGNOSE: Find and fix failures systematically
 4. DESIGN: Build from requirements, not instructions
 5. SHIP: Deploy to users and handle feedback
 
+THE RESILIENCE LAYER (Critical for Real Learning):
+Every stage must include:
+- designedFailure: A specific way to BREAK the system
+- consequence: What HAPPENS when it breaks (visible impact)
+- recovery: How to DETECT, FIX, and PREVENT recurrence
+
+Skills are forged when things go WRONG, not when they go right.
+
 OUTPUT FORMAT (JSON array with exactly 5 objects):
 {
-  "title": "Short title (2-5 words)",
+  "title": "TOPIC-SPECIFIC title (2-5 words) — someone should know the topic from this alone",
   "capability": "What the learner can DO (verb-based, verifiable)",
   "artifact": "Inspectable output that proves competence (must be falsifiable)",
-  "designedFailure": "Specific mistake to make and recover from",
+  "designedFailure": "Specific way to break it — the adversary or stressor",
+  "consequence": "What happens when it breaks — visible impact they can observe",
+  "recovery": "How to detect, diagnose, fix, and prevent recurrence",
   "transfer": "Apply skill in different context without scaffolding",
   "topics": ["subtopic1", "subtopic2", "subtopic3"],
   "consideration": {
@@ -191,11 +207,11 @@ OUTPUT FORMAT (JSON array with exactly 5 objects):
 }
 
 QUALITY CRITERIA:
-- Capabilities must be VERIFIABLE
-- Artifacts must be FALSIFIABLE
-- Tradeoffs must be REAL (not theoretical)
-- Severity must be HONEST (don't inflate to 'warning' for minor things)
-- Checkpoints only for genuine risks`;
+- Titles must be SPECIFIC to the topic (would someone know the topic just from the title?)
+- Capabilities must be VERIFIABLE (observable action, not vague understanding)
+- Artifacts must be FALSIFIABLE (can be inspected and judged)
+- Consequences must be OBSERVABLE (learner can see the failure)
+- Recovery must be ACTIONABLE (specific steps, not vague advice)`;
 }
 
 /**
@@ -208,25 +224,37 @@ function buildUserPrompt(topic: string, level: UserLevel, durationDays: number):
     advanced: 'Has experience, filling gaps toward mastery.',
   };
 
-  return `Generate a 5-stage capability progression with tradeoff awareness for:
+  return `Generate a 5-stage capability progression for:
 
 TOPIC: ${topic}
 LEVEL: ${level} — ${levelContext[level]}
 DURATION: ${durationDays} days (~${Math.ceil(durationDays / 5)} days per stage)
 
-For each stage, include a "consideration" that surfaces:
-1. What the learner GAINS by completing this stage
-2. What they're TRADING OFF (deferring, skipping, or sacrificing)
-3. Severity: 'info' (minor), 'caution' (worth noting), or 'warning' (could cause problems)
-4. If 'warning': a checkpoint question to confirm the tradeoff is acceptable
+CRITICAL — TITLE REQUIREMENTS:
+Each stage title MUST be specific to "${topic}". Someone should know the topic just from reading the titles.
 
-SEVERITY GUIDELINES:
-- 'info': Tradeoff is obvious or temporary
-- 'caution': Easy to overlook, could cause friction later
-- 'warning': Could fundamentally undermine the learning goal if ignored
+BAD TITLES (too generic — DO NOT USE):
+- "${topic} Fundamentals"
+- "Adapting & Customizing"
+- "Debugging & Problem-Solving"
+- "Building From Scratch"
+- "Deploying & Real-World Application"
 
-Be honest about severity. Most stages should be 'info' or 'caution'.
-Only use 'warning' when skipping something could genuinely derail the learner.
+GOOD TITLES (topic-specific — USE THIS STYLE):
+For cooking: "Master Your Mise en Place", "Build Flavor Intuition", "Rescue Kitchen Disasters", "Create Original Recipes", "Host a Dinner Party"
+For guitar: "Play Your First Song", "Smooth Chord Transitions", "Fix Buzzing & Timing", "Write Your Own Riffs", "Perform for an Audience"
+For photography: "Nail Exposure Basics", "Compose Compelling Shots", "Fix Bad Lighting", "Develop Your Style", "Build a Portfolio"
+
+For each stage, include:
+1. title: TOPIC-SPECIFIC (2-5 words, unique to this domain)
+2. capability: What the learner can DO (verb-based, verifiable)
+3. artifact: Inspectable output that proves competence
+4. designedFailure: Specific way to BREAK the system
+5. consequence: What HAPPENS when it breaks
+6. recovery: How to DETECT, FIX, and PREVENT
+7. transfer: Apply skill in different context
+8. topics: Relevant subtopics for resource discovery
+9. consideration: { gaining, tradingOff, severity, checkpoint? }
 
 Return ONLY the JSON array. No markdown. No explanation.`;
 }
@@ -456,6 +484,12 @@ export class CapabilityGenerator {
         capability: stage.capability as string,
         artifact: stage.artifact as string,
         designedFailure: stage.designedFailure as string,
+        consequence: typeof stage.consequence === 'string' 
+          ? stage.consequence 
+          : 'The system fails in an observable way',
+        recovery: typeof stage.recovery === 'string'
+          ? stage.recovery
+          : 'Identify the failure, diagnose the cause, fix it, and prevent recurrence',
         transfer: stage.transfer as string,
         topics: (stage.topics as unknown[]).map(String),
         consideration,
@@ -510,6 +544,8 @@ export class CapabilityGenerator {
 
   /**
    * Generate fallback progression when LLM is unavailable.
+   * Note: These titles are less topic-specific than LLM-generated ones,
+   * but still better than completely generic stage names.
    */
   private generateFallback(topic: string, _level: UserLevel, _durationDays: number): CapabilityStage[] {
     const topicName = this.formatTopicName(topic);
@@ -517,46 +553,56 @@ export class CapabilityGenerator {
 
     return [
       {
-        title: `Your First ${topicName} Output`,
+        title: `Create Your First ${topicName}`,
         capability: `Create a basic ${t} deliverable from scratch without step-by-step guidance`,
         artifact: `A working example that demonstrates fundamental ${t} concepts`,
         designedFailure: `Missing a critical step that causes the output to fail in an obvious way`,
+        consequence: `The output doesn't work at all, or produces obviously wrong results that you can see immediately`,
+        recovery: `Compare your output against a known-working example, identify the missing step, and rebuild with that step included`,
         transfer: `Create the same type of output for a different use case or context`,
         topics: [t, 'basics', 'fundamentals', 'getting-started'],
         consideration: this.getUniversalConsideration(0),
       },
       {
-        title: `Modify & Adapt`,
+        title: `Customize ${topicName} Your Way`,
         capability: `Take existing ${t} work and modify it to meet new requirements`,
         artifact: `An adapted version with documented changes and rationale`,
         designedFailure: `Breaking existing functionality while adding new features`,
+        consequence: `Something that used to work now fails — you've introduced a regression that may not be immediately obvious`,
+        recovery: `Test all existing functionality after each change, use version control to identify what broke, and learn to make isolated changes`,
         transfer: `Apply the same modification pattern to a completely different starting point`,
         topics: [t, 'customization', 'adaptation', 'requirements'],
         consideration: this.getUniversalConsideration(1),
       },
       {
-        title: `Debug & Diagnose`,
+        title: `Fix ${topicName} Problems`,
         capability: `Identify and fix problems in ${t} work systematically`,
         artifact: `A debugging log showing problem identification, investigation, and resolution`,
         designedFailure: `Fixing a symptom instead of the root cause`,
+        consequence: `The problem appears fixed but returns later, or fixing it causes a different problem elsewhere`,
+        recovery: `Ask "why" five times to find root cause, document the full causal chain, and verify the fix addresses the origin not just the symptom`,
         transfer: `Debug a problem in an unfamiliar context`,
         topics: [t, 'debugging', 'troubleshooting', 'problem-solving'],
         consideration: this.getUniversalConsideration(2),
       },
       {
-        title: `Design From Requirements`,
+        title: `Design Original ${topicName}`,
         capability: `Build a ${t} solution given only requirements, not instructions`,
         artifact: `A complete solution with design decisions documented`,
         designedFailure: `Over-engineering or under-engineering for the actual requirements`,
+        consequence: `Either you've built something too complex that's hard to maintain, or too simple that can't handle real needs`,
+        recovery: `Review requirements with fresh eyes, identify which constraints are real vs assumed, and refactor toward appropriate complexity`,
         transfer: `Design a solution for requirements in a domain you're less familiar with`,
         topics: [t, 'design', 'architecture', 'decision-making'],
         consideration: this.getUniversalConsideration(3),
       },
       {
-        title: `Ship & Defend`,
+        title: `Share ${topicName} With Others`,
         capability: `Deploy ${t} work to real users and handle feedback`,
         artifact: `A deployed solution with documentation and record of feedback addressed`,
         designedFailure: `Receiving critical feedback you didn't anticipate`,
+        consequence: `Users struggle with something you thought was obvious, or reject the solution for reasons you didn't consider`,
+        recovery: `Separate ego from work, categorize feedback by frequency and severity, prioritize fixes, and document lessons for next time`,
         transfer: `Help someone else ship their work and handle their feedback`,
         topics: [t, 'deployment', 'documentation', 'feedback', 'iteration'],
         consideration: this.getUniversalConsideration(4),

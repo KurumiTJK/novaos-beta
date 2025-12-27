@@ -320,7 +320,10 @@ describe('ClarityDetector', () => {
     });
   });
 
-  describe('Confirmation detection', () => {
+  // DEPRECATED: These tests are for legacy pattern-based detection.
+  // Intent classification is now handled by ExploreIntentClassifier.
+  // These methods return false to delegate to explore-flow.
+  describe.skip('Confirmation detection (DEPRECATED - use ExploreIntentClassifier)', () => {
     it('should detect "yes" as confirmation', () => {
       expect(detector.isConfirmation('yes')).toBe(true);
       expect(detector.isConfirmation('Yes!')).toBe(true);
@@ -344,7 +347,10 @@ describe('ClarityDetector', () => {
     });
   });
 
-  describe('Skip detection', () => {
+  // DEPRECATED: These tests are for legacy pattern-based detection.
+  // Intent classification is now handled by ExploreIntentClassifier.
+  // These methods return false to delegate to explore-flow.
+  describe.skip('Skip detection (DEPRECATED - use ExploreIntentClassifier)', () => {
     it('should detect "just build me a plan"', () => {
       expect(detector.isSkipRequest('just build me a plan')).toBe(true);
       expect(detector.isSkipRequest('just create a plan')).toBe(true);

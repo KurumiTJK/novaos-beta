@@ -8,6 +8,7 @@
 //   - ExploreMessage: Single message in exploration dialogue
 //   - ExploreContext: Summary passed to Refine phase
 //   - ExploreConfig: Configuration for explore behavior
+//   - ExploreIntent: User intent classification (NEW)
 //
 // The Explore phase helps users crystallize vague intentions into concrete,
 // actionable learning goals through natural conversation.
@@ -15,6 +16,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { UserId, Timestamp } from '../../../types/branded.js';
+
+// Re-export intent types from the classifier
+export type {
+  ExploreIntent,
+  ExploreIntentResult,
+} from './explore-intent-classifier.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPLORE MESSAGE

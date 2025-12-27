@@ -60,7 +60,7 @@ const mockQuest: Quest = {
   order: 1,
   createdAt: mockTimestamp,
   updatedAt: mockTimestamp,
-  topics: ['types', 'interfaces', 'functions'],
+  topicIds: ['types', 'interfaces', 'functions'],
 };
 
 const mockStep: Step = {

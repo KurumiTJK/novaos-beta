@@ -246,7 +246,7 @@ export class SwordGate {
     input: SwordGateInput,
     refinementState: SwordRefinementState | null,
     exploreState: ExploreState | null,
-    modeResult: { mode: SwordGateMode; bypassExplore?: boolean; bypassReason?: string }
+    modeResult: { mode: SwordGateMode; bypassExplore?: boolean; bypassReason?: string; viewTarget?: ViewTarget; viewRequest?: ViewRequest }
   ): Promise<SwordGateOutput> {
     const { mode, bypassExplore, bypassReason } = modeResult;
 
@@ -1083,21 +1083,56 @@ export class SwordGate {
 
   /**
    * Build response for proposal.
+   * 
+   * Surfaces the full competence-building structure:
+   * - Capability: What the learner can DO
+   * - Artifact: Proof of competence (falsifiable)
+   * - Challenge: Designed failure to recover from
+   * - Transfer: Apply skill in new context
    */
   private buildProposalResponse(proposal: LessonPlanProposal): string {
     const lines: string[] = [
-      `Here's your learning plan for "${proposal.title}":`,
+      `📋 **${proposal.title}** — ${proposal.totalDays} days of deliberate practice`,
       '',
-      `📅 Duration: ${proposal.totalDuration} (${proposal.totalDays} days)`,
-      `📚 ${proposal.quests.length} sections covering ${proposal.topicsCovered.length} topics`,
-      `🔍 Found ${proposal.resourcesFound} learning resources`,
+      `Found ${proposal.resourcesFound} learning resources across ${proposal.topicsCovered.length} topics.`,
       '',
-      '**Sections:**',
     ];
 
+    // Add each quest with full capability breakdown
     for (const quest of proposal.quests) {
-      lines.push(`${quest.order}. ${quest.title} (${quest.estimatedDays} days)`);
+      lines.push('───────────────────────────────────────');
+      lines.push('');
+      lines.push(`**${quest.title}** (${quest.estimatedDays} days)`);
+      
+      // The description contains the formatted capability info
+      if (quest.description) {
+        // Split description into lines and add with proper formatting
+        const descLines = quest.description.split('\n');
+        for (const line of descLines) {
+          if (line.trim()) {
+            // Convert markdown bold to emoji-prefixed format for clarity
+            // Full resilience layer: Challenge → Consequence → Recovery
+            let formatted = line
+              .replace(/^\*\*Capability:\*\*\s*/i, '🎯 ')
+              .replace(/^\*\*Artifact:\*\*\s*/i, '📦 ')
+              .replace(/^\*\*Challenge:\*\*\s*/i, '⚡ ')
+              .replace(/^\*\*Consequence:\*\*\s*/i, '💥 ')
+              .replace(/^\*\*Recovery:\*\*\s*/i, '🔧 ')
+              .replace(/^\*\*Transfer:\*\*\s*/i, '🔄 ');
+            lines.push(formatted);
+          }
+        }
+      }
+      
+      // Show topics covered
+      if (quest.topics && quest.topics.length > 0) {
+        lines.push(`📚 Topics: ${quest.topics.join(', ')}`);
+      }
+      
+      lines.push('');
     }
+
+    lines.push('───────────────────────────────────────');
 
     if (proposal.gaps && proposal.gaps.length > 0) {
       lines.push('');

@@ -19,6 +19,11 @@
 //   4. Propose crystallized goal when clarity threshold reached
 //   5. Confirm and transition to refine phase
 //
+// Architecture (v2):
+//   - Intent-first routing using LLM classification
+//   - Replaces fragile regex pattern matching
+//   - Handles any phrasing naturally
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import OpenAI from 'openai';
@@ -44,6 +49,12 @@ import {
   createEmptyExploreContext,
 } from './types.js';
 import { ClarityDetector, createClarityDetector } from './clarity-detector.js';
+import {
+  ExploreIntentClassifier,
+  createExploreIntentClassifier,
+  type ExploreIntent,
+  type ExploreIntentResult,
+} from './explore-intent-classifier.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SYSTEM PROMPTS
@@ -122,11 +133,15 @@ Be specific—extract actual details, not generic placeholders.`;
 
 /**
  * Manages the exploration conversation flow.
+ *
+ * Uses LLM-based intent classification for robust routing,
+ * handling any user phrasing naturally.
  */
 export class ExploreFlow {
-  private openai: OpenAI;
+  private readonly openai: OpenAI;
   private readonly config: ExploreConfig;
   private readonly clarityDetector: ClarityDetector;
+  private readonly intentClassifier: ExploreIntentClassifier;
 
   constructor(
     config: Partial<ExploreConfig> = {},
@@ -140,6 +155,7 @@ export class ExploreFlow {
     }
     this.openai = new OpenAI({ apiKey: key });
     this.clarityDetector = createClarityDetector(this.config, key);
+    this.intentClassifier = createExploreIntentClassifier(key);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +164,8 @@ export class ExploreFlow {
 
   /**
    * Process a message in the exploration flow.
+   *
+   * Uses intent-first routing: classify intent, then dispatch to handler.
    */
   async process(input: ExploreFlowInput): AsyncAppResult<ExploreFlowOutput> {
     const { message, currentState } = input;
@@ -158,21 +176,27 @@ export class ExploreFlow {
         return this.startExploration(message);
       }
 
-      // Check for special commands
-      if (this.clarityDetector.isSkipRequest(message)) {
-        return this.handleSkip(currentState, message);
-      }
+      // ═══════════════════════════════════════════════════════════════════════
+      // INTENT-FIRST: Classify before doing anything else
+      // ═══════════════════════════════════════════════════════════════════════
+      const stage = currentState.stage === 'proposing' ? 'proposing' : 'exploring';
+      const recentHistory = currentState.conversationHistory
+        .slice(-4)
+        .map(m => `${m.role}: ${m.content}`);
 
-      // Check if user is confirming a proposed goal
-      if (
-        currentState.stage === 'proposing' &&
-        this.clarityDetector.isConfirmation(message)
-      ) {
-        return this.handleConfirmation(currentState);
-      }
+      const intentResult = await this.intentClassifier.classify(
+        message,
+        stage,
+        recentHistory
+      );
 
-      // Continue exploration conversation
-      return this.continueExploration(currentState, message);
+      console.log('[EXPLORE_FLOW] Intent:', intentResult.intent,
+        `(${intentResult.confidence.toFixed(2)})`, '-', intentResult.reasoning);
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // ROUTE BASED ON INTENT
+      // ═══════════════════════════════════════════════════════════════════════
+      return this.routeByIntent(currentState, message, intentResult);
     } catch (error) {
       console.error('[EXPLORE_FLOW] Processing error:', error);
       return err(appError(
@@ -180,6 +204,47 @@ export class ExploreFlow {
         'Failed to process exploration message',
         { cause: error instanceof Error ? error : new Error(String(error)) }
       ));
+    }
+  }
+
+  /**
+   * Route to appropriate handler based on classified intent.
+   */
+  private async routeByIntent(
+    state: ExploreState,
+    message: string,
+    intentResult: ExploreIntentResult
+  ): AsyncAppResult<ExploreFlowOutput> {
+    switch (intentResult.intent) {
+      case 'skip':
+        return this.handleSkip(state, message);
+
+      case 'confirm':
+        if (state.stage === 'proposing') {
+          return this.handleConfirmation(state, message);
+        }
+        // If confirming but we haven't proposed yet, treat as skip
+        return this.handleSkip(state, message);
+
+      case 'reject':
+        return this.handleRejection(state, message);
+
+      case 'exit':
+        return this.handleExit(state, message);
+
+      case 'off_topic':
+        return this.handleOffTopic(state, message);
+
+      case 'clarify':
+        return this.handleClarifyRequest(state, message);
+
+      case 'continue':
+      default:
+        // Check if they stated a clear goal inline
+        if (intentResult.extractedGoal && intentResult.confidence > 0.85) {
+          return this.proposeGoal(state, intentResult.extractedGoal, message);
+        }
+        return this.continueExploration(state, message);
     }
   }
 
@@ -193,18 +258,8 @@ export class ExploreFlow {
   private async startExploration(
     initialStatement: string
   ): AsyncAppResult<ExploreFlowOutput> {
-    // First, assess initial clarity (used to inform the conversation, NOT to skip)
+    // Assess initial clarity (used to inform the conversation tone)
     const clarity = await this.clarityDetector.assess(initialStatement);
-
-    // ★ CHANGE: Never auto-skip exploration based on clarity alone.
-    // Even "clear" goals like "i want to learn rust" benefit from exploration:
-    // - What aspect of Rust? (systems, web/wasm, CLI tools?)
-    // - User's background and experience level
-    // - Time commitment and learning style
-    // - Why they want to learn (career, hobby, specific project?)
-    //
-    // Users can always say "skip" to bypass exploration if they want.
-    // The clarity score is still used to inform the conversation tone.
 
     // Generate opening response
     const response = await this.generateResponse(initialStatement, null, clarity);
@@ -295,7 +350,7 @@ export class ExploreFlow {
       updatedState.turnCount >= this.config.minTurnsBeforeTransition;
 
     if (shouldPropose && insights.suggestedGoal) {
-      return this.proposeGoal(updatedState, insights.suggestedGoal);
+      return this.proposeGoal(updatedState, insights.suggestedGoal, userMessage);
     }
 
     // Generate continuation response
@@ -326,21 +381,31 @@ export class ExploreFlow {
    */
   private async proposeGoal(
     state: ExploreState,
-    proposedGoal: string
+    proposedGoal: string,
+    userMessage?: string
   ): AsyncAppResult<ExploreFlowOutput> {
     const now = createTimestamp();
 
     // Build proposal message
     const response = this.buildProposalMessage(state, proposedGoal);
 
+    // Add user message to history if provided
+    const conversationHistory = userMessage
+      ? [
+          ...state.conversationHistory,
+          { role: 'user' as const, content: userMessage, timestamp: now },
+          { role: 'assistant' as const, content: response, timestamp: now, intent: 'proposing' as const },
+        ]
+      : [
+          ...state.conversationHistory,
+          { role: 'assistant' as const, content: response, timestamp: now, intent: 'proposing' as const },
+        ];
+
     const updatedState: ExploreState = {
       ...state,
       stage: 'proposing',
       candidateGoals: [...state.candidateGoals, proposedGoal],
-      conversationHistory: [
-        ...state.conversationHistory,
-        { role: 'assistant', content: response, timestamp: now, intent: 'proposing' },
-      ],
+      conversationHistory,
       updatedAt: now,
     };
 
@@ -377,7 +442,8 @@ export class ExploreFlow {
    * Handle user confirming a proposed goal.
    */
   private async handleConfirmation(
-    state: ExploreState
+    state: ExploreState,
+    message: string
   ): AsyncAppResult<ExploreFlowOutput> {
     const now = createTimestamp();
     const crystallizedGoal = state.candidateGoals[state.candidateGoals.length - 1] ?? state.initialStatement;
@@ -391,6 +457,7 @@ export class ExploreFlow {
       clarityScore: 1.0,
       conversationHistory: [
         ...state.conversationHistory,
+        { role: 'user', content: message, timestamp: now },
         { role: 'assistant', content: response, timestamp: now, intent: 'transitioning' },
       ],
       updatedAt: now,
@@ -445,49 +512,222 @@ export class ExploreFlow {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // REJECTION HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
   /**
-   * Build skip result for initially clear goals.
+   * Handle user rejecting a proposed goal.
    */
-  private async buildSkipResult(
-    initialStatement: string,
-    clarity: ClarityDetectionResult,
-    reason: ExploreTransitionReason
+  private async handleRejection(
+    state: ExploreState,
+    message: string
   ): AsyncAppResult<ExploreFlowOutput> {
     const now = createTimestamp();
-    const goal = clarity.extractedGoal ?? initialStatement;
 
-    const response = `I'll help you learn ${goal}. Let me ask a few quick questions to customize your learning plan.`;
-
-    const state: ExploreState = {
-      userId: '' as UserId,
-      initialStatement,
+    // Go back to exploring stage
+    const updatedState: ExploreState = {
+      ...state,
+      stage: 'exploring',
       conversationHistory: [
-        { role: 'user', content: initialStatement, timestamp: now },
-        { role: 'assistant', content: response, timestamp: now, intent: 'transitioning' },
+        ...state.conversationHistory,
+        { role: 'user', content: message, timestamp: now },
       ],
-      conversationSummary: 'User provided clear goal - skipping exploration.',
-      interests: [],
-      constraints: [],
-      background: [],
-      motivations: [],
-      candidateGoals: [goal],
-      crystallizedGoal: goal,
-      clarityScore: 1.0,
-      stage: 'confirmed',
-      turnCount: 1,
-      maxTurns: this.config.maxTurns,
-      createdAt: now,
+      turnCount: state.turnCount + 1,
       updatedAt: now,
-      expiresAt: createTimestamp(new Date(Date.now() + this.config.exploreTtlSeconds * 1000)),
+    };
+
+    // Generate a response that acknowledges and redirects
+    const response = await this.generateRejectionResponse(state, message);
+
+    const finalState: ExploreState = {
+      ...updatedState,
+      conversationHistory: [
+        ...updatedState.conversationHistory,
+        { role: 'assistant', content: response, timestamp: now, intent: 'exploring' },
+      ],
     };
 
     return ok({
-      state,
+      state: finalState,
       response,
-      shouldTransition: true,
-      transitionContext: createEmptyExploreContext(goal),
-      transitionReason: reason,
+      shouldTransition: false,
     });
+  }
+
+  /**
+   * Generate response when user rejects a proposed goal.
+   */
+  private async generateRejectionResponse(
+    state: ExploreState,
+    message: string
+  ): Promise<string> {
+    try {
+      const lastProposal = state.candidateGoals[state.candidateGoals.length - 1];
+      
+      const prompt = `The user was proposed this learning goal: "${lastProposal}"
+They responded with: "${message}"
+
+Generate a brief, friendly response that:
+1. Acknowledges their feedback
+2. Asks ONE clarifying question to better understand what they actually want
+
+Keep it to 2-3 sentences. Be conversational, not formal.`;
+
+      const response = await this.openai.chat.completions.create({
+        model: this.config.llmModel,
+        messages: [
+          { role: 'system', content: EXPLORE_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 150,
+        temperature: this.config.llmTemperature,
+      });
+
+      return response.choices[0]?.message?.content?.trim() ?? 
+        "I see, that's not quite right. What would you like to focus on instead?";
+    } catch (error) {
+      console.error('[EXPLORE_FLOW] Rejection response error:', error);
+      return "Got it, let me adjust. What aspect would you like to focus on instead?";
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EXIT HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handle user wanting to exit the exploration entirely.
+   */
+  private async handleExit(
+    state: ExploreState,
+    message: string
+  ): AsyncAppResult<ExploreFlowOutput> {
+    const now = createTimestamp();
+
+    const response = "No problem! If you want to create a learning plan later, just let me know.";
+
+    const finalState: ExploreState = {
+      ...state,
+      stage: 'expired', // Mark as terminated
+      conversationHistory: [
+        ...state.conversationHistory,
+        { role: 'user', content: message, timestamp: now },
+        { role: 'assistant', content: response, timestamp: now, intent: 'transitioning' },
+      ],
+      updatedAt: now,
+    };
+
+    return ok({
+      state: finalState,
+      response,
+      shouldTransition: false, // Don't transition to refine, just end
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OFF-TOPIC HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handle off-topic messages.
+   */
+  private async handleOffTopic(
+    state: ExploreState,
+    message: string
+  ): AsyncAppResult<ExploreFlowOutput> {
+    const now = createTimestamp();
+
+    const response = "I'd love to help with that, but right now I'm focused on helping you define your learning goal. What would you like to learn?";
+
+    const finalState: ExploreState = {
+      ...state,
+      conversationHistory: [
+        ...state.conversationHistory,
+        { role: 'user', content: message, timestamp: now },
+        { role: 'assistant', content: response, timestamp: now, intent: 'exploring' },
+      ],
+      turnCount: state.turnCount + 1,
+      updatedAt: now,
+    };
+
+    return ok({
+      state: finalState,
+      response,
+      shouldTransition: false,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CLARIFY REQUEST HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handle user asking for clarification.
+   */
+  private async handleClarifyRequest(
+    state: ExploreState,
+    message: string
+  ): AsyncAppResult<ExploreFlowOutput> {
+    const now = createTimestamp();
+
+    // Generate a clarifying response
+    const response = await this.generateClarifyResponse(state, message);
+
+    const finalState: ExploreState = {
+      ...state,
+      conversationHistory: [
+        ...state.conversationHistory,
+        { role: 'user', content: message, timestamp: now },
+        { role: 'assistant', content: response, timestamp: now, intent: 'clarifying' },
+      ],
+      turnCount: state.turnCount + 1,
+      updatedAt: now,
+    };
+
+    return ok({
+      state: finalState,
+      response,
+      shouldTransition: false,
+    });
+  }
+
+  /**
+   * Generate response to a clarification request.
+   */
+  private async generateClarifyResponse(
+    state: ExploreState,
+    message: string
+  ): Promise<string> {
+    try {
+      const recentHistory = state.conversationHistory
+        .slice(-4)
+        .map(m => `${m.role}: ${m.content}`)
+        .join('\n');
+
+      const prompt = `The user asked for clarification: "${message}"
+
+Recent conversation:
+${recentHistory}
+
+Provide a brief, helpful clarification (2-3 sentences). Then gently redirect back to exploring their learning goals.`;
+
+      const response = await this.openai.chat.completions.create({
+        model: this.config.llmModel,
+        messages: [
+          { role: 'system', content: EXPLORE_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 150,
+        temperature: this.config.llmTemperature,
+      });
+
+      return response.choices[0]?.message?.content?.trim() ?? 
+        "I'm here to help you define what you want to learn so we can create a personalized plan. What topic or skill interests you?";
+    } catch (error) {
+      console.error('[EXPLORE_FLOW] Clarify response error:', error);
+      return "I'm helping you figure out what you want to learn so we can build a plan together. What interests you?";
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

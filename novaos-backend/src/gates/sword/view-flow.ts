@@ -617,9 +617,9 @@ export class ViewFlow {
       }
 
       // Show topics if available
-      if (quest.topics && quest.topics.length > 0) {
-        const topicsList = quest.topics.slice(0, 4).join(', ');
-        const more = quest.topics.length > 4 ? ` +${quest.topics.length - 4} more` : '';
+      if (quest.topicIds && quest.topicIds.length > 0) {
+        const topicsList = quest.topicIds.slice(0, 4).join(', ');
+        const more = quest.topicIds.length > 4 ? ` +${quest.topicIds.length - 4} more` : '';
         lines.push(`   Topics: ${topicsList}${more}`);
       }
 

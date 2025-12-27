@@ -13,9 +13,9 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { createTimestamp } from '../../types/branded.js';
-import type { UserId, Timestamp } from '../../types/branded.js';
-import type { UserLevel, LearningStyle, DayOfWeek, ALL_DAYS } from '../../services/spark-engine/types.js';
+import { createTimestamp } from '../../../types/branded.js';
+import type { UserId, Timestamp } from '../../../types/branded.js';
+import type { UserLevel, LearningStyle, DayOfWeek, ALL_DAYS } from '../../../services/spark-engine/types.js';
 
 import type {
   SwordRefinementState,
@@ -23,14 +23,14 @@ import type {
   SwordUserPreferences,
   SwordGateConfig,
   RefinementField,
-} from './types.js';
+} from '../types.js';
 import {
   REQUIRED_REFINEMENT_FIELDS,
   OPTIONAL_REFINEMENT_FIELDS,
   hasRequiredFields,
   getMissingRequiredFields,
   calculateRefinementProgress,
-} from './types.js';
+} from '../types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // QUESTION TEMPLATES
@@ -83,6 +83,9 @@ const QUESTION_TEMPLATES: Record<RefinementField, readonly string[]> = {
  */
 function getQuestionForField(field: RefinementField, topic?: string): string {
   const templates = QUESTION_TEMPLATES[field];
+  if (!templates || templates.length === 0) {
+    return `Please provide your ${field}.`;
+  }
   const template = templates[Math.floor(Math.random() * templates.length)]!;
   return template.replace('{topic}', topic ?? 'this topic');
 }

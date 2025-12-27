@@ -15,6 +15,9 @@
 //   - Optional but helpful: purpose/motivation
 //   - Optional but helpful: scope/depth indication
 //
+// NOTE: Skip/confirm detection has been moved to ExploreIntentClassifier.
+// This class now focuses purely on clarity assessment.
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import OpenAI from 'openai';
@@ -119,31 +122,6 @@ const VAGUENESS_PATTERNS: Array<{
   },
 ];
 
-/**
- * Patterns that indicate user is confirming a proposed goal.
- */
-const CONFIRMATION_PATTERNS: RegExp[] = [
-  /^(yes|yeah|yep|yup|exactly|correct|right|perfect|that'?s (it|right|correct)|bingo|spot on)[.!?]?$/i,
-  /^that('?s| is) (what i want|it|correct|right|perfect|exactly what)/i,
-  /^(sounds? good|looks? good|works? for me|i('?m| am) good with that)[.!?]?$/i,
-  /^(let'?s (go|do it|proceed)|ready|i'?m ready)[.!?]?$/i,
-  /^sure[.!?]?$/i,
-  /^ok(ay)?[.!?]?$/i,
-  /^absolutely[.!?]?$/i,
-  /^definitely[.!?]?$/i,
-];
-
-/**
- * Patterns that indicate user wants to skip exploration.
- */
-const SKIP_PATTERNS: RegExp[] = [
-  /^(just )?(build|create|make|start)( me)?( a| the)? (plan|learning plan|curriculum)/i,
-  /^skip( this| exploration| the questions)?\.?$/i,
-  /^(i know what i want|i'?m? (clear|sure|certain))/i,
-  /^(no need|don'?t need) (to )?(explore|ask|questions)/i,
-  /^(let'?s )?(just )?(start|begin|go|proceed|get started)/i,
-];
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // LLM CLASSIFICATION
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -188,6 +166,9 @@ Now assess:`;
 
 /**
  * Detects goal clarity using pattern matching and LLM analysis.
+ *
+ * Focuses purely on clarity assessment. Skip/confirm intent detection
+ * has been moved to ExploreIntentClassifier.
  */
 export class ClarityDetector {
   private openai: OpenAI | null = null;
@@ -213,15 +194,6 @@ export class ClarityDetector {
     goalStatement: string,
     state?: ExploreState
   ): Promise<ClarityDetectionResult> {
-    // First, check for confirmation or skip patterns
-    if (this.isConfirmation(goalStatement)) {
-      return this.buildConfirmationResult(state);
-    }
-
-    if (this.isSkipRequest(goalStatement)) {
-      return this.buildSkipResult(goalStatement);
-    }
-
     // Try pattern-based detection first
     const patternResult = this.assessWithPatterns(goalStatement);
 
@@ -496,53 +468,26 @@ export class ClarityDetector {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // SPECIAL CASES
+  // LEGACY METHODS (For backward compatibility with sword-gate.ts)
+  // These return false so sword-gate delegates to explore-flow for real intent classification
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Check if message is confirming a proposed goal.
-   */
-  isConfirmation(message: string): boolean {
-    return CONFIRMATION_PATTERNS.some(p => p.test(message.trim()));
-  }
-
-  /**
    * Check if message is requesting to skip exploration.
+   * @deprecated Use ExploreIntentClassifier instead. Returns false to delegate to explore-flow.
    */
-  isSkipRequest(message: string): boolean {
-    return SKIP_PATTERNS.some(p => p.test(message.trim()));
+  isSkipRequest(_message: string): boolean {
+    // Always return false - let explore-flow's intent classifier handle this
+    return false;
   }
 
   /**
-   * Build result for confirmation.
+   * Check if message is confirming a proposed goal.
+   * @deprecated Use ExploreIntentClassifier instead. Returns false to delegate to explore-flow.
    */
-  private buildConfirmationResult(state?: ExploreState): ClarityDetectionResult {
-    const lastCandidate = state?.candidateGoals[state.candidateGoals.length - 1];
-    
-    return {
-      score: 1.0,
-      isClear: true,
-      extractedGoal: lastCandidate ?? state?.initialStatement,
-      unclearAspects: [],
-      suggestedQuestion: undefined,
-      method: 'pattern',
-      reasoning: 'User confirmed proposed goal',
-    };
-  }
-
-  /**
-   * Build result for skip request.
-   */
-  private buildSkipResult(goalStatement: string): ClarityDetectionResult {
-    return {
-      score: 0.7, // Treat as moderately clear - user wants to proceed
-      isClear: true,
-      extractedGoal: this.extractGoal(goalStatement),
-      unclearAspects: [],
-      suggestedQuestion: undefined,
-      method: 'pattern',
-      reasoning: 'User requested to skip exploration',
-    };
+  isConfirmation(_message: string): boolean {
+    // Always return false - let explore-flow's intent classifier handle this
+    return false;
   }
 }
 
