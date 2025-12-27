@@ -129,7 +129,7 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
     { type: 'youtube_api', enabled: true, priority: 3, maxResults: 10 },
     { type: 'github_api', enabled: true, priority: 4, maxResults: 10 },
     { type: 'tavily_search', enabled: true, priority: 5, maxResults: 10 },
-    { type: 'google_cse', enabled: true, priority: 6, maxResults: 10 },
+    { type: 'google_cse', enabled: false, priority: 6, maxResults: 10 },  // Disabled - requires CSE setup
   ],
 };
 
