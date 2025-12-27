@@ -77,16 +77,52 @@ export class ClientError extends Error {
 
 export interface RouterConfig extends PipelineConfig {
   requireAuth?: boolean;
+  enableFullStepGenerator?: boolean;  // Enable full resource discovery mode
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ROUTER FACTORY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export function createRouter(config: RouterConfig = {}): Router {
+/**
+ * Creates the API router with all endpoints.
+ * Now async to support full StepGenerator initialization.
+ */
+export async function createRouterAsync(config: RouterConfig = {}): Promise<Router> {
   const router = Router();
-  const pipeline = new ExecutionPipeline(config);
   const requireAuth = config.requireAuth ?? false;
+  const enableFullStepGenerator = config.enableFullStepGenerator ?? false;
+
+  // Get Redis client for SparkEngine (if available)
+  const redisClient = storeManager.getRedisClient();
+  
+  // Create pipeline with Redis support
+  const pipeline = new ExecutionPipeline({
+    ...config,
+    redis: redisClient ?? undefined,
+    enableFullStepGenerator,
+  });
+
+  // Initialize full StepGenerator mode if enabled and Redis is available
+  if (enableFullStepGenerator) {
+    if (redisClient) {
+      console.log('[ROUTER] Initializing full StepGenerator mode...');
+      try {
+        await pipeline.initializeFullMode();
+        // Verify initialization succeeded
+        const status = (pipeline as any).fullModeInitialized;
+        const bootstrap = (pipeline as any).sparkEngineBootstrap;
+        console.log('[ROUTER] Full StepGenerator mode initialized successfully');
+        console.log('[ROUTER] Verification: fullModeInitialized=' + status + ', hasBootstrap=' + !!bootstrap);
+      } catch (error) {
+        console.error('[ROUTER] Failed to initialize full StepGenerator mode:', error);
+        console.log('[ROUTER] Falling back to stub mode');
+      }
+    } else {
+      console.warn('[ROUTER] Full StepGenerator mode requested but Redis not available');
+      console.log('[ROUTER] Using stub mode (no Redis connection)');
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // PUBLIC ENDPOINTS (no auth)
@@ -210,6 +246,13 @@ export function createRouter(config: RouterConfig = {}): Router {
 
   router.post('/chat', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
+      // DEBUG: Check pipeline state on each request
+      console.log('[CHAT DEBUG] Pipeline state:', {
+        fullModeInitialized: (pipeline as any).fullModeInitialized,
+        hasSparkEngineBootstrap: !!(pipeline as any).sparkEngineBootstrap,
+        enableFullStepGenerator: (pipeline as any).enableFullStepGenerator,
+      });
+
       // Validate request
       const parseResult = ChatRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -1353,3 +1396,7 @@ export function errorHandler(
     code: 'INTERNAL_ERROR',
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// BACKWARD COMPATIBILITY
+// ─────────────────────────────────────────────────────────────────────────────────

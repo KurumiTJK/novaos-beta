@@ -114,6 +114,14 @@ export class RedisStore implements KeyValueStore {
     return this.connected && this.client.status === 'ready';
   }
 
+  /**
+   * Get the raw ioredis client for advanced operations.
+   * Used by SparkEngine for distributed locking and pub/sub.
+   */
+  getClient(): Redis {
+    return this.client;
+  }
+
   async get(key: string): Promise<string | null> {
     return this.client.get(key);
   }
@@ -271,17 +279,12 @@ interface MemoryEntry {
   expiresAt?: number;
 }
 
-interface SortedSetEntry {
-  member: string;
-  score: number;
-}
-
 export class MemoryStore implements KeyValueStore {
   private store = new Map<string, MemoryEntry>();
   private hashes = new Map<string, Map<string, string>>();
   private lists = new Map<string, string[]>();
   private sets = new Map<string, Set<string>>();
-  private sortedSets = new Map<string, SortedSetEntry[]>();
+  private sortedSets = new Map<string, Map<string, number>>();
 
   isConnected(): boolean {
     return true;
@@ -291,22 +294,17 @@ export class MemoryStore implements KeyValueStore {
     return entry.expiresAt !== undefined && Date.now() > entry.expiresAt;
   }
 
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.store.entries()) {
-      if (entry.expiresAt && now > entry.expiresAt) {
-        this.store.delete(key);
-      }
+  private cleanup(key: string): void {
+    const entry = this.store.get(key);
+    if (entry && this.isExpired(entry)) {
+      this.store.delete(key);
     }
   }
 
   async get(key: string): Promise<string | null> {
+    this.cleanup(key);
     const entry = this.store.get(key);
-    if (!entry || this.isExpired(entry)) {
-      this.store.delete(key);
-      return null;
-    }
-    return entry.value;
+    return entry ? entry.value : null;
   }
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
@@ -318,29 +316,19 @@ export class MemoryStore implements KeyValueStore {
   }
 
   async delete(key: string): Promise<boolean> {
-    const existed = this.store.has(key) || this.lists.has(key) || this.sets.has(key) || this.hashes.has(key) || this.sortedSets.has(key);
-    this.store.delete(key);
-    this.lists.delete(key);
-    this.sets.delete(key);
-    this.hashes.delete(key);
-    this.sortedSets.delete(key);
-    return existed;
+    return this.store.delete(key);
   }
 
   async exists(key: string): Promise<boolean> {
-    const entry = this.store.get(key);
-    if (!entry || this.isExpired(entry)) {
-      this.store.delete(key);
-      return false;
-    }
-    return true;
+    this.cleanup(key);
+    return this.store.has(key);
   }
 
   async incr(key: string): Promise<number> {
-    const current = await this.get(key);
-    const newValue = (parseInt(current ?? '0', 10) || 0) + 1;
-    await this.set(key, String(newValue));
-    return newValue;
+    const value = await this.get(key);
+    const num = parseInt(value ?? '0', 10) + 1;
+    await this.set(key, String(num));
+    return num;
   }
 
   async expire(key: string, ttlSeconds: number): Promise<boolean> {
@@ -351,11 +339,18 @@ export class MemoryStore implements KeyValueStore {
   }
 
   async keys(pattern: string): Promise<string[]> {
-    this.cleanup();
     const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-    return Array.from(this.store.keys()).filter(key => regex.test(key));
+    const result: string[] = [];
+    for (const key of this.store.keys()) {
+      this.cleanup(key);
+      if (this.store.has(key) && regex.test(key)) {
+        result.push(key);
+      }
+    }
+    return result;
   }
 
+  // Hash operations
   async hget(key: string, field: string): Promise<string | null> {
     const hash = this.hashes.get(key);
     return hash?.get(field) ?? null;
@@ -373,7 +368,7 @@ export class MemoryStore implements KeyValueStore {
   async hgetall(key: string): Promise<Record<string, string>> {
     const hash = this.hashes.get(key);
     if (!hash) return {};
-    return Object.fromEntries(hash.entries());
+    return Object.fromEntries(hash);
   }
 
   async hdel(key: string, field: string): Promise<boolean> {
@@ -381,6 +376,7 @@ export class MemoryStore implements KeyValueStore {
     return hash?.delete(field) ?? false;
   }
 
+  // List operations
   async lpush(key: string, value: string): Promise<number> {
     let list = this.lists.get(key);
     if (!list) {
@@ -393,18 +389,18 @@ export class MemoryStore implements KeyValueStore {
 
   async lrange(key: string, start: number, stop: number): Promise<string[]> {
     const list = this.lists.get(key) ?? [];
-    const end = stop < 0 ? list.length + stop + 1 : stop + 1;
+    const end = stop === -1 ? list.length : stop + 1;
     return list.slice(start, end);
   }
 
   async ltrim(key: string, start: number, stop: number): Promise<void> {
     const list = this.lists.get(key);
     if (!list) return;
-    const end = stop < 0 ? list.length + stop + 1 : stop + 1;
-    const trimmed = list.slice(start, end);
-    this.lists.set(key, trimmed);
+    const end = stop === -1 ? list.length : stop + 1;
+    this.lists.set(key, list.slice(start, end));
   }
 
+  // Set operations
   async sadd(key: string, ...members: string[]): Promise<number> {
     let set = this.sets.get(key);
     if (!set) {
@@ -426,7 +422,9 @@ export class MemoryStore implements KeyValueStore {
     if (!set) return 0;
     let removed = 0;
     for (const member of members) {
-      if (set.delete(member)) removed++;
+      if (set.delete(member)) {
+        removed++;
+      }
     }
     return removed;
   }
@@ -448,40 +446,38 @@ export class MemoryStore implements KeyValueStore {
 
   // Sorted set operations
   async zadd(key: string, score: number, member: string): Promise<number> {
-    let zset = this.sortedSets.get(key);
-    if (!zset) {
-      zset = [];
-      this.sortedSets.set(key, zset);
+    let sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) {
+      sortedSet = new Map();
+      this.sortedSets.set(key, sortedSet);
     }
-    
-    // Check if member exists
-    const existingIndex = zset.findIndex(e => e.member === member);
-    if (existingIndex >= 0) {
-      // Update score
-      zset[existingIndex]!.score = score;
-      // Re-sort
-      zset.sort((a, b) => a.score - b.score);
-      return 0; // No new elements added
-    }
-    
-    // Add new entry and sort
-    zset.push({ member, score });
-    zset.sort((a, b) => a.score - b.score);
-    return 1;
+    const isNew = !sortedSet.has(member);
+    sortedSet.set(member, score);
+    return isNew ? 1 : 0;
   }
 
   async zrange(key: string, start: number, stop: number): Promise<string[]> {
-    const zset = this.sortedSets.get(key) ?? [];
-    const end = stop < 0 ? zset.length + stop + 1 : stop + 1;
-    return zset.slice(start, end).map(e => e.member);
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return [];
+    
+    const sorted = Array.from(sortedSet.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([member]) => member);
+    
+    const end = stop === -1 ? sorted.length : stop + 1;
+    return sorted.slice(start, end);
   }
 
   async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
-    const zset = this.sortedSets.get(key) ?? [];
-    // Reverse the sorted set (highest scores first)
-    const reversed = [...zset].reverse();
-    const end = stop < 0 ? reversed.length + stop + 1 : stop + 1;
-    return reversed.slice(start, end).map(e => e.member);
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return [];
+    
+    const sorted = Array.from(sortedSet.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([member]) => member);
+    
+    const end = stop === -1 ? sorted.length : stop + 1;
+    return sorted.slice(start, end);
   }
 
   async zrangebyscore(
@@ -490,17 +486,21 @@ export class MemoryStore implements KeyValueStore {
     max: number | string,
     options?: { limit?: { offset: number; count: number } }
   ): Promise<string[]> {
-    const zset = this.sortedSets.get(key) ?? [];
-    const minVal = this.parseScoreBound(min, -Infinity);
-    const maxVal = this.parseScoreBound(max, Infinity);
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return [];
     
-    let result = zset
-      .filter(e => e.score >= minVal && e.score <= maxVal)
-      .map(e => e.member);
+    const minScore = this.parseScoreBound(min, -Infinity);
+    const maxScore = this.parseScoreBound(max, Infinity);
+    
+    let result = Array.from(sortedSet.entries())
+      .filter(([_, score]) => score >= minScore && score <= maxScore)
+      .sort((a, b) => a[1] - b[1])
+      .map(([member]) => member);
     
     if (options?.limit) {
       result = result.slice(options.limit.offset, options.limit.offset + options.limit.count);
     }
+    
     return result;
   }
 
@@ -510,73 +510,74 @@ export class MemoryStore implements KeyValueStore {
     min: number | string,
     options?: { limit?: { offset: number; count: number } }
   ): Promise<string[]> {
-    const zset = this.sortedSets.get(key) ?? [];
-    const minVal = this.parseScoreBound(min, -Infinity);
-    const maxVal = this.parseScoreBound(max, Infinity);
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return [];
     
-    let result = [...zset]
-      .filter(e => e.score >= minVal && e.score <= maxVal)
-      .reverse()
-      .map(e => e.member);
+    const minScore = this.parseScoreBound(min, -Infinity);
+    const maxScore = this.parseScoreBound(max, Infinity);
+    
+    let result = Array.from(sortedSet.entries())
+      .filter(([_, score]) => score >= minScore && score <= maxScore)
+      .sort((a, b) => b[1] - a[1])
+      .map(([member]) => member);
     
     if (options?.limit) {
       result = result.slice(options.limit.offset, options.limit.offset + options.limit.count);
     }
+    
     return result;
   }
 
   async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
-    const zset = this.sortedSets.get(key);
-    if (!zset) return 0;
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return 0;
     
-    const len = zset.length;
-    const normalizedStart = start < 0 ? Math.max(0, len + start) : start;
-    const normalizedStop = stop < 0 ? len + stop : stop;
+    const sorted = Array.from(sortedSet.entries())
+      .sort((a, b) => a[1] - b[1]);
     
-    if (normalizedStart > normalizedStop || normalizedStart >= len) return 0;
+    const end = stop === -1 ? sorted.length : stop + 1;
+    const toRemove = sorted.slice(start, end);
     
-    const deleteCount = Math.min(normalizedStop, len - 1) - normalizedStart + 1;
-    zset.splice(normalizedStart, deleteCount);
-    return deleteCount;
+    for (const [member] of toRemove) {
+      sortedSet.delete(member);
+    }
+    
+    return toRemove.length;
   }
 
   async zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number> {
-    const zset = this.sortedSets.get(key);
-    if (!zset) return 0;
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return 0;
     
-    const minVal = this.parseScoreBound(min, -Infinity);
-    const maxVal = this.parseScoreBound(max, Infinity);
+    const minScore = this.parseScoreBound(min, -Infinity);
+    const maxScore = this.parseScoreBound(max, Infinity);
     
-    const originalLength = zset.length;
-    const filtered = zset.filter(e => e.score < minVal || e.score > maxVal);
-    this.sortedSets.set(key, filtered);
+    let removed = 0;
+    for (const [member, score] of sortedSet.entries()) {
+      if (score >= minScore && score <= maxScore) {
+        sortedSet.delete(member);
+        removed++;
+      }
+    }
     
-    return originalLength - filtered.length;
+    return removed;
   }
 
   async zcard(key: string): Promise<number> {
-    const zset = this.sortedSets.get(key);
-    return zset?.length ?? 0;
+    const sortedSet = this.sortedSets.get(key);
+    return sortedSet?.size ?? 0;
   }
 
   async zrem(key: string, member: string): Promise<number> {
-    const zset = this.sortedSets.get(key);
-    if (!zset) return 0;
-    
-    const index = zset.findIndex(e => e.member === member);
-    if (index >= 0) {
-      zset.splice(index, 1);
-      return 1;
-    }
-    return 0;
+    const sortedSet = this.sortedSets.get(key);
+    if (!sortedSet) return 0;
+    return sortedSet.delete(member) ? 1 : 0;
   }
 
   async zscore(key: string, member: string): Promise<number | null> {
-    const zset = this.sortedSets.get(key);
-    if (!zset) return null;
-    
-    const entry = zset.find(e => e.member === member);
-    return entry?.score ?? null;
+    const sortedSet = this.sortedSets.get(key);
+    const score = sortedSet?.get(member);
+    return score !== undefined ? score : null;
   }
 
   /**
@@ -644,6 +645,18 @@ export class StoreManager {
       return this.redis!;
     }
     return this.memory;
+  }
+
+  /**
+   * Get the raw ioredis client for advanced operations.
+   * Returns null if Redis is not available.
+   * Used by SparkEngine for distributed locking and pub/sub.
+   */
+  getRedisClient(): Redis | null {
+    if (this.useRedis && this.redis?.isConnected()) {
+      return this.redis.getClient();
+    }
+    return null;
   }
 
   isUsingRedis(): boolean {

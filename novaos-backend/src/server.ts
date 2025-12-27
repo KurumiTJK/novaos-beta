@@ -4,7 +4,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import { createRouter, errorHandler } from './api/routes.js';
+import { createRouterAsync, errorHandler } from './api/routes.js';  // ← Changed to createRouterAsync
 import { createHealthRouter } from './api/routes/health.js';
 import { requestMiddleware } from './api/middleware/request.js';
 import { storeManager } from './storage/index.js';
@@ -32,6 +32,9 @@ const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true';
 
 // Redis configuration
 const REDIS_URL = process.env.REDIS_URL;
+
+// StepGenerator configuration
+const ENABLE_FULL_STEP_GENERATOR = process.env.ENABLE_FULL_STEP_GENERATOR !== 'false';  // ← NEW: Default true
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER
@@ -94,20 +97,6 @@ app.get('/', (_req, res) => {
   });
 });
 
-// API routes
-const router = createRouter({
-  openaiApiKey: OPENAI_API_KEY,
-  geminiApiKey: GEMINI_API_KEY,
-  preferredProvider: PREFERRED_PROVIDER,
-  useMockProvider: USE_MOCK,
-  requireAuth: REQUIRE_AUTH,
-});
-
-app.use('/api/v1', router);
-
-// Error handler (must be last)
-app.use(errorHandler);
-
 // ─────────────────────────────────────────────────────────────────────────────────
 // START SERVER
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -141,6 +130,26 @@ async function startServer() {
   await storeManager.initialize();
 
   const config = loadConfig();
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // CREATE ROUTER (NOW ASYNC)
+  // ═══════════════════════════════════════════════════════════════════════════════
+  console.log('[SERVER] Creating API router...');
+  console.log('[SERVER] Full StepGenerator mode:', ENABLE_FULL_STEP_GENERATOR ? 'ENABLED' : 'DISABLED');
+  
+  const router = await createRouterAsync({
+    openaiApiKey: OPENAI_API_KEY,
+    geminiApiKey: GEMINI_API_KEY,
+    preferredProvider: PREFERRED_PROVIDER,
+    useMockProvider: USE_MOCK,
+    requireAuth: REQUIRE_AUTH,
+    enableFullStepGenerator: ENABLE_FULL_STEP_GENERATOR,  // ← NEW: Enable full mode
+  });
+
+  app.use('/api/v1', router);
+
+  // Error handler (must be last)
+  app.use(errorHandler);
   
   const server = app.listen(PORT, () => {
     const providerStatus = USE_MOCK 
@@ -148,6 +157,7 @@ async function startServer() {
       : [OPENAI_API_KEY ? 'openai' : '', GEMINI_API_KEY ? 'gemini' : ''].filter(Boolean).join(', ') || 'none (mock fallback)';
     const storageStatus = storeManager.isUsingRedis() ? 'redis' : 'memory';
     const verifyStatus = canVerify() ? 'enabled' : 'disabled';
+    const stepGenStatus = ENABLE_FULL_STEP_GENERATOR && storeManager.isUsingRedis() ? 'full' : 'stub';
     const startupTime = Date.now() - startTime;
     
     // Structured log for startup
@@ -156,6 +166,7 @@ async function startServer() {
       environment: NODE_ENV,
       storage: storageStatus,
       verification: verifyStatus,
+      stepGenerator: stepGenStatus,
       startupMs: startupTime,
     });
     
@@ -170,6 +181,7 @@ async function startServer() {
 ║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(49)}║
 ║  Storage:      ${storageStatus.padEnd(49)}║
 ║  Verification: ${verifyStatus.padEnd(49)}║
+║  StepGenerator:${stepGenStatus.padEnd(50)}║
 ║  Mode:         ${config.staging.preferCheaperModels ? 'staging (cheaper)' : 'production'.padEnd(41)}║
 ╚═══════════════════════════════════════════════════════════════════╝
 

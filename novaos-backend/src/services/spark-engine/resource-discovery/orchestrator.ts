@@ -51,8 +51,8 @@ import {
 // Components
 import { canonicalizeURL, urlsAreEquivalent, deduplicateURLs } from './canonicalize.js';
 import { detectProvider, extractYouTubeId, extractGitHubId } from './provider-id.js';
-import { getTopicRegistry, type TopicMatchResult } from './taxonomy/index.js';
 import { getKnownSourcesRegistry, type KnownSourceMatch } from './known-sources/index.js';
+import type { TopicMatchResult } from './taxonomy/index.js';
 import { getResourceCache, type CacheGetResult } from './cache/index.js';
 import { getApiKeyManager, type KeySelection } from './api-keys/index.js';
 
@@ -128,7 +128,8 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
     { type: 'curated_list', enabled: true, priority: 2, maxResults: 10 },
     { type: 'youtube_api', enabled: true, priority: 3, maxResults: 10 },
     { type: 'github_api', enabled: true, priority: 4, maxResults: 10 },
-    { type: 'web_search', enabled: false, priority: 5, maxResults: 5 },
+    { type: 'tavily_search', enabled: true, priority: 5, maxResults: 10 },
+    { type: 'google_cse', enabled: true, priority: 6, maxResults: 10 },
   ],
 };
 
@@ -153,6 +154,9 @@ export interface DiscoveryRequest {
   
   /** Maximum total results */
   readonly maxResults?: number;
+  
+  /** Content types to include */
+  readonly includeTypes?: readonly string[];
 }
 
 /**
@@ -230,6 +234,93 @@ export interface OrchestratorError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// YOUTUBE API TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+interface YouTubeSearchResponse {
+  items?: Array<{
+    id: { videoId?: string; playlistId?: string };
+    snippet: {
+      title: string;
+      description: string;
+      channelTitle: string;
+      publishedAt: string;
+      thumbnails?: {
+        default?: { url: string };
+        medium?: { url: string };
+        high?: { url: string };
+      };
+    };
+  }>;
+  pageInfo?: {
+    totalResults: number;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// GITHUB API TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+interface GitHubSearchResponse {
+  total_count: number;
+  items: Array<{
+    id: number;
+    name: string;
+    full_name: string;
+    html_url: string;
+    description: string | null;
+    stargazers_count: number;
+    forks_count: number;
+    language: string | null;
+    topics: string[];
+    updated_at: string;
+    owner: {
+      login: string;
+      avatar_url: string;
+    };
+  }>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// TAVILY API TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+interface TavilySearchResponse {
+  query: string;
+  results: Array<{
+    title: string;
+    url: string;
+    content: string;
+    score: number;
+    published_date?: string;
+  }>;
+  response_time?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// GOOGLE CSE API TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+interface GoogleCSEResponse {
+  kind: string;
+  searchInformation?: {
+    totalResults: string;
+    searchTime: number;
+  };
+  items?: Array<{
+    title: string;
+    link: string;
+    displayLink: string;
+    snippet: string;
+    formattedUrl?: string;
+    htmlSnippet?: string;
+    pagemap?: {
+      metatags?: Array<Record<string, string>>;
+    };
+  }>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // RESOURCE DISCOVERY ORCHESTRATOR
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -296,6 +387,8 @@ export class ResourceDiscoveryOrchestrator {
       // Stage 1: Find candidates from all sources
       const candidates = await this.findCandidates(request, stats);
       stats.candidatesFound = candidates.length;
+      
+      logger.info('Candidates found', { count: candidates.length });
       
       // Stage 2: Canonicalize and deduplicate
       const deduplicated = this.deduplicateCandidates(candidates, request.excludeUrls);
@@ -366,8 +459,11 @@ export class ResourceDiscoveryOrchestrator {
     
     for (const source of sources) {
       try {
+        logger.debug('Searching source', { type: source.type });
         const sourceCandidates = await this.findFromSource(source, request);
         candidates.push(...sourceCandidates);
+        
+        logger.debug('Source results', { type: source.type, count: sourceCandidates.length });
         
         // Track known source count
         if (source.type === 'known_source') {
@@ -402,9 +498,17 @@ export class ResourceDiscoveryOrchestrator {
       case 'github_api':
         return this.findFromGitHubApi(request, source.maxResults);
       
+      case 'tavily_search':
+        return this.findFromTavily(request, source.maxResults);
+      
+      case 'google_cse':
+        return this.findFromGoogleCSE(request, source.maxResults);
+      
       case 'web_search':
-        // Web search disabled by default (last resort)
-        return [];
+        // Legacy - try Tavily first, fall back to Google CSE
+        const tavilyResults = await this.findFromTavily(request, source.maxResults);
+        if (tavilyResults.length > 0) return tavilyResults;
+        return this.findFromGoogleCSE(request, source.maxResults);
       
       default:
         return [];
@@ -450,39 +554,513 @@ export class ResourceDiscoveryOrchestrator {
   
   /**
    * Find resources from YouTube API.
+   * PHASE 17D: Actual implementation with YouTube Data API v3
    */
   private async findFromYouTubeApi(
     request: DiscoveryRequest,
-    _maxResults: number
+    maxResults: number
   ): Promise<RawResourceCandidate[]> {
     // Check if we have API keys available
     const keyManager = getApiKeyManager();
-    if (!keyManager.hasAvailableQuota('youtube')) {
-      logger.debug('YouTube API quota unavailable');
+    const keyResult = keyManager.getKey('youtube');
+    
+    if (!keyResult.ok) {
+      logger.debug('YouTube API key unavailable', { error: keyResult.error });
       return [];
     }
     
-    // YouTube API search would go here
-    // For now, return empty (would be implemented with actual API calls)
-    return [];
+    const keySelection = keyResult.value;
+    
+    const candidates: RawResourceCandidate[] = [];
+    
+    try {
+      // Build search query from topics
+      const searchTerms = request.topics.map(t => {
+        // Extract human-readable name from topic ID
+        // e.g., "language:rust:ownership" -> "rust ownership"
+        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
+        return topicStr.split(':').slice(1).join(' ');
+      }).join(' ');
+      
+      const query = `${searchTerms} tutorial`;
+      
+      logger.info('YouTube API search', { query, maxResults });
+      
+      // Call YouTube Data API v3
+      const url = new URL('https://www.googleapis.com/youtube/v3/search');
+      url.searchParams.set('part', 'snippet');
+      url.searchParams.set('q', query);
+      url.searchParams.set('type', 'video');
+      url.searchParams.set('maxResults', String(Math.min(maxResults, 25)));
+      url.searchParams.set('relevanceLanguage', 'en');
+      url.searchParams.set('safeSearch', 'moderate');
+      url.searchParams.set('videoDuration', 'medium'); // 4-20 minutes
+      url.searchParams.set('key', keySelection.key);
+      
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('YouTube API error', { 
+          status: response.status, 
+          error: errorText 
+        });
+        
+        // Mark key as rate limited if quota exceeded
+        if (response.status === 403) {
+          keyManager.markRateLimited(keySelection.keyId);
+        }
+        
+        return [];
+      }
+      
+      const data = await response.json() as YouTubeSearchResponse;
+      
+      logger.info('YouTube API response', { 
+        itemCount: data.items?.length ?? 0,
+        totalResults: data.pageInfo?.totalResults ?? 0 
+      });
+      
+      // Record usage
+      keyManager.recordUsage(keySelection.keyId, data.items?.length ?? 1);
+      
+      // Convert to candidates
+      for (const item of data.items ?? []) {
+        if (!item.id.videoId) continue;
+        
+        const videoUrl = `https://www.youtube.com/watch?v=${item.id.videoId}`;
+        const now = new Date();
+        
+        candidates.push({
+          id: createResourceId(`youtube:${item.id.videoId}`),
+          canonicalUrl: videoUrl as CanonicalURL,
+          displayUrl: videoUrl as unknown as DisplayURL,
+          source: {
+            type: 'youtube_api',
+            discoveredAt: now,
+          },
+          provider: 'youtube',
+          topicIds: request.topics,
+          title: item.snippet.title,
+          snippet: item.snippet.description?.substring(0, 500),
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + RESOURCE_TTL.API_SEARCH_MS),
+          metadata: {
+            channelTitle: item.snippet.channelTitle,
+            publishedAt: item.snippet.publishedAt,
+            thumbnailUrl: item.snippet.thumbnails?.medium?.url ?? item.snippet.thumbnails?.default?.url,
+          },
+        });
+      }
+      
+      logger.info('YouTube candidates created', { count: candidates.length });
+      
+      // Log discovered resources for verification
+      for (const c of candidates.slice(0, 5)) {
+        logger.info('YouTube resource', { 
+          title: c.title?.substring(0, 60), 
+          url: c.canonicalUrl 
+        });
+      }
+      
+    } catch (error) {
+      logger.error('YouTube API fetch error', { error });
+    }
+    
+    return candidates;
   }
   
   /**
    * Find resources from GitHub API.
+   * PHASE 17D: Actual implementation with GitHub Search API
    */
   private async findFromGitHubApi(
     request: DiscoveryRequest,
-    _maxResults: number
+    maxResults: number
   ): Promise<RawResourceCandidate[]> {
     // Check if we have API keys available
     const keyManager = getApiKeyManager();
-    if (!keyManager.hasAvailableQuota('github')) {
-      logger.debug('GitHub API quota unavailable');
+    const keyResult = keyManager.getKey('github');
+    
+    if (!keyResult.ok) {
+      logger.debug('GitHub API key unavailable', { error: keyResult.error });
       return [];
     }
     
-    // GitHub API search would go here
-    return [];
+    const keySelection = keyResult.value;
+    
+    const candidates: RawResourceCandidate[] = [];
+    
+    try {
+      // Build search query from topics
+      const searchTerms = request.topics.map(t => {
+        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
+        // Extract the main topic (e.g., "rust" from "language:rust:basics")
+        const parts = topicStr.split(':');
+        return parts[1] ?? parts[0];
+      });
+      
+      // Deduplicate and join
+      const uniqueTerms = [...new Set(searchTerms)];
+      const query = `${uniqueTerms.join(' ')} tutorial learning`;
+      
+      logger.info('GitHub API search', { query, maxResults });
+      
+      // Call GitHub Search API
+      const url = new URL('https://api.github.com/search/repositories');
+      url.searchParams.set('q', `${query} in:name,description,readme`);
+      url.searchParams.set('sort', 'stars');
+      url.searchParams.set('order', 'desc');
+      url.searchParams.set('per_page', String(Math.min(maxResults, 30)));
+      
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': `token ${keySelection.key}`,
+          'User-Agent': 'NovaOS-ResourceDiscovery/1.0',
+        },
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('GitHub API error', { 
+          status: response.status, 
+          error: errorText 
+        });
+        
+        // Mark key as rate limited if quota exceeded
+        if (response.status === 403 || response.status === 429) {
+          keyManager.markRateLimited(keySelection.keyId);
+        }
+        
+        return [];
+      }
+      
+      const data = await response.json() as GitHubSearchResponse;
+      
+      logger.info('GitHub API response', { 
+        itemCount: data.items?.length ?? 0,
+        totalCount: data.total_count 
+      });
+      
+      // Record usage
+      keyManager.recordUsage(keySelection.keyId, 1);
+      
+      // Convert to candidates
+      for (const item of data.items ?? []) {
+        const now = new Date();
+        
+        candidates.push({
+          id: createResourceId(`github:${item.id}`),
+          canonicalUrl: item.html_url as CanonicalURL,
+          displayUrl: item.html_url as unknown as DisplayURL,
+          source: {
+            type: 'github_api',
+            discoveredAt: now,
+          },
+          provider: 'github',
+          topicIds: request.topics,
+          title: item.full_name,
+          snippet: item.description ?? `A ${item.language ?? 'programming'} repository with ${item.stargazers_count} stars`,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + RESOURCE_TTL.API_SEARCH_MS),
+          metadata: {
+            stars: item.stargazers_count,
+            forks: item.forks_count,
+            language: item.language,
+            topics: item.topics,
+            owner: item.owner.login,
+            updatedAt: item.updated_at,
+          },
+        });
+      }
+      
+      logger.info('GitHub candidates created', { count: candidates.length });
+      
+      // Log discovered resources for verification
+      for (const item of (data.items ?? []).slice(0, 5)) {
+        logger.info('GitHub resource', { 
+          repo: item.full_name, 
+          stars: item.stargazers_count,
+          url: item.html_url 
+        });
+      }
+      
+    } catch (error) {
+      logger.error('GitHub API fetch error', { error });
+    }
+    
+    return candidates;
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TAVILY SEARCH API
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /**
+   * Find resources from Tavily AI Search API.
+   * Tavily provides AI-optimized search results with summaries.
+   */
+  private async findFromTavily(
+    request: DiscoveryRequest,
+    maxResults: number
+  ): Promise<RawResourceCandidate[]> {
+    // Get Tavily API key from environment
+    const apiKey = process.env.TAVILY_API_KEY;
+    
+    if (!apiKey) {
+      logger.debug('Tavily API key not configured');
+      return [];
+    }
+    
+    const candidates: RawResourceCandidate[] = [];
+    
+    try {
+      // Build search query from topics
+      const searchTerms = request.topics.map(t => {
+        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
+        return topicStr.split(':').slice(1).join(' ');
+      }).join(' ');
+      
+      const query = `${searchTerms} tutorial guide documentation`;
+      
+      logger.info('Tavily API search', { query, maxResults });
+      
+      // Call Tavily Search API
+      const response = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: 'basic',
+          include_answer: false,
+          include_raw_content: false,
+          max_results: Math.min(maxResults, 20),
+          include_domains: [
+            'doc.rust-lang.org',
+            'docs.python.org',
+            'developer.mozilla.org',
+            'learn.microsoft.com',
+            'dev.to',
+            'medium.com',
+            'freecodecamp.org',
+            'codecademy.com',
+            'exercism.org',
+            'rust-lang.org',
+            'typescriptlang.org',
+          ],
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Tavily API error', { 
+          status: response.status, 
+          error: errorText 
+        });
+        return [];
+      }
+      
+      const data = await response.json() as TavilySearchResponse;
+      
+      logger.info('Tavily API response', { 
+        resultCount: data.results?.length ?? 0 
+      });
+      
+      // Convert to candidates
+      for (const result of data.results ?? []) {
+        const now = new Date();
+        
+        candidates.push({
+          id: createResourceId(`tavily:${Buffer.from(result.url).toString('base64').substring(0, 32)}`),
+          canonicalUrl: result.url as CanonicalURL,
+          displayUrl: result.url as unknown as DisplayURL,
+          source: {
+            type: 'tavily_search' as any,
+            discoveredAt: now,
+          },
+          provider: this.detectProviderFromUrl(result.url),
+          topicIds: request.topics,
+          title: result.title,
+          snippet: result.content?.substring(0, 500),
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + RESOURCE_TTL.API_SEARCH_MS),
+          metadata: {
+            score: result.score,
+            publishedDate: result.published_date,
+          },
+        });
+      }
+      
+      logger.info('Tavily candidates created', { count: candidates.length });
+      
+      // Log discovered resources for verification
+      for (const result of (data.results ?? []).slice(0, 5)) {
+        logger.info('Tavily resource', { 
+          title: result.title?.substring(0, 60), 
+          url: result.url,
+          score: result.score
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Tavily API fetch error', { error });
+    }
+    
+    return candidates;
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GOOGLE CUSTOM SEARCH ENGINE (CSE)
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /**
+   * Find resources from Google Custom Search Engine.
+   */
+  private async findFromGoogleCSE(
+    request: DiscoveryRequest,
+    maxResults: number
+  ): Promise<RawResourceCandidate[]> {
+    // Get Google CSE credentials from environment
+    const apiKey = process.env.GOOGLE_CSE_API_KEY;
+    const searchEngineId = process.env.GOOGLE_CSE_ID;
+    
+    if (!apiKey || !searchEngineId) {
+      logger.debug('Google CSE not configured', { 
+        hasApiKey: !!apiKey, 
+        hasSearchEngineId: !!searchEngineId 
+      });
+      return [];
+    }
+    
+    const candidates: RawResourceCandidate[] = [];
+    
+    try {
+      // Build search query from topics
+      const searchTerms = request.topics.map(t => {
+        const topicStr = typeof t === 'string' ? t : (t as any).id ?? String(t);
+        return topicStr.split(':').slice(1).join(' ');
+      }).join(' ');
+      
+      const query = `${searchTerms} tutorial beginner guide`;
+      
+      logger.info('Google CSE search', { query, maxResults });
+      
+      // Call Google Custom Search API
+      const url = new URL('https://www.googleapis.com/customsearch/v1');
+      url.searchParams.set('key', apiKey);
+      url.searchParams.set('cx', searchEngineId);
+      url.searchParams.set('q', query);
+      url.searchParams.set('num', String(Math.min(maxResults, 10))); // Google CSE max is 10 per request
+      
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Google CSE error', { 
+          status: response.status, 
+          error: errorText 
+        });
+        return [];
+      }
+      
+      const data = await response.json() as GoogleCSEResponse;
+      
+      logger.info('Google CSE response', { 
+        resultCount: data.items?.length ?? 0,
+        totalResults: data.searchInformation?.totalResults
+      });
+      
+      // Convert to candidates
+      for (const item of data.items ?? []) {
+        const now = new Date();
+        
+        candidates.push({
+          id: createResourceId(`gcse:${Buffer.from(item.link).toString('base64').substring(0, 32)}`),
+          canonicalUrl: item.link as CanonicalURL,
+          displayUrl: item.displayLink as unknown as DisplayURL,
+          source: {
+            type: 'google_cse' as any,
+            discoveredAt: now,
+          },
+          provider: this.detectProviderFromUrl(item.link),
+          topicIds: request.topics,
+          title: item.title,
+          snippet: item.snippet?.substring(0, 500),
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + RESOURCE_TTL.API_SEARCH_MS),
+          metadata: {
+            displayLink: item.displayLink,
+            formattedUrl: item.formattedUrl,
+            htmlSnippet: item.htmlSnippet,
+          },
+        });
+      }
+      
+      logger.info('Google CSE candidates created', { count: candidates.length });
+      
+      // Log discovered resources for verification
+      for (const item of (data.items ?? []).slice(0, 5)) {
+        logger.info('Google CSE resource', { 
+          title: item.title?.substring(0, 60), 
+          url: item.link 
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Google CSE fetch error', { error });
+    }
+    
+    return candidates;
+  }
+  
+  /**
+   * Detect provider from URL for web search results.
+   */
+  private detectProviderFromUrl(url: string): ResourceProvider {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      
+      if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+        return 'youtube';
+      }
+      if (hostname.includes('github.com')) {
+        return 'github';
+      }
+      if (hostname.includes('stackoverflow.com')) {
+        return 'stackoverflow';
+      }
+      if (hostname.includes('npmjs.com') || hostname.includes('npmjs.org')) {
+        return 'npm';
+      }
+      if (hostname.includes('crates.io')) {
+        return 'crates';
+      }
+      if (hostname.includes('pypi.org')) {
+        return 'pypi';
+      }
+      if (hostname.includes('developer.mozilla.org')) {
+        return 'mdn';
+      }
+      
+      return 'other';
+    } catch {
+      return 'other';
+    }
   }
   
   // ─────────────────────────────────────────────────────────────────────────────
@@ -550,45 +1128,61 @@ export class ResourceDiscoveryOrchestrator {
     
     // Detect provider
     const providerResult = detectProvider(url);
-    const provider = providerResult?.provider ?? 'unknown';
     
-    // Extract provider-specific ID
-    let providerId: unknown = null;
-    switch (provider) {
-      case 'youtube':
-        providerId = extractYouTubeId(url);
-        break;
-      case 'github':
-        providerId = extractGitHubId(url);
-        break;
+    // Topic matching is done at candidate level (already have topicIds)
+    // No need to match URL to topics here
+    const topicMatches: TopicMatchResult[] = [];
+    
+    // Check known sources (safely)
+    let knownSource: KnownSourceMatch | null = null;
+    try {
+      const knownSourcesRegistry = getKnownSourcesRegistry();
+      if (typeof knownSourcesRegistry.matchUrl === 'function') {
+        knownSource = knownSourcesRegistry.matchUrl(url);
+      }
+    } catch {
+      // Known source lookup failed, continue without it
     }
-    
-    // Match topics (would use text from title/description)
-    const topicRegistry = getTopicRegistry();
-    const matcher = topicRegistry.getMatcher();
-    const topics = matcher.match(url); // Simple URL-based matching
-    
-    // Check known sources
-    const knownSourceRegistry = getKnownSourcesRegistry();
-    const knownSource = knownSourceRegistry.matchUrl(url);
     
     // Calculate confidence
-    let confidence = 0.5;
-    if (knownSource) {
-      confidence = knownSource.confidence;
-    } else if (providerResult) {
-      confidence = providerResult.confidence === 'high' ? 0.9 :
-                   providerResult.confidence === 'medium' ? 0.7 : 0.5;
-    }
+    const confidence = this.calculateClassificationConfidence(
+      providerResult,
+      topicMatches,
+      knownSource
+    );
     
     return {
       url: canonical,
-      provider,
-      providerId,
-      topics,
+      provider: providerResult.provider,
+      providerId: providerResult.id,
+      topics: topicMatches,
       knownSource,
       confidence,
     };
+  }
+  
+  /**
+   * Calculate classification confidence.
+   */
+  private calculateClassificationConfidence(
+    _providerResult: { provider: ResourceProvider; id: unknown },
+    topicMatches: readonly TopicMatchResult[],
+    knownSource: KnownSourceMatch | null
+  ): number {
+    let confidence = 0.5; // Base confidence
+    
+    // Boost for known source
+    if (knownSource) {
+      confidence += 0.3;
+    }
+    
+    // Boost for topic matches
+    if (topicMatches.length > 0) {
+      const avgTopicConfidence = topicMatches.reduce((sum, m) => sum + m.confidence, 0) / topicMatches.length;
+      confidence += avgTopicConfidence * 0.2;
+    }
+    
+    return Math.min(confidence, 1);
   }
   
   // ─────────────────────────────────────────────────────────────────────────────
@@ -596,19 +1190,14 @@ export class ResourceDiscoveryOrchestrator {
   // ─────────────────────────────────────────────────────────────────────────────
   
   /**
-   * Enrich candidates with API metadata.
+   * Enrich candidates with provider-specific metadata.
    */
   private async enrichCandidates(
     candidates: Array<RawResourceCandidate & { classification: ClassificationResult }>,
     stats: { cacheHits: number; byProvider: Record<string, number>; [key: string]: unknown }
   ): Promise<EnrichedResource[]> {
-    if (!this.config.enableEnrichment) {
-      // Skip enrichment, create minimal EnrichedResource
-      return candidates.map(c => this.createMinimalEnrichedResource(c));
-    }
-    
+    const enriched: EnrichedResource[] = [];
     const cache = getResourceCache();
-    const results: EnrichedResource[] = [];
     
     // Process in batches for concurrency control
     const batches = this.batch(candidates, this.config.maxConcurrency);
@@ -617,107 +1206,143 @@ export class ResourceDiscoveryOrchestrator {
       const batchResults = await Promise.all(
         batch.map(async (candidate) => {
           // Check cache first
-          const cached = await cache.getEnriched(candidate.classification.url);
-          if (cached.ok) {
-            stats.cacheHits = (stats.cacheHits ?? 0) + 1;
-            return cached.value.data;
+          if (this.config.enableCache) {
+            const cached = await cache.getEnriched(candidate.canonicalUrl);
+            if (cached.ok) {
+              stats.cacheHits++;
+              return cached.value.data;
+            }
           }
           
-          // Enrich based on provider
-          const enriched = await this.enrichByProvider(candidate);
+          // Enrich by provider
+          const result = await this.enrichByProvider(candidate);
           
-          // Cache the result
-          if (enriched) {
-            await cache.setEnriched(candidate.classification.url, enriched);
-            
-            // Track by provider
-            const provider = candidate.classification.provider;
-            stats.byProvider = stats.byProvider ?? {};
-            stats.byProvider[provider] = (stats.byProvider[provider] ?? 0) + 1;
+          // Cache result
+          if (result && this.config.enableCache) {
+            await cache.setEnriched(candidate.canonicalUrl, result);
           }
           
-          return enriched;
+          return result;
         })
       );
       
-      results.push(...batchResults.filter((r): r is EnrichedResource => r !== null));
+      for (const result of batchResults) {
+        if (result) {
+          enriched.push(result);
+          
+          // Track by provider
+          const provider = result.provider;
+          stats.byProvider[provider] = (stats.byProvider[provider] ?? 0) + 1;
+        }
+      }
     }
     
-    return results;
+    return enriched;
   }
   
   /**
-   * Enrich a candidate based on its provider.
+   * Enrich a single candidate by its provider.
    */
   private async enrichByProvider(
     candidate: RawResourceCandidate & { classification: ClassificationResult }
   ): Promise<EnrichedResource | null> {
-    // For now, create minimal enriched resource
-    // Full API enrichment would go here
-    return this.createMinimalEnrichedResource(candidate);
-  }
-  
-  /**
-   * Create a minimal enriched resource without API calls.
-   */
-  private createMinimalEnrichedResource(
-    candidate: RawResourceCandidate & { classification: ClassificationResult }
-  ): EnrichedResource {
     const now = new Date();
     
-    return {
-      id: createResourceId(`${candidate.classification.provider}:${candidate.canonicalUrl}`),
+    // Build base enriched resource
+    const base: EnrichedResource = {
+      id: candidate.id,
       canonicalUrl: candidate.canonicalUrl,
       displayUrl: candidate.displayUrl,
-      provider: candidate.classification.provider,
-      providerId: candidate.classification.providerId as string | undefined,
+      url: candidate.canonicalUrl,
+      title: candidate.title ?? 'Untitled',
+      description: candidate.snippet ?? '',
       source: candidate.source,
+      provider: candidate.classification.provider,
+      providerId: candidate.classification.providerId
+        ? String(candidate.classification.providerId)
+        : undefined,
+      topics: candidate.classification.topics.map(t => ({
+        id: t.topicId,
+        name: t.topicId.split(':').pop() ?? t.topicId,
+      })),
+      contentType: this.inferContentType(candidate.classification.provider),
+      difficulty: 'beginner',
+      estimatedMinutes: this.inferDuration(candidate.classification.provider),
       candidateCreatedAt: candidate.createdAt,
       enrichedAt: now,
-      enrichmentExpiresAt: new Date(now.getTime() + RESOURCE_TTL.ENRICHMENT_MS),
-      title: candidate.title ?? 'Unknown',
-      description: candidate.snippet ?? '',
-      contentType: 'article',
-      format: 'text',
-      difficulty: 'intermediate',
-      metadata: { 
-        provider: 'unknown' as const,
-        title: candidate.title ?? 'Unknown',
-      },
-      topicIds: candidate.topicIds,
-      qualitySignals: this.computeQualitySignals(candidate),
+      qualitySignals: this.computeInitialQuality(candidate),
     };
+    
+    return base;
   }
   
   /**
-   * Compute quality signals for a candidate.
+   * Infer content type from provider.
    */
-  private computeQualitySignals(
+  private inferContentType(provider: ResourceProvider): string {
+    switch (provider) {
+      case 'youtube':
+        return 'video';
+      case 'github':
+        return 'repository';
+      case 'npm':
+      case 'crates':
+      case 'pypi':
+        return 'documentation';
+      case 'stackoverflow':
+        return 'article';
+      case 'mdn':
+        return 'documentation';
+      default:
+        return 'article';
+    }
+  }
+  
+  /**
+   * Infer estimated duration from provider.
+   */
+  private inferDuration(provider: ResourceProvider): number {
+    switch (provider) {
+      case 'youtube':
+        return 15; // Average tutorial video
+      case 'github':
+        return 30; // Time to explore a repo
+      case 'stackoverflow':
+        return 5;
+      case 'mdn':
+        return 10;
+      default:
+        return 15;
+    }
+  }
+  
+  /**
+   * Compute initial quality signals.
+   */
+  private computeInitialQuality(
     candidate: RawResourceCandidate & { classification: ClassificationResult }
   ): QualitySignals {
+    let popularity = 0.5;
     let authority = 0.5;
     
     // Boost for known sources
     if (candidate.classification.knownSource) {
-      const authorityLevel = candidate.classification.knownSource.source.authority;
-      authority = authorityLevel === 'official' ? 1.0 :
-                  authorityLevel === 'authoritative' ? 0.9 :
-                  authorityLevel === 'community' ? 0.7 : 0.6;
+      authority = 0.8 + (candidate.classification.knownSource.authority === 'official' ? 0.2 : 0);
     }
     
-    const popularity = 0.5;
-    const recency = 0.5;
-    const completeness = 0.5;
+    // Use metadata if available
+    const metadata = (candidate as any).metadata;
+    if (metadata?.stars) {
+      // GitHub stars
+      popularity = Math.min(0.9, 0.3 + Math.log10(metadata.stars + 1) / 5);
+    }
     
     return {
       popularity,
-      recency,
+      recency: 0.7, // Assume reasonably recent
       authority,
-      completeness,
-      composite: (popularity + recency + authority + completeness) / 4,
-      details: {
-        ageInDays: 0,
-      },
+      completeness: 0.6,
+      composite: (popularity + 0.7 + authority + 0.6) / 4,
     };
   }
   
@@ -731,21 +1356,10 @@ export class ResourceDiscoveryOrchestrator {
   private async verifyCandidates(
     enriched: EnrichedResource[],
     stats: { cacheHits: number; [key: string]: unknown }
-  ): Promise<{
-    verified: VerifiedResource[];
-    failed: Array<{ url: string; error: ResourceError }>;
-  }> {
-    if (!this.config.enableVerification) {
-      // Skip verification, assume all accessible
-      return {
-        verified: enriched.map(e => this.createUnverifiedResource(e)),
-        failed: [],
-      };
-    }
-    
-    const cache = getResourceCache();
+  ): Promise<{ verified: VerifiedResource[]; failed: { url: string; error: ResourceError }[] }> {
     const verified: VerifiedResource[] = [];
-    const failed: Array<{ url: string; error: ResourceError }> = [];
+    const failed: { url: string; error: ResourceError }[] = [];
+    const cache = getResourceCache();
     
     // Process in batches
     const batches = this.batch(enriched, this.config.maxConcurrency);
@@ -754,17 +1368,22 @@ export class ResourceDiscoveryOrchestrator {
       const batchResults = await Promise.all(
         batch.map(async (resource) => {
           // Check cache first
-          const cached = await cache.getVerified(resource.canonicalUrl);
-          if (cached.ok) {
-            stats.cacheHits = (stats.cacheHits ?? 0) + 1;
-            return { verified: cached.value.data, failed: null };
+          if (this.config.enableCache) {
+            const cached = await cache.getVerified(resource.canonicalUrl);
+            if (cached.ok) {
+              stats.cacheHits++;
+              return { verified: cached.value.data, failed: null };
+            }
           }
           
-          // Verify accessibility
+          // Verify
           const result = await this.verifyResource(resource);
           
           if (result.ok) {
-            await cache.setVerified(resource.canonicalUrl, result.value);
+            // Cache result
+            if (this.config.enableCache) {
+              await cache.setVerified(resource.canonicalUrl, result.value);
+            }
             return { verified: result.value, failed: null };
           } else {
             return {

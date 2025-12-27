@@ -38,6 +38,7 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 import { SwordGate, type SwordGateOutput } from '../gates/sword/index.js';
+import type { IResourceDiscoveryService } from '../gates/sword/lesson-plan-generator.js';
 import type { IRefinementStore, RefinementState } from '../services/spark-engine/store/types.js';
 import type { UserId, Timestamp } from '../types/branded.js';
 import { createUserId, createTimestamp } from '../types/branded.js';
@@ -51,8 +52,11 @@ import { storeManager } from '../storage/index.js';
 import type { ISparkEngine } from '../services/spark-engine/index.js';
 import { 
   bootstrapSparkEngine,
+  bootstrapSparkEngineAsync,
   type SparkEngineBootstrapResult,
-} from './spark-engine-bootstrap.js';
+  type SparkEngineConfig,
+} from '../services/spark-engine/spark-engine-bootstrap.js';
+import type { Redis } from 'ioredis';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -142,6 +146,11 @@ export interface PipelineConfig extends ProviderManagerConfig {
   systemPrompt?: string;
   enableLensSearch?: boolean;
   enableSwordGate?: boolean;  // ← NEW: Option to enable/disable SwordGate
+  
+  // Full mode options (Phase 17)
+  enableFullStepGenerator?: boolean;  // ← Enable LLM-based curriculum generation
+  redis?: Redis;                       // ← Redis instance for full mode
+  sparkEngineConfig?: Partial<SparkEngineConfig>;  // ← Additional SparkEngine config
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -161,11 +170,22 @@ export class ExecutionPipeline {
   
   // SparkEngine bootstrap result (lazy initialized)
   private sparkEngineBootstrap: SparkEngineBootstrapResult | null = null;
+  
+  // Full mode support (Phase 17)
+  private enableFullStepGenerator: boolean;
+  private fullModeInitialized: boolean = false;
+  private redis?: Redis;
+  private sparkEngineConfig?: Partial<SparkEngineConfig>;
 
   constructor(config: PipelineConfig = {}) {
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
     this.enableLensSearch = config.enableLensSearch ?? true;
     this.enableSwordGate = config.enableSwordGate ?? true;  // ← Enabled by default
+    
+    // Full mode config (Phase 17)
+    this.enableFullStepGenerator = config.enableFullStepGenerator ?? false;
+    this.redis = config.redis;
+    this.sparkEngineConfig = config.sparkEngineConfig;
     
     // Determine mock mode
     const hasConfigKeys = !!(config.openaiApiKey || config.geminiApiKey);
@@ -188,14 +208,75 @@ export class ExecutionPipeline {
       });
     }
   }
+  
+  /**
+   * Initialize full mode with LLM-based StepGenerator.
+   * 
+   * This enables:
+   * - CurriculumLLMAdapter for dynamic curriculum generation
+   * - ResourceDiscoveryOrchestrator for finding learning resources
+   * - Full TopicTaxonomy with inference
+   * 
+   * Requirements:
+   * - ProviderManager must be configured (not mock mode)
+   * - Redis must be provided for resource caching
+   * 
+   * Call this BEFORE execute() if you want full mode.
+   */
+  async initializeFullMode(): Promise<void> {
+    if (!this.enableFullStepGenerator) {
+      console.log('[PIPELINE] Full mode not enabled in config, skipping');
+      return;
+    }
+    
+    if (this.fullModeInitialized) {
+      console.log('[PIPELINE] Full mode already initialized');
+      return;
+    }
+    
+    if (this.useMock || !this.providerManager) {
+      console.warn('[PIPELINE] Full mode requires real LLM provider. Configure openaiApiKey or geminiApiKey.');
+      return;
+    }
+    
+    console.log('[PIPELINE] Initializing full StepGenerator mode...');
+    
+    const kvStore = storeManager.getStore();
+    
+    this.sparkEngineBootstrap = await bootstrapSparkEngineAsync(
+      kvStore,
+      this.redis ?? null,
+      this.providerManager,
+      {
+        encryptionEnabled: true,
+        useStubStepGenerator: false, // Full mode
+        useStubReminderService: true, // Reminders still stubbed
+        ...this.sparkEngineConfig,
+      }
+    );
+    
+    this.fullModeInitialized = true;
+    
+    console.log('[PIPELINE] Full mode initialized:', this.sparkEngineBootstrap.status);
+  }
 
   /**
    * Lazy initialization of SparkEngine via bootstrap.
-   * Creates all dependencies on first use.
+   * 
+   * If enableFullStepGenerator is true and initializeFullMode() was called,
+   * returns the full SparkEngine. Otherwise returns stub SparkEngine.
    */
   private getSparkEngine(): ISparkEngine {
+    // Check if full mode was requested but not initialized
+    if (this.enableFullStepGenerator && !this.fullModeInitialized) {
+      console.warn(
+        '[PIPELINE] Full StepGenerator mode requested but initializeFullMode() not called. ' +
+        'Falling back to stub mode. Call await pipeline.initializeFullMode() first.'
+      );
+    }
+    
     if (!this.sparkEngineBootstrap) {
-      console.log('[PIPELINE] Bootstrapping SparkEngine...');
+      console.log('[PIPELINE] Bootstrapping SparkEngine (stub mode)...');
       
       // Get the underlying KeyValueStore from the global storeManager
       const kvStore = storeManager.getStore();
@@ -225,22 +306,98 @@ export class ExecutionPipeline {
       // Get or create SparkEngine via bootstrap
       const sparkEngine = this.getSparkEngine();
       
-      // Initialize SwordGate with full SparkEngine
+      // Create resource service adapter if discovery is available
+      const resourceService = this.createResourceServiceAdapter();
+      
+      if (resourceService) {
+        console.log('[PIPELINE] Resource service adapter created for SwordGate');
+      } else {
+        console.warn('[PIPELINE] No resource discovery available - SwordGate will use fallback');
+      }
+      
+      // Initialize SwordGate with full SparkEngine + resource discovery
       this.swordGate = new SwordGate(
         this.refinementStore,
         {
           useLlmModeDetection: !this.useMock && !!process.env.OPENAI_API_KEY,
         },
         {
-          sparkEngine,  // ← NOW WIRED via bootstrap!
+          sparkEngine,
           openaiApiKey: process.env.OPENAI_API_KEY,
-          // rateLimiter can be added later
+          resourceService,  // ← Pass resource discovery!
         }
       );
       
       console.log('[PIPELINE] SwordGate initialized with SparkEngine');
     }
     return this.swordGate;
+  }
+
+  /**
+   * Create adapter to bridge ResourceDiscoveryOrchestrator to IResourceDiscoveryService.
+   * This allows SwordGate's LessonPlanGenerator to use the full resource discovery system.
+   */
+  private createResourceServiceAdapter(): IResourceDiscoveryService | undefined {
+    if (!this.sparkEngineBootstrap?.resourceDiscovery) {
+      console.log('[PIPELINE] No resourceDiscovery in bootstrap - adapter unavailable');
+      return undefined;
+    }
+
+    const orchestrator = this.sparkEngineBootstrap.resourceDiscovery;
+    console.log('[PIPELINE] Creating resource service adapter from orchestrator');
+
+    return {
+      async discover(request) {
+        try {
+          console.log('[RESOURCE_ADAPTER] Discovering resources for topics:', request.topics);
+          
+          const result = await orchestrator.discover({
+            topics: request.topics.map(t => ({ id: t as any, name: t.split(':').pop() ?? t })),
+            maxResults: request.maxResults ?? 50,
+            includeTypes: request.contentTypes as any[],
+          });
+
+          if (!result.ok) {
+            console.error('[RESOURCE_ADAPTER] Discovery failed:', result.error);
+            return result as any;
+          }
+
+          const resources = result.value.resources;
+          console.log(`[RESOURCE_ADAPTER] Found ${resources.length} resources`);
+
+          return {
+            ok: true,
+            value: {
+              resources: resources.map(r => ({
+                id: r.id,
+                title: r.title,
+                url: r.url,
+                canonicalUrl: r.canonicalUrl,
+                provider: r.providerId ?? 'unknown',
+                contentType: r.contentType,
+                topics: r.topics.map(t => typeof t === 'string' ? t : t.id),
+                estimatedMinutes: r.estimatedMinutes,
+                difficulty: r.difficulty,
+                quality: r.qualitySignals ? { score: r.qualitySignals.composite } : undefined,
+              })),
+              topicsCovered: resources
+                .flatMap(r => r.topics.map(t => typeof t === 'string' ? t : t.id))
+                .filter((v, i, a) => a.indexOf(v) === i),
+              gaps: [],
+            },
+          };
+        } catch (error) {
+          console.error('[RESOURCE_ADAPTER] Discovery error:', error);
+          return {
+            ok: false,
+            error: {
+              code: 'DISCOVERY_FAILED',
+              message: error instanceof Error ? error.message : 'Unknown error',
+            },
+          };
+        }
+      },
+    };
   }
 
   /**
