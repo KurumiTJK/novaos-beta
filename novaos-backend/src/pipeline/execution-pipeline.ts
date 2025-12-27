@@ -638,6 +638,8 @@ export class ExecutionPipeline {
       (state.intent?.type === 'action' || state.intent?.type === 'planning');
     
     // ★ Pattern-based learning intent detection (catches "i want to learn X")
+    // These patterns are specific enough that we should route to SwordGate
+    // REGARDLESS of what the intent classifier says about the domain
     const learningPatterns = [
       /\b(i want to learn|teach me|help me learn|i'?d like to learn|learn how to)\b/i,
       /\b(create a (learning )?plan|make a (learning )?plan|set up a plan)\b/i,
@@ -646,8 +648,10 @@ export class ExecutionPipeline {
     ];
     const isLearningIntentByPattern = learningPatterns.some(p => p.test(state.userMessage));
     
-    const isNewLearningIntent = isLearningIntentByClassifier || 
-      (state.intent?.primaryDomain === 'education' && isLearningIntentByPattern);
+    // ★ FIX: Route to SwordGate if pattern matches, regardless of classifier domain
+    // The patterns are specific enough ("i want to learn", "teach me") that they
+    // indicate clear learning intent even if classifier says domain is "technical"
+    const isNewLearningIntent = isLearningIntentByClassifier || isLearningIntentByPattern;
     
     // Route to SwordGate if EITHER condition is true
     const shouldUseSwordGate = 
@@ -655,7 +659,11 @@ export class ExecutionPipeline {
       context.userId &&
       (hasActiveSwordSession || isNewLearningIntent);
     
+    // ★ DIAGNOSTIC: Log the routing decision
+    console.log(`[PIPELINE] SwordGate routing check: enableSwordGate=${this.enableSwordGate}, userId=${!!context.userId}, hasActive=${hasActiveSwordSession}, newIntent=${isNewLearningIntent}, shouldUse=${shouldUseSwordGate}`);
+    
     if (shouldUseSwordGate) {
+      console.log('[PIPELINE] Entering SwordGate block...');
       try {
         const routeReason = hasActiveSwordSession 
           ? 'active sword session' 

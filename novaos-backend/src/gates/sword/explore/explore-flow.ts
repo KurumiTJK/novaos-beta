@@ -193,13 +193,18 @@ export class ExploreFlow {
   private async startExploration(
     initialStatement: string
   ): AsyncAppResult<ExploreFlowOutput> {
-    // First, assess initial clarity
+    // First, assess initial clarity (used to inform the conversation, NOT to skip)
     const clarity = await this.clarityDetector.assess(initialStatement);
 
-    // If already clear, skip exploration
-    if (clarity.isClear && clarity.extractedGoal) {
-      return this.buildSkipResult(initialStatement, clarity, 'explicit_goal');
-    }
+    // ★ CHANGE: Never auto-skip exploration based on clarity alone.
+    // Even "clear" goals like "i want to learn rust" benefit from exploration:
+    // - What aspect of Rust? (systems, web/wasm, CLI tools?)
+    // - User's background and experience level
+    // - Time commitment and learning style
+    // - Why they want to learn (career, hobby, specific project?)
+    //
+    // Users can always say "skip" to bypass exploration if they want.
+    // The clarity score is still used to inform the conversation tone.
 
     // Generate opening response
     const response = await this.generateResponse(initialStatement, null, clarity);

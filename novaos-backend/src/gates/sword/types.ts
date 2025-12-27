@@ -576,13 +576,17 @@ export function isRefinementField(value: unknown): value is RefinementField {
 
 /**
  * Check if all required refinement fields are present.
+ * 
+ * ★ IMPORTANT: Checks BOTH totalDuration AND totalDays
+ * The lesson plan generator requires totalDays to be a number.
  */
 export function hasRequiredFields(inputs: SwordRefinementInputs): boolean {
   return (
     !!inputs.goalStatement &&
     !!inputs.userLevel &&
     typeof inputs.dailyTimeCommitment === 'number' &&
-    !!inputs.totalDuration
+    !!inputs.totalDuration &&
+    typeof inputs.totalDays === 'number'  // ★ FIX: Also check totalDays
   );
 }
 

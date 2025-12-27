@@ -109,10 +109,18 @@ const SKIP_PATTERNS: RegExp[] = [
   /^(skip|next|continue|proceed)\.?$/i,
   /\b(skip)\s+(this|the|these|exploration|questions?|step)\b/i,
   /\b(just|let'?s)\s+(start|begin|create|make|go|proceed)\b/i,
-  /\b(skip to|jump to|go to)\s+(the\s+)?(plan|creation|next|end)\b/i,
+  /\b(skip to|jump to|go to|move on to)\s+(the\s+)?(plan|creation|next|end|lesson|generating)\b/i,
   /\b(i'?m ready|ready to start|ready to go)\b/i,
   /\b(don'?t need|skip)\s+(to\s+)?(ask|explore|talk|discuss)\b/i,
   /\b(get straight to|get right to)\s+(it|the point|the plan)\b/i,
+  // ★ NEW: "can we create", "lets create the plan/lesson"
+  /\b(can we|let'?s|let us)\s+(create|make|build|generate)\s+(the\s+)?(plan|lesson)/i,
+  // ★ NEW: "move on" without specifying destination
+  /\b(move on|moving on|let'?s move|can we move)\b/i,
+  // ★ NEW: "create the lesson plan" / "lesson generation"
+  /\b(create|start|begin|make)\s+(the\s+)?(lesson\s*)?(plan|generation)\b/i,
+  // ★ NEW: Direct requests to proceed
+  /\b(enough (questions|talking|exploring)|let'?s (just )?(do|get) (this|it))\b/i,
 ];
 
 /**
