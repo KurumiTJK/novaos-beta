@@ -211,7 +211,7 @@ export class SkillDecomposer implements ISkillDecomposer {
   /**
    * Split a skill that exceeds time budget into smaller skills.
    */
-  async splitSkill(skill: Skill, dailyMinutes: number): AsyncAppResult<readonly Skill[]> {
+  async splitSkill(skill: Skill, dailyMinutes: number): AsyncAppResult<Skill[]> {
     if (skill.estimatedMinutes <= dailyMinutes) {
       return ok([skill]);
     }

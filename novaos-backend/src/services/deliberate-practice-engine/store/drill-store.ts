@@ -12,14 +12,14 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { KeyValueStore } from '../../../../storage/index.js';
-import type { EncryptionService } from '../../../../security/encryption/service.js';
-import { ok, err, type AsyncAppResult } from '../../../../types/result.js';
-import type { DrillId, WeekPlanId, GoalId, UserId, Timestamp } from '../../../../types/branded.js';
-import { createTimestamp } from '../../../../types/branded.js';
-import { SwordKeys } from '../../../../infrastructure/redis/keys.js';
+import type { KeyValueStore } from '../../../storage/index.js';
+import type { EncryptionService } from '../../../security/encryption/service.js';
+import { ok, err, type AsyncAppResult } from '../../../types/result.js';
+import type { DrillId, WeekPlanId, GoalId, UserId, Timestamp } from '../../../types/branded.js';
+import { createTimestamp } from '../../../types/branded.js';
+import { SwordKeys } from '../../../infrastructure/redis/keys.js';
 import type { DailyDrill, DrillOutcome, DrillStatus } from '../types.js';
-import { SecureStore, storeError } from '../../../spark-engine/store/secure-store.js';
+import { SecureStore, storeError } from '../../spark-engine/store/secure-store.js';
 import type {
   SecureStoreConfig,
   SaveOptions,
@@ -28,8 +28,8 @@ import type {
   SaveResult,
   DeleteResult,
   ListResult,
-} from '../../../spark-engine/store/types.js';
-import { StoreErrorCode } from '../../../spark-engine/store/types.js';
+} from '../../spark-engine/store/types.js';
+import { StoreErrorCode } from '../../spark-engine/store/types.js';
 import type { IDrillStore } from '../interfaces.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -295,7 +295,7 @@ export class DrillStore extends SecureStore<DailyDrill, DrillId> implements IDri
       const end = new Date(endDate);
       
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = d.toISOString().split('T')[0]!;
         const result = await this.getByDate(userId, goalId, dateStr);
         if (result.ok && result.value !== null) {
           drills.push(result.value);

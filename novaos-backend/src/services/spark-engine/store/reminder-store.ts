@@ -20,9 +20,9 @@ import type { ReminderId, SparkId, UserId, StepId, Timestamp } from '../../../ty
 import { createTimestamp } from '../../../types/branded.js';
 import { buildKey, KeyNamespace } from '../../../infrastructure/redis/keys.js';
 import type { ReminderSchedule, ReminderStatus, ReminderTone, SparkVariant, ReminderChannels } from '../types.js';
-import { SecureStore, storeError } from './secure-store.js';
-import type { IReminderStore, SecureStoreConfig, SaveOptions, GetOptions } from './types.js';
-import { StoreErrorCode as ErrorCodes } from './types.js';
+import { SecureStore, storeError } from '../store/secure-store.js';
+import type { IReminderStore, SecureStoreConfig, SaveOptions, GetOptions } from '../store/types.js';
+import { StoreErrorCode as ErrorCodes } from '../store/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -63,6 +63,17 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
     
     // Check if store supports sorted sets
     this.extendedStore = 'zadd' in store ? (store as unknown as RedisStore) : null;
+  }
+
+  /**
+   * Get the Redis store, throwing if not available.
+   * Used for Redis-specific operations (sets, sorted sets, etc.)
+   */
+  private get redis(): RedisStore {
+    if (!this.extendedStore) {
+      throw new Error('ReminderStore requires Redis for set operations');
+    }
+    return this.extendedStore;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -129,7 +140,8 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
     // Determine TTL based on status
     let ttl: number | undefined;
     if (reminder.status === 'expired' || reminder.status === 'cancelled') {
-      ttl = this.config.expiredReminderTtlSeconds || EXPIRED_REMINDER_TTL_SECONDS;
+      // Use constant for expired reminder TTL (config extension not needed)
+      ttl = EXPIRED_REMINDER_TTL_SECONDS;
     }
 
     // Save the reminder entity
@@ -197,7 +209,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   async getPendingByUser(userId: UserId): AsyncAppResult<readonly ReminderSchedule[]> {
     try {
       const indexKey = this.getUserPendingKey(userId);
-      const reminderIds = await this.store.smembers(indexKey);
+      const reminderIds = await this.redis.smembers(indexKey);
 
       if (reminderIds.length === 0) {
         return ok([]);
@@ -240,7 +252,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   async getPendingBySpark(sparkId: SparkId): AsyncAppResult<readonly ReminderSchedule[]> {
     try {
       const indexKey = this.getSparkRemindersKey(sparkId);
-      const reminderIds = await this.store.smembers(indexKey);
+      const reminderIds = await this.redis.smembers(indexKey);
 
       if (reminderIds.length === 0) {
         return ok([]);
@@ -372,7 +384,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   async deleteBySpark(sparkId: SparkId): AsyncAppResult<number> {
     try {
       const indexKey = this.getSparkRemindersKey(sparkId);
-      const reminderIds = await this.store.smembers(indexKey);
+      const reminderIds = await this.redis.smembers(indexKey);
 
       let deleted = 0;
       for (const id of reminderIds) {
@@ -383,7 +395,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
       }
 
       // Clean up the index
-      await this.store.delete(indexKey);
+      await this.redis.delete(indexKey);
 
       return ok(deleted);
     } catch (error) {
@@ -464,7 +476,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   async countPendingByUser(userId: UserId): AsyncAppResult<number> {
     try {
       const indexKey = this.getUserPendingKey(userId);
-      const count = await this.store.scard(indexKey);
+      const count = await this.redis.scard(indexKey);
       return ok(count);
     } catch (error) {
       return err(
@@ -487,10 +499,10 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
     // This requires scanning - could be optimized with additional index
     try {
       const pattern = buildKey(KeyNamespace.SWORD, 'reminder', '*');
-      const keys = await this.store.keys(pattern);
+      const keys = await this.redis.keys(pattern);
 
       for (const key of keys) {
-        const data = await this.store.get(key);
+        const data = await this.redis.get(key);
         if (!data) continue;
 
         try {
@@ -562,7 +574,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
         await this.extendedStore.zadd(key, score, reminder.id);
       } else {
         // Fallback: use a set (loses time ordering)
-        await this.store.sadd(key, reminder.id);
+        await this.redis.sadd(key, reminder.id);
       }
 
       return ok(undefined);
@@ -586,9 +598,9 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
 
       if (this.extendedStore) {
         // Use ZREM for sorted set
-        await this.store.srem(key, reminderId);
+        await this.redis.srem(key, reminderId);
       } else {
-        await this.store.srem(key, reminderId);
+        await this.redis.srem(key, reminderId);
       }
 
       return ok(undefined);
@@ -609,7 +621,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   private async addToUserIndex(userId: UserId, reminderId: ReminderId): AsyncAppResult<void> {
     try {
       const key = this.getUserPendingKey(userId);
-      await this.store.sadd(key, reminderId);
+      await this.redis.sadd(key, reminderId);
       return ok(undefined);
     } catch (error) {
       return err(
@@ -628,7 +640,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   private async removeFromUserIndex(userId: UserId, reminderId: ReminderId): AsyncAppResult<void> {
     try {
       const key = this.getUserPendingKey(userId);
-      await this.store.srem(key, reminderId);
+      await this.redis.srem(key, reminderId);
       return ok(undefined);
     } catch (error) {
       return err(
@@ -647,7 +659,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   private async addToSparkIndex(sparkId: SparkId, reminderId: ReminderId): AsyncAppResult<void> {
     try {
       const key = this.getSparkRemindersKey(sparkId);
-      await this.store.sadd(key, reminderId);
+      await this.redis.sadd(key, reminderId);
       return ok(undefined);
     } catch (error) {
       return err(
@@ -666,7 +678,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   private async removeFromSparkIndex(sparkId: SparkId, reminderId: ReminderId): AsyncAppResult<void> {
     try {
       const key = this.getSparkRemindersKey(sparkId);
-      await this.store.srem(key, reminderId);
+      await this.redis.srem(key, reminderId);
       return ok(undefined);
     } catch (error) {
       return err(
@@ -690,7 +702,7 @@ export class ReminderStore extends SecureStore<ReminderSchedule, ReminderId> imp
   private async getDueRemindersFallback(cutoff: Date): AsyncAppResult<readonly ReminderSchedule[]> {
     try {
       const key = this.getDueQueueKey();
-      const reminderIds = await this.store.smembers(key);
+      const reminderIds = await this.redis.smembers(key);
 
       const reminders: ReminderSchedule[] = [];
       for (const id of reminderIds) {

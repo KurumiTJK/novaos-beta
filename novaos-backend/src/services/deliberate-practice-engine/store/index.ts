@@ -16,9 +16,9 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { KeyValueStore } from '../../../../storage/index.js';
-import type { EncryptionService } from '../../../../security/encryption/service.js';
-import type { SecureStoreConfig } from '../../../spark-engine/store/types.js';
+import type { KeyValueStore } from '../../../storage/index.js';
+import type { EncryptionService } from '../../../security/encryption/service.js';
+import type { SecureStoreConfig } from '../../spark-engine/store/types.js';
 import type { IDeliberatePracticeStores } from '../interfaces.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────

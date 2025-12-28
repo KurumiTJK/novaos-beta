@@ -63,6 +63,14 @@ import {
 } from '../services/spark-engine/spark-engine-bootstrap.js';
 import type { Redis } from 'ioredis';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 18: DELIBERATE PRACTICE ENGINE IMPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import type { IDeliberatePracticeEngine } from '../services/deliberate-practice-engine/interfaces.js';
+import { createDeliberatePracticeStores } from '../services/deliberate-practice-engine/store/index.js';
+import { createDeliberatePracticeEngine } from '../services/deliberate-practice-engine/deliberate-practice-engine.js';
+
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -156,6 +164,9 @@ export interface PipelineConfig extends ProviderManagerConfig {
   enableFullStepGenerator?: boolean;  // ← Enable LLM-based curriculum generation
   redis?: Redis;                       // ← Redis instance for full mode
   sparkEngineConfig?: Partial<SparkEngineConfig>;  // ← Additional SparkEngine config
+  
+  // Phase 18: Deliberate Practice Engine
+  enableDeliberatePractice?: boolean;  // ← Enable Deliberate Practice Engine
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -183,6 +194,10 @@ export class ExecutionPipeline {
   private redis?: Redis;
   private sparkEngineConfig?: Partial<SparkEngineConfig>;
 
+  // Phase 18: Deliberate Practice Engine
+  private enableDeliberatePractice: boolean;
+  private practiceEngine: IDeliberatePracticeEngine | null = null;
+
   constructor(config: PipelineConfig = {}) {
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
     this.enableLensSearch = config.enableLensSearch ?? true;
@@ -192,6 +207,9 @@ export class ExecutionPipeline {
     this.enableFullStepGenerator = config.enableFullStepGenerator ?? false;
     this.redis = config.redis;
     this.sparkEngineConfig = config.sparkEngineConfig;
+    
+    // Phase 18: Deliberate Practice config
+    this.enableDeliberatePractice = config.enableDeliberatePractice ?? true;
     
     // Determine mock mode
     const hasConfigKeys = !!(config.openaiApiKey || config.geminiApiKey);
@@ -222,6 +240,7 @@ export class ExecutionPipeline {
    * - CurriculumLLMAdapter for dynamic curriculum generation
    * - ResourceDiscoveryOrchestrator for finding learning resources
    * - Full TopicTaxonomy with inference
+   * - Phase 18: Deliberate Practice Engine
    * 
    * Requirements:
    * - ProviderManager must be configured (not mock mode)
@@ -261,9 +280,49 @@ export class ExecutionPipeline {
       }
     );
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PHASE 18: INITIALIZE DELIBERATE PRACTICE ENGINE
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (this.enableDeliberatePractice) {
+      try {
+        console.log('[PIPELINE] Initializing Deliberate Practice Engine...');
+        
+        // Create practice stores
+        const practiceStores = createDeliberatePracticeStores(kvStore, {
+          encryptionEnabled: true,
+        });
+        
+        // Create practice engine
+        this.practiceEngine = createDeliberatePracticeEngine({
+          stores: practiceStores,
+          config: {
+            dailyMinutes: 30,
+            userLevel: 'intermediate',
+            timezone: 'UTC',
+            openaiApiKey: process.env.OPENAI_API_KEY,
+            useLLM: true,
+          },
+        });
+        
+        console.log('[PIPELINE] Deliberate Practice Engine initialized');
+      } catch (practiceError) {
+        console.error('[PIPELINE] Failed to initialize Deliberate Practice Engine:', practiceError);
+        // Continue without practice engine - it's optional
+      }
+    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    
     this.fullModeInitialized = true;
     
     console.log('[PIPELINE] Full mode initialized:', this.sparkEngineBootstrap.status);
+  }
+
+  /**
+   * Get the Deliberate Practice Engine instance.
+   * Returns null if not initialized.
+   */
+  getPracticeEngine(): IDeliberatePracticeEngine | null {
+    return this.practiceEngine;
   }
 
   /**
@@ -323,7 +382,9 @@ export class ExecutionPipeline {
         console.warn('[PIPELINE] No resource discovery available - SwordGate will use fallback');
       }
       
-      // Initialize SwordGate with full SparkEngine + resource discovery
+      // ═══════════════════════════════════════════════════════════════════════════
+      // PHASE 18: Initialize SwordGate with Deliberate Practice Engine
+      // ═══════════════════════════════════════════════════════════════════════════
       this.swordGate = new SwordGate(
         this.refinementStore,
         {
@@ -333,10 +394,12 @@ export class ExecutionPipeline {
           sparkEngine,
           openaiApiKey: process.env.OPENAI_API_KEY,
           resourceService,  // ← Pass resource discovery!
+          practiceEngine: this.practiceEngine ?? undefined,  // ← Phase 18: Pass practice engine!
         }
       );
       
-      console.log('[PIPELINE] SwordGate initialized with SparkEngine');
+      console.log('[PIPELINE] SwordGate initialized with SparkEngine' + 
+        (this.practiceEngine ? ' and Deliberate Practice Engine' : ''));
     }
     return this.swordGate;
   }

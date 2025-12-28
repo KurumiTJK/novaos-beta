@@ -166,7 +166,7 @@ export class DrillGenerator implements IDrillGenerator {
       repeatTomorrow: false,
       previousDrillId: previousDrill?.id,
       continuationContext: rollForward?.carryForward,
-      isRetry,
+      isRetry: isRetry ?? false,
       retryCount,
       createdAt: now,
       updatedAt: now,

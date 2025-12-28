@@ -42,9 +42,9 @@ import type {
   TodayPracticeResult,
   DrillCompletionParams,
   GoalProgress,
-  DrillCompletionAnalysis,
   IDeliberatePracticeStores,
 } from './interfaces.js';
+import type { DrillCompletionAnalysis } from './types.js';
 import { SkillDecomposer, type SkillDecomposerConfig } from './skill-decomposer.js';
 import { DrillGenerator, type DrillGeneratorConfig } from './drill-generator.js';
 import { WeekTracker } from './week-tracker.js';
@@ -466,8 +466,13 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
 
     const updatedDrill = updateResult.value;
 
-    // Update skill mastery
-    await this.updateSkillMastery(drill.skillId, outcome);
+    // Update skill mastery based on outcome
+    if (outcome === 'pass') {
+      await this.updateSkillMastery(drill.skillId, 'practicing');
+    } else if (outcome === 'fail' || outcome === 'partial') {
+      await this.updateSkillMastery(drill.skillId, 'attempted');
+    }
+    // 'skipped' doesn't update mastery
 
     // Update week progress
     await this.weekTracker.updateProgress(drill.weekPlanId, outcome, drill.skillId);
@@ -652,7 +657,7 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
     const overallPassRate = totalAttempted > 0 ? totalDrillsPassed / totalAttempted : 0;
 
     // Calculate streaks (simplified)
-    const currentStreak = this.calculateCurrentStreak(skills);
+    const currentStreak = this.calculateCurrentStreak([...skills]);
     const longestStreak = currentStreak; // Would need drill history for accurate count
 
     // Calculate schedule status
@@ -803,7 +808,7 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
       startDate,
       endDate,
       status: 'active',
-      weeklyCompetence: firstQuest.competence ?? 'Complete first week of practice',
+      weeklyCompetence: firstQuest.description ?? 'Complete first week of practice',
       theme: firstQuest.title,
       scheduledSkillIds: firstMapping.skillIds.slice(0, PRACTICE_DAYS_PER_WEEK),
       carryForwardSkillIds: [],

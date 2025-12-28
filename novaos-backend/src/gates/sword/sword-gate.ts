@@ -24,6 +24,8 @@
 //   - LessonPlanGenerator: Generate curriculum proposals
 //   - ISparkEngine: Create goals and quests
 //
+// Phase 18: SwordGateHook integration for Deliberate Practice Engine
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { UserId, GoalId } from '../../types/branded.js';
@@ -82,6 +84,17 @@ import { ClarityDetector, createClarityDetector } from './explore/clarity-detect
 import { ViewFlow, createViewFlow } from './view-flow.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 18: DELIBERATE PRACTICE IMPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import type { IDeliberatePracticeEngine } from '../../services/deliberate-practice-engine/interfaces.js';
+import {
+  SwordGateHook,
+  createSwordGateHook,
+  triggerSkillDecomposition,
+} from './sword-gate-hook.js';
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // RATE LIMITER INTERFACE
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -130,6 +143,9 @@ export class SwordGate {
   // Phase 14B: View component
   private readonly viewFlow: ViewFlow | null = null;
 
+  // Phase 18: Deliberate Practice Hook
+  private readonly swordGateHook?: SwordGateHook;
+
   constructor(
     baseRefinementStore: IRefinementStore,
     config: Partial<SwordGateConfig> = {},
@@ -139,6 +155,7 @@ export class SwordGate {
       resourceService?: IResourceDiscoveryService;
       curriculumService?: ICurriculumService;
       openaiApiKey?: string;
+      practiceEngine?: IDeliberatePracticeEngine;  // Phase 18: NEW
     } = {}
   ) {
     this.config = { ...DEFAULT_SWORD_GATE_CONFIG, ...config };
@@ -175,6 +192,21 @@ export class SwordGate {
         maxGoalsToList: this.config.viewMaxGoalsToList,
         includeProgressInList: this.config.viewIncludeProgressInList,
       });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Phase 18: Initialize SwordGateHook if practiceEngine available
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (options.practiceEngine) {
+      this.swordGateHook = createSwordGateHook({
+        practiceEngine: options.practiceEngine,
+        config: {
+          openaiApiKey: options.openaiApiKey,
+          enabled: true,
+          failSilently: true,  // Don't block goal creation if decomposition fails
+        },
+      });
+      console.log('[SWORD_GATE] SwordGateHook initialized for Deliberate Practice');
     }
   }
 
@@ -984,6 +1016,29 @@ export class SwordGate {
     // Trigger onGoalCreated to generate steps and sparks
     await this.sparkEngine.onGoalCreated(goal, quests);
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PHASE 18: TRIGGER SKILL DECOMPOSITION FOR DELIBERATE PRACTICE
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (this.swordGateHook) {
+      console.log('[SWORD_GATE] Triggering skill decomposition for goal:', goal.id);
+      const decompositionResult = await triggerSkillDecomposition(
+        this.swordGateHook,
+        goal,
+        quests
+      );
+      
+      if (decompositionResult) {
+        console.log(
+          `[SWORD_GATE] Skill decomposition: ${decompositionResult.totalSkills} skills created, ` +
+          `success=${decompositionResult.success}`
+        );
+        if (decompositionResult.warnings.length > 0) {
+          console.warn('[SWORD_GATE] Decomposition warnings:', decompositionResult.warnings);
+        }
+      }
+    }
+    // ═══════════════════════════════════════════════════════════════════════════
+
     return ok({
       goal,
       quests,
@@ -1226,7 +1281,7 @@ export class SwordGate {
         responseMessage: "No problem! I've cancelled the learning plan. What else can I help you with?",
         suppressModelGeneration: false, // Allow normal LLM response to take over
       },
-      action: 'proceed',
+      action: 'continue',
       executionTimeMs: Date.now() - startTime,
     };
   }
@@ -1248,6 +1303,7 @@ export function createSwordGate(
     resourceService?: IResourceDiscoveryService;
     curriculumService?: ICurriculumService;
     openaiApiKey?: string;
+    practiceEngine?: IDeliberatePracticeEngine;  // Phase 18: NEW
   }
 ): SwordGate {
   return new SwordGate(baseRefinementStore, config, options);
