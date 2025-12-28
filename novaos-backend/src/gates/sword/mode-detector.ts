@@ -1,9 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODE DETECTOR — SwordGate Mode Classification
 // NovaOS Gates — Phase 14A: SwordGate Explore Module
+// Phase 18B: Practice Mode Extension
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Detects the appropriate SwordGate mode based on:
+//   0. Practice mode patterns (Phase 18B) - drill interaction
 //   1. Active explore state (continue explore flow)
 //   2. Active refinement state (continue refine/suggest flow)
 //   3. Confirmation patterns (proceed to create)
@@ -27,8 +29,9 @@ import type {
   SwordGateConfig,
   ViewTarget,
   ViewRequest,
+  PracticeIntent,
 } from './types.js';
-import { isViewTarget } from './types.js';
+import { isViewTarget, isPracticeIntent } from './types.js';
 
 // Phase 14A: Import ExploreState
 import type { ExploreState } from './explore/types.js';
@@ -78,6 +81,13 @@ export interface ModeDetectionResult {
 
   /** Parsed view request details */
   readonly viewRequest?: ViewRequest;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Practice mode fields (Phase 18B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Practice intent when mode is 'practice' */
+  readonly practiceIntent?: PracticeIntent;
 }
 
 /**
@@ -202,6 +212,138 @@ const VIEW_UPCOMING_PATTERNS: RegExp[] = [
   /\bwhat'?s\s+(coming\s+)?next\b/i,
   /\bnext\s+(few\s+)?(lessons?|days?|steps?)\b/i,
   /\bupcoming\s+(lessons?|schedule)?\b/i,
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRACTICE MODE PATTERNS (Phase 18B)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Patterns for viewing today's lesson (practice mode).
+ * These take priority over view mode because they're more action-oriented.
+ */
+const PRACTICE_VIEW_TODAY_PATTERNS: RegExp[] = [
+  /what('?s| is)?\s+(my\s+)?(lesson|practice|drill|task)\s*(today|for today)?/i,
+  /today('?s)?\s+(lesson|practice|drill|task)/i,
+  /what\s+(should|do)\s+i\s+(practice|learn|do)\s*(today)?/i,
+  /show\s+(me\s+)?(my\s+)?(today'?s?\s+)?(lesson|practice|drill)/i,
+  /^(lesson|practice|drill)\s*(today)?$/i,
+  /what('?s| is)?\s+on\s+(the\s+)?agenda/i,
+  /^today$/i,
+];
+
+/**
+ * Patterns for completing practice (pass).
+ */
+const PRACTICE_COMPLETE_PASS_PATTERNS: RegExp[] = [
+  /^(done|finished|completed|did it|i did it|got it|nailed it)\.?$/i,
+  /i('?m| am)?\s*(done|finished|completed)/i,
+  /i\s+(did|finished|completed)\s+(it|the\s+(lesson|practice|drill|task))/i,
+  /^(yes|yep|yeah|yup)[\s,]+(i\s+)?(did|done|finished)/i,
+  /mark\s+(it\s+)?(as\s+)?(done|complete|finished|passed)/i,
+  /i\s+passed/i,
+  /that\s+was\s+(easy|great|good)/i,
+  /✅|👍|🎉/,
+];
+
+/**
+ * Patterns for completing practice (fail).
+ */
+const PRACTICE_COMPLETE_FAIL_PATTERNS: RegExp[] = [
+  /i\s+(couldn'?t|could not|failed|didn'?t|did not)\s+(do\s+it|finish|complete|pass)/i,
+  /^(failed|couldn'?t do it|didn'?t pass)\.?$/i,
+  /i\s+failed/i,
+  /didn'?t\s+(work|go well)/i,
+  /mark\s+(it\s+)?(as\s+)?(failed|incomplete)/i,
+  /❌|👎/,
+];
+
+/**
+ * Patterns for skipping practice.
+ */
+const PRACTICE_SKIP_PATTERNS: RegExp[] = [
+  /skip\s+(today|this|it)/i,
+  /i('?ll| will)?\s+(skip|pass on)\s+(today|this|it)/i,
+  /not\s+today/i,
+  /do\s+(it\s+)?tomorrow/i,
+  /can'?t\s+(today|do it today)/i,
+  /postpone/i,
+];
+
+/**
+ * Patterns for viewing progress (practice mode).
+ */
+const PRACTICE_VIEW_PROGRESS_PATTERNS: RegExp[] = [
+  /how('?s| is)?\s+(my\s+)?progress/i,
+  /(show|what'?s)\s+(my\s+)?progress/i,
+  /how\s+am\s+i\s+doing/i,
+  /my\s+stats/i,
+  /what\s+have\s+i\s+(learned|mastered|completed)/i,
+];
+
+/**
+ * Patterns for viewing week plan (practice mode).
+ */
+const PRACTICE_VIEW_WEEK_PATTERNS: RegExp[] = [
+  /this\s+week('?s)?\s+(plan|schedule|lessons)/i,
+  /what('?s| is)?\s+(the\s+)?week('?s)?\s+(plan|schedule)/i,
+  /weekly\s+(plan|schedule|overview)/i,
+  /show\s+(me\s+)?(the\s+)?week/i,
+];
+
+/**
+ * Patterns for viewing all goals (practice mode).
+ */
+const PRACTICE_VIEW_GOALS_PATTERNS: RegExp[] = [
+  /(show|list|view|what('?s| is| are)?)\s+(my\s+)?goals/i,
+  /my\s+goals/i,
+  /all\s+(my\s+)?goals/i,
+  /what\s+am\s+i\s+learning/i,
+  /learning\s+goals/i,
+];
+
+/**
+ * Patterns for deleting a specific goal (practice mode).
+ */
+const PRACTICE_DELETE_GOAL_PATTERNS: RegExp[] = [
+  /delete\s+(goal\s*)?(#?\d+|this|current)/i,
+  /remove\s+(goal\s*)?(#?\d+|this|current)/i,
+  /cancel\s+(goal\s*)?(#?\d+|this|current)/i,
+];
+
+/**
+ * Patterns for deleting all goals (practice mode).
+ */
+const PRACTICE_DELETE_ALL_PATTERNS: RegExp[] = [
+  /delete\s+all(\s+(my\s+)?goals)?/i,
+  /remove\s+all(\s+(my\s+)?goals)?/i,
+  /clear\s+all(\s+goals)?/i,
+  /reset\s+(all\s+)?goals/i,
+  /start\s+fresh/i,
+  /wipe\s+(all\s+)?goals/i,
+];
+
+/**
+ * Patterns for starting practice early (practice mode).
+ */
+const PRACTICE_START_NOW_PATTERNS: RegExp[] = [
+  /start\s+(now|today|early|my\s+lesson)/i,
+  /begin\s+(now|today|early)/i,
+  /practice\s+now/i,
+  /let('?s| me)?\s+start/i,
+  /i\s+want\s+to\s+(start|begin|practice)\s*(now)?$/i,
+  /give\s+me\s+(my\s+)?(first\s+)?(lesson|drill)/i,
+  /can\s+i\s+start/i,
+];
+
+/**
+ * Patterns for switching between goals (practice mode).
+ */
+const PRACTICE_SWITCH_GOAL_PATTERNS: RegExp[] = [
+  /switch\s+(to\s+)?goal\s*(#?\d+)/i,
+  /use\s+goal\s*(#?\d+)/i,
+  /change\s+(to\s+)?goal\s*(#?\d+)/i,
+  /select\s+goal\s*(#?\d+)/i,
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -351,7 +493,23 @@ export class ModeDetector {
     const message = input.message.trim();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Priority 0: View requests (Phase 14B)
+    // Priority 0: Practice mode requests (Phase 18B)
+    // Practice mode takes highest priority for drill interaction.
+    // ─────────────────────────────────────────────────────────────────────────
+    const practiceResult = this.detectPracticeIntent(message);
+    if (practiceResult) {
+      return {
+        mode: 'practice',
+        confidence: practiceResult.confidence,
+        detectionMethod: 'keyword',
+        reasoning: practiceResult.reasoning,
+        isContinuation: false,
+        practiceIntent: practiceResult.intent,
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Priority 0.5: View requests (Phase 14B)
     // View mode takes precedence to allow users to check content anytime.
     // ─────────────────────────────────────────────────────────────────────────
     const viewResult = this.detectViewIntent(message);
@@ -675,6 +833,133 @@ export class ModeDetector {
     return null;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PRACTICE MODE DETECTION (Phase 18B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Check if message is a practice-related query.
+   * Public method for external use (e.g., by SwordGate).
+   */
+  isPracticeQuery(message: string): boolean {
+    return this.detectPracticeIntent(message) !== null;
+  }
+
+  /**
+   * Detect if message is a practice request and determine the intent.
+   * Returns null if not a practice request.
+   */
+  private detectPracticeIntent(message: string): {
+    intent: PracticeIntent;
+    confidence: number;
+    reasoning: string;
+  } | null {
+    const trimmed = message.trim();
+
+    // Check patterns in order of specificity (most specific first)
+
+    // Delete all (must check before delete_goal to avoid false matches)
+    if (PRACTICE_DELETE_ALL_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'delete_all',
+        confidence: 0.95,
+        reasoning: 'Delete all goals request detected',
+      };
+    }
+
+    // Delete specific goal
+    if (PRACTICE_DELETE_GOAL_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'delete_goal',
+        confidence: 0.92,
+        reasoning: 'Delete specific goal request detected',
+      };
+    }
+
+    // Switch goal
+    if (PRACTICE_SWITCH_GOAL_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'switch_goal',
+        confidence: 0.90,
+        reasoning: 'Switch goal request detected',
+      };
+    }
+
+    // Start now (practice early)
+    if (PRACTICE_START_NOW_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'start_now',
+        confidence: 0.92,
+        reasoning: 'Start practice now request detected',
+      };
+    }
+
+    // View goals
+    if (PRACTICE_VIEW_GOALS_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'view_goals',
+        confidence: 0.90,
+        reasoning: 'View goals request detected',
+      };
+    }
+
+    // Complete pass (most specific action)
+    if (PRACTICE_COMPLETE_PASS_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'complete_pass',
+        confidence: 0.95,
+        reasoning: 'Practice completion (pass) detected',
+      };
+    }
+
+    // Complete fail
+    if (PRACTICE_COMPLETE_FAIL_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'complete_fail',
+        confidence: 0.92,
+        reasoning: 'Practice completion (fail) detected',
+      };
+    }
+
+    // Skip
+    if (PRACTICE_SKIP_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'skip',
+        confidence: 0.90,
+        reasoning: 'Practice skip request detected',
+      };
+    }
+
+    // View progress
+    if (PRACTICE_VIEW_PROGRESS_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'view_progress',
+        confidence: 0.88,
+        reasoning: 'Progress view request detected',
+      };
+    }
+
+    // View week
+    if (PRACTICE_VIEW_WEEK_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'view_week',
+        confidence: 0.85,
+        reasoning: 'Week plan view request detected',
+      };
+    }
+
+    // View today (default practice action, checked last)
+    if (PRACTICE_VIEW_TODAY_PATTERNS.some((p) => p.test(trimmed))) {
+      return {
+        intent: 'view_today',
+        confidence: 0.90,
+        reasoning: "Today's practice view request detected",
+      };
+    }
+
+    return null;
+  }
+
   /**
    * Check if message contains a clear, specific goal statement.
    */
@@ -854,8 +1139,8 @@ export class ModeDetector {
 
       const parsed = JSON.parse(jsonStr.trim());
 
-      // Validate mode (updated for Phase 14A)
-      const validModes: SwordGateMode[] = ['capture', 'explore', 'refine', 'suggest', 'create', 'modify', 'view'];
+      // Validate mode (updated for Phase 14A + 18B)
+      const validModes: SwordGateMode[] = ['capture', 'explore', 'refine', 'suggest', 'create', 'modify', 'view', 'practice'];
       const mode = validModes.includes(parsed.mode) ? parsed.mode : 'capture';
 
       return {

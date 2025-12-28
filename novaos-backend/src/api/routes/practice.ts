@@ -103,7 +103,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.get(
-    '/practice/today',
+    '/today',
     auth.middleware(true),
     requirePracticeEngine,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -114,7 +114,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
         }
 
         const { goalId } = parseResult.data;
-        const userId = req.user!.id as UserId;
+        const userId = req.user!.userId as UserId;
 
         // Use orchestrator if available (preferred), otherwise use engine directly
         if (practiceOrchestrator) {
@@ -196,7 +196,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.post(
-    '/practice/complete',
+    '/complete',
     auth.middleware(true),
     requirePracticeEngine,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -207,16 +207,14 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
         }
 
         const { goalId, passSignalMet, observation } = parseResult.data;
-        const userId = req.user!.id as UserId;
+        const userId = req.user!.userId as UserId;
 
         if (practiceOrchestrator) {
-          const result = await practiceOrchestrator.completeTodayPractice(
+          const result = await practiceOrchestrator.completePractice(
             userId,
             goalId as GoalId,
-            {
-              passSignalMet,
-              observation,
-            }
+            passSignalMet,
+            observation
           );
 
           if (!isOk(result)) {
@@ -225,9 +223,11 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
 
           res.json({
             success: true,
-            drill: result.value.drill,
+            drillId: result.value.drillId,
+            outcome: result.value.outcome,
+            passSignalMet: result.value.passSignalMet,
+            repeatTomorrow: result.value.repeatTomorrow,
             message: result.value.message,
-            nextAction: result.value.nextAction,
           });
         } else if (practiceEngine) {
           // Get today's drill first
@@ -241,10 +241,9 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
           }
 
           const drillId = todayResult.value.drill.id;
-          const outcome = passSignalMet ? 'pass' as const : 'fail' as const;
 
           const result = await practiceEngine.recordOutcome(drillId, {
-            outcome,
+            passSignalMet,
             observation,
           });
 
@@ -268,7 +267,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.post(
-    '/practice/skip',
+    '/skip',
     auth.middleware(true),
     requirePracticeEngine,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -279,10 +278,10 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
         }
 
         const { goalId, reason } = parseResult.data;
-        const userId = req.user!.id as UserId;
+        const userId = req.user!.userId as UserId;
 
         if (practiceOrchestrator) {
-          const result = await practiceOrchestrator.skipTodayPractice(
+          const result = await practiceOrchestrator.skipPractice(
             userId,
             goalId as GoalId,
             reason
@@ -331,7 +330,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.get(
-    '/practice/progress',
+    '/progress',
     auth.middleware(true),
     requirePracticeEngine,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -365,7 +364,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.get(
-    '/practice/week',
+    '/week',
     auth.middleware(true),
     requirePracticeEngine,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -401,7 +400,7 @@ export function createPracticeRoutes(config: PracticeRouterConfig): Router {
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.get(
-    '/practice/plan',
+    '/plan',
     auth.middleware(true),
     requirePracticeEngine,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {

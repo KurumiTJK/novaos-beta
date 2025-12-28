@@ -1,16 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// DELIBERATE PRACTICE ENGINE INTERFACES — Dependency Contracts
-// NovaOS — Phase 18: Deliberate Practice Engine
+// DELIBERATE PRACTICE ENGINE INTERFACES — Phase 19: Enhanced Contracts
+// NovaOS — Phase 19A: Interface Definitions
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// This module defines the interface contracts for the Deliberate Practice system:
-//   - ISkillDecomposer: CapabilityStage → Skills conversion
-//   - IDrillGenerator: Daily drill generation with roll-forward
-//   - IWeekTracker: Week state management and transitions
-//   - IDeliberatePracticeEngine: Main orchestrator
+// This module defines the enhanced interface contracts for the Deliberate Practice system:
 //
-// Store interfaces follow the pattern from spark-engine/store/types.ts:
-//   - ISkillStore, IDrillStore, IWeekPlanStore
+// KEY ENHANCEMENTS:
+//   - ISkillTreeGenerator: Generate skills with tree structure and cross-quest deps
+//   - IWeekPlanGenerator: Generate week plans for any quest duration
+//   - IDailyDrillEngine: Generate structured drills (warmup/main/stretch)
+//   - IUnlockService: Handle skill and milestone unlocking
+//   - IMasteryService: Track mastery progression with unlock triggers
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -33,10 +33,19 @@ import type {
   LearningPlan,
   DrillOutcome,
   SkillMastery,
+  SkillStatus,
+  SkillType,
   DrillCompletionAnalysis,
   CreateSkillParams,
   CreateDrillParams,
   CreateWeekPlanParams,
+  QuestDuration,
+  DayPlan,
+  DrillSection,
+  QuestMilestone,
+  GoalProgress,
+  QuestProgress,
+  SkillDistribution,
 } from './types.js';
 
 // Re-export store types from spark-engine pattern
@@ -50,13 +59,13 @@ import type {
 } from '../spark-engine/store/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SKILL DECOMPOSER INTERFACE
+// SKILL TREE GENERATOR INTERFACE (NEW)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Context for skill decomposition.
+ * Context for skill tree generation.
  */
-export interface SkillDecompositionContext {
+export interface SkillTreeGenerationContext {
   /** The quest being decomposed */
   readonly quest: Quest;
 
@@ -66,19 +75,40 @@ export interface SkillDecompositionContext {
   /** Capability stages from the quest */
   readonly stages: readonly CapabilityStage[];
 
+  /** Quest duration */
+  readonly duration: QuestDuration;
+
   /** Daily time budget in minutes */
   readonly dailyMinutes: number;
 
   /** User's skill level */
   readonly userLevel: 'beginner' | 'intermediate' | 'advanced';
+
+  /** ALL skills from previous quests (for cross-quest dependencies) */
+  readonly previousQuestSkills: readonly Skill[];
+
+  /** Previous quests (for context) */
+  readonly previousQuests: readonly Quest[];
+
+  /** Target skill distribution */
+  readonly distribution?: SkillDistribution;
 }
 
 /**
- * Result of skill decomposition.
+ * Result of skill tree generation.
  */
-export interface SkillDecompositionResult {
-  /** Generated skills (not yet saved) */
+export interface SkillTreeGenerationResult {
+  /** Generated skills with tree structure */
   readonly skills: readonly Skill[];
+
+  /** Root skill IDs (no prerequisites within this quest) */
+  readonly rootSkillIds: readonly SkillId[];
+
+  /** Synthesis skill ID (the milestone skill) */
+  readonly synthesisSkillId: SkillId;
+
+  /** Skill IDs that reference previous quest skills */
+  readonly crossQuestSkillIds: readonly SkillId[];
 
   /** Total estimated days for all skills */
   readonly totalDays: number;
@@ -86,299 +116,588 @@ export interface SkillDecompositionResult {
   /** Warnings or gaps identified */
   readonly warnings: readonly string[];
 
-  /** Suggested week allocation */
-  readonly suggestedWeekCount: number;
+  /** Quest milestone */
+  readonly milestone: QuestMilestone;
+
+  /** Skill distribution achieved */
+  readonly distribution: {
+    readonly foundation: number;
+    readonly building: number;
+    readonly compound: number;
+    readonly synthesis: number;
+  };
 }
 
 /**
- * Decomposes Quest capability stages into actionable Skills.
+ * Generates skill trees from Quest capability stages.
  *
- * The decomposer:
- *   - Extracts action, successSignal, lockedVariables from each stage
- *   - Ensures each skill fits the daily time budget
- *   - Preserves the resilience layer (adversarialElement, failureMode, etc.)
- *   - Establishes prerequisite chains
+ * KEY DIFFERENCES from Phase 18 SkillDecomposer:
+ *   - Generates TREE structure, not flat list
+ *   - Handles CROSS-QUEST dependencies
+ *   - Creates COMPOUND and SYNTHESIS skills
+ *   - Respects quest duration (multi-week)
  */
-export interface ISkillDecomposer {
+export interface ISkillTreeGenerator {
   /**
-   * Decompose a quest's capability stages into skills.
+   * Generate a skill tree for a quest.
    *
-   * @param context - Decomposition context with quest, goal, stages
-   * @returns Generated skills and metadata
+   * @param context - Generation context with quest, previous skills, duration
+   * @returns Generated skills with tree structure
    */
-  decompose(context: SkillDecompositionContext): AsyncAppResult<SkillDecompositionResult>;
+  generate(context: SkillTreeGenerationContext): AsyncAppResult<SkillTreeGenerationResult>;
+
+  /**
+   * Find relevant skills from previous quests for dependencies.
+   *
+   * @param topics - Topics the current quest covers
+   * @param previousSkills - All skills from previous quests
+   * @returns Skills that are relevant prerequisites
+   */
+  findRelevantPriorSkills(
+    topics: readonly string[],
+    previousSkills: readonly Skill[]
+  ): readonly Skill[];
+
+  /**
+   * Create compound skill that combines multiple skills.
+   *
+   * @param componentSkills - Skills to combine (can span quests)
+   * @param context - Generation context
+   * @returns Compound skill
+   */
+  createCompoundSkill(
+    componentSkills: readonly Skill[],
+    context: SkillTreeGenerationContext
+  ): AsyncAppResult<Skill>;
+
+  /**
+   * Create synthesis skill (milestone skill) for end of quest.
+   *
+   * @param allQuestSkills - All skills in this quest
+   * @param context - Generation context
+   * @returns Synthesis skill
+   */
+  createSynthesisSkill(
+    allQuestSkills: readonly Skill[],
+    context: SkillTreeGenerationContext
+  ): AsyncAppResult<Skill>;
 
   /**
    * Validate a skill meets all requirements.
    *
-   * Requirements:
-   *   - Has verb-first action
-   *   - Has binary success signal
-   *   - Has at least one locked variable
-   *   - Fits time budget
-   *
    * @returns Error message if invalid, undefined if valid
    */
   validateSkill(skill: Skill, dailyMinutes: number): string | undefined;
-
-  /**
-   * Split a skill that exceeds time budget into smaller skills.
-   *
-   * @param skill - The oversized skill
-   * @param dailyMinutes - Target time budget
-   * @returns Array of smaller skills
-   */
-  splitSkill(skill: Skill, dailyMinutes: number): AsyncAppResult<readonly Skill[]>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DRILL GENERATOR INTERFACE
+// WEEK PLAN GENERATOR INTERFACE (NEW)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Context for generating a daily drill.
+ * Context for week plan generation.
  */
-export interface DrillGenerationContext {
-  /** User identifier */
-  readonly userId: UserId;
+export interface WeekPlanGenerationContext {
+  /** Goal being planned */
+  readonly goal: Goal;
 
-  /** Goal identifier */
-  readonly goalId: GoalId;
+  /** Quest this week belongs to */
+  readonly quest: Quest;
 
-  /** Current week plan */
+  /** Quest duration */
+  readonly duration: QuestDuration;
+
+  /** Week number within the goal (1-based) */
+  readonly weekNumber: number;
+
+  /** Week number within the quest (1-based) */
+  readonly weekInQuest: number;
+
+  /** Skills scheduled for this week */
+  readonly weekSkills: readonly Skill[];
+
+  /** All skills from previous quests */
+  readonly previousQuestSkills: readonly Skill[];
+
+  /** Skills carried forward from previous week */
+  readonly carryForwardSkills: readonly Skill[];
+
+  /** Start date for the week */
+  readonly startDate: string;
+}
+
+/**
+ * Result of week plan generation.
+ */
+export interface WeekPlanGenerationResult {
+  /** Generated week plan */
   readonly weekPlan: WeekPlan;
 
-  /** Available skills (with current mastery state) */
-  readonly availableSkills: readonly Skill[];
+  /** Day plans within the week */
+  readonly dayPlans: readonly DayPlan[];
+
+  /** Skills that need review from previous quests */
+  readonly reviewSkills: readonly Skill[];
+
+  /** Warnings about scheduling */
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Generates week plans with day-by-day scheduling.
+ *
+ * KEY FEATURES:
+ *   - Works for any quest duration (1 day to multi-week)
+ *   - Schedules skills respecting dependencies
+ *   - Identifies review skills from previous quests
+ *   - Places compound skills after their prerequisites
+ *   - Places synthesis at end of quest's last week
+ */
+export interface IWeekPlanGenerator {
+  /**
+   * Generate a week plan.
+   *
+   * @param context - Generation context
+   * @returns Week plan with day schedules
+   */
+  generate(context: WeekPlanGenerationContext): AsyncAppResult<WeekPlanGenerationResult>;
+
+  /**
+   * Generate all week plans for a quest.
+   *
+   * @param quest - The quest
+   * @param duration - Quest duration
+   * @param skills - All skills for this quest
+   * @param previousQuestSkills - Skills from previous quests
+   * @param goal - Parent goal
+   * @param startWeekNumber - Starting week number in the goal
+   * @param startDate - Start date for first week
+   * @returns All week plans for the quest
+   */
+  generateForQuest(
+    quest: Quest,
+    duration: QuestDuration,
+    skills: readonly Skill[],
+    previousQuestSkills: readonly Skill[],
+    goal: Goal,
+    startWeekNumber: number,
+    startDate: string
+  ): AsyncAppResult<readonly WeekPlan[]>;
+
+  /**
+   * Identify skills from previous quests to review in warmups.
+   *
+   * @param weekSkills - Skills scheduled for this week
+   * @param previousQuestSkills - All previous quest skills
+   * @returns Skills to review
+   */
+  identifyReviewSkills(
+    weekSkills: readonly Skill[],
+    previousQuestSkills: readonly Skill[]
+  ): readonly Skill[];
+
+  /**
+   * Assign skills to days respecting dependencies.
+   *
+   * @param skills - Skills to assign
+   * @param daysAvailable - Number of practice days
+   * @returns Skills assigned to each day
+   */
+  assignSkillsToDays(
+    skills: readonly Skill[],
+    daysAvailable: number
+  ): readonly (Skill | null)[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DAILY DRILL ENGINE INTERFACE (NEW)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Context for daily drill generation.
+ */
+export interface DailyDrillGenerationContext {
+  /** Skill to practice */
+  readonly skill: Skill;
+
+  /** Day plan this drill is for */
+  readonly dayPlan: DayPlan;
+
+  /** Week plan context */
+  readonly weekPlan: WeekPlan;
+
+  /** Goal context */
+  readonly goal: Goal;
+
+  /** Quest context */
+  readonly quest: Quest;
 
   /** Previous drill (if any, for roll-forward) */
   readonly previousDrill?: DailyDrill;
 
-  /** Date to generate drill for (YYYY-MM-DD) */
-  readonly date: string;
+  /** Skills from previous quests (for warmup selection) */
+  readonly previousQuestSkills: readonly Skill[];
 
-  /** Day number in the overall plan */
-  readonly dayNumber: number;
+  /** Component skills (for compound/synthesis drills) */
+  readonly componentSkills?: readonly Skill[];
 
   /** Daily time budget in minutes */
   readonly dailyMinutes: number;
 }
 
 /**
- * Result of roll-forward analysis.
+ * Result of daily drill generation.
  */
-export interface RollForwardResult {
-  /**
-   * Should retry the same skill?
-   * True if previous drill failed or was partial.
-   */
-  readonly repeatSkill: boolean;
+export interface DailyDrillGenerationResult {
+  /** Generated drill */
+  readonly drill: DailyDrill;
 
-  /**
-   * Suggested adaptation for retry.
-   * How to adjust the action for better success.
-   */
-  readonly adaptation?: string;
+  /** Warmup section (if any) */
+  readonly warmup: DrillSection | null;
 
-  /**
-   * Context to carry forward.
-   * Information from previous attempt.
-   */
-  readonly carryForward: string;
+  /** Main practice section */
+  readonly main: DrillSection;
 
-  /**
-   * Skill to practice.
-   * Same skill if retry, next skill otherwise.
-   */
-  readonly nextSkillId: SkillId;
+  /** Stretch challenge section (if any) */
+  readonly stretch: DrillSection | null;
 
-  /**
-   * Retry count (incremented if retrying same skill).
-   */
-  readonly retryCount: number;
+  /** Context explaining drill selection */
+  readonly context: string;
 }
 
 /**
- * Generates daily drills with roll-forward logic.
+ * Generates structured daily drills with warmup/main/stretch sections.
  *
- * The generator:
- *   - Selects the optimal skill for today
- *   - Analyzes previous drill for roll-forward context
- *   - Adapts skills for retry after failure
- *   - Creates coherent drill sequences
+ * KEY FEATURES:
+ *   - Structured drill format (warmup → main → stretch)
+ *   - Cross-quest review in warmups
+ *   - Compound skill drills combine multiple skills
+ *   - Roll-forward logic from previous drills
+ *   - Adaptation for retries
  */
-export interface IDrillGenerator {
+export interface IDailyDrillEngine {
   /**
    * Generate a drill for the given context.
    *
    * @param context - Generation context
-   * @returns Generated drill (not yet saved)
+   * @returns Structured drill
    */
-  generate(context: DrillGenerationContext): AsyncAppResult<DailyDrill>;
+  generate(context: DailyDrillGenerationContext): AsyncAppResult<DailyDrillGenerationResult>;
 
   /**
-   * Analyze previous drill and determine next action.
+   * Generate warmup section.
    *
-   * @param previousDrill - The drill to analyze
-   * @param skills - Available skills for selection
-   * @returns Roll-forward decision
+   * @param skill - Today's skill
+   * @param dayPlan - Day plan with review info
+   * @param previousQuestSkills - Skills from previous quests
+   * @returns Warmup section or null
    */
-  analyzeAndRollForward(
-    previousDrill: DailyDrill,
-    skills: readonly Skill[]
-  ): AsyncAppResult<RollForwardResult>;
+  generateWarmup(
+    skill: Skill,
+    dayPlan: DayPlan,
+    previousQuestSkills: readonly Skill[]
+  ): AsyncAppResult<DrillSection | null>;
 
   /**
-   * Select the optimal skill for today.
+   * Generate main practice section.
    *
-   * Priority order:
-   *   1. Carry-forward (retry failed skills)
-   *   2. Prerequisites (unblocked skills)
-   *   3. Sequence (next in order)
-   *   4. Review (reinforcement of mastered skills)
-   *
-   * @param context - Generation context
-   * @returns Selected skill
+   * @param skill - Skill to practice
+   * @param componentSkills - Component skills for compound drills
+   * @param dailyMinutes - Time budget
+   * @returns Main section
    */
-  selectSkill(context: DrillGenerationContext): AsyncAppResult<Skill>;
+  generateMain(
+    skill: Skill,
+    componentSkills: readonly Skill[] | undefined,
+    dailyMinutes: number
+  ): AsyncAppResult<DrillSection>;
 
   /**
-   * Adapt a skill for retry after failure.
+   * Generate stretch challenge section.
    *
-   * Simplifications may include:
-   *   - Reduced scope
-   *   - Explicit hints
-   *   - Smaller success criteria
-   *
-   * @param skill - The skill to adapt
-   * @param previousDrill - The failed drill attempt
-   * @param retryCount - How many times this has been retried
-   * @returns Adapted action and pass signal
+   * @param skill - Today's skill
+   * @returns Stretch section or null
    */
-  adaptSkillForRetry(
+  generateStretch(skill: Skill): AsyncAppResult<DrillSection | null>;
+
+  /**
+   * Adapt a drill for retry after failure.
+   *
+   * @param skill - Skill to retry
+   * @param previousDrill - Failed drill
+   * @param retryCount - How many retries so far
+   * @returns Adapted sections
+   */
+  adaptForRetry(
     skill: Skill,
     previousDrill: DailyDrill,
     retryCount: number
   ): AsyncAppResult<{
-    action: string;
-    passSignal: string;
-    constraint: string;
+    main: DrillSection;
+    warmup?: DrillSection;
   }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// WEEK TRACKER INTERFACE
+// UNLOCK SERVICE INTERFACE (NEW)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Result of week completion.
+ * Result of checking skill prerequisites.
  */
-export interface WeekCompletionResult {
-  /** The completed week plan */
-  readonly completedWeek: WeekPlan;
+export interface PrerequisiteCheckResult {
+  /** Whether all prerequisites are met */
+  readonly allMet: boolean;
 
-  /** Skills that need carry-forward */
-  readonly carryForwardSkills: readonly Skill[];
+  /** Prerequisites that are met */
+  readonly metPrerequisites: readonly SkillId[];
 
-  /** Generated focus for next week */
-  readonly nextWeekFocus: string;
+  /** Prerequisites still needed */
+  readonly missingPrerequisites: readonly SkillId[];
 
-  /** Weekly summary for user */
-  readonly summary: string;
-
-  /** Next week plan (if created) */
-  readonly nextWeek?: WeekPlan;
+  /** Which quests the missing prerequisites come from */
+  readonly missingFromQuests: readonly QuestId[];
 }
 
 /**
- * Week progress update.
+ * Result of unlocking skills.
  */
-export interface WeekProgressUpdate {
-  /** Updated drill counts */
-  readonly drillsCompleted: number;
-  readonly drillsPassed: number;
-  readonly drillsFailed: number;
-  readonly drillsSkipped: number;
+export interface UnlockResult {
+  /** Skills that were unlocked */
+  readonly unlockedSkillIds: readonly SkillId[];
 
-  /** Recalculated pass rate */
+  /** Skills still locked */
+  readonly stillLockedSkillIds: readonly SkillId[];
+
+  /** Whether milestone was unlocked */
+  readonly milestoneUnlocked: boolean;
+}
+
+/**
+ * Handles skill and milestone unlocking based on prerequisites.
+ */
+export interface IUnlockService {
+  /**
+   * Check if a skill's prerequisites are met.
+   *
+   * @param skillId - Skill to check
+   * @returns Prerequisite check result
+   */
+  checkPrerequisites(skillId: SkillId): AsyncAppResult<PrerequisiteCheckResult>;
+
+  /**
+   * Unlock skills whose prerequisites are now met.
+   *
+   * Called after skill mastery updates.
+   *
+   * @param masteredSkillId - Skill that was just mastered
+   * @returns Skills that were unlocked
+   */
+  unlockEligibleSkills(masteredSkillId: SkillId): AsyncAppResult<UnlockResult>;
+
+  /**
+   * Check if milestone can be unlocked.
+   *
+   * @param questId - Quest to check
+   * @param requiredMasteryPercent - Required mastery percentage
+   * @returns Whether milestone is available
+   */
+  checkMilestoneAvailability(
+    questId: QuestId,
+    requiredMasteryPercent: number
+  ): AsyncAppResult<boolean>;
+
+  /**
+   * Get all locked skills and their missing prerequisites.
+   *
+   * @param goalId - Goal to check
+   * @returns Map of skill ID to missing prerequisites
+   */
+  getLockedSkillsWithReasons(
+    goalId: GoalId
+  ): AsyncAppResult<ReadonlyMap<SkillId, readonly SkillId[]>>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MASTERY SERVICE INTERFACE (NEW)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Result of recording a drill outcome.
+ */
+export interface MasteryUpdateResult {
+  /** Updated skill */
+  readonly skill: Skill;
+
+  /** Previous mastery level */
+  readonly previousMastery: SkillMastery;
+
+  /** New mastery level */
+  readonly newMastery: SkillMastery;
+
+  /** Previous status */
+  readonly previousStatus: SkillStatus;
+
+  /** New status */
+  readonly newStatus: SkillStatus;
+
+  /** Whether skill was just mastered */
+  readonly justMastered: boolean;
+
+  /** Skills unlocked by this mastery change */
+  readonly unlockedSkills: readonly Skill[];
+
+  /** Whether milestone is now available */
+  readonly milestoneUnlocked: boolean;
+}
+
+/**
+ * Tracks skill mastery and triggers unlocks.
+ */
+export interface IMasteryService {
+  /**
+   * Update skill mastery after drill completion.
+   *
+   * @param skillId - Skill that was practiced
+   * @param outcome - Drill outcome
+   * @returns Mastery update result with unlock info
+   */
+  recordOutcome(
+    skillId: SkillId,
+    outcome: DrillOutcome
+  ): AsyncAppResult<MasteryUpdateResult>;
+
+  /**
+   * Get current mastery summary for a goal.
+   *
+   * @param goalId - Goal to summarize
+   * @returns Mastery counts by level
+   */
+  getMasterySummary(goalId: GoalId): AsyncAppResult<{
+    readonly notStarted: number;
+    readonly attempting: number;
+    readonly practicing: number;
+    readonly mastered: number;
+    readonly total: number;
+  }>;
+
+  /**
+   * Calculate mastery percentage for a quest.
+   *
+   * @param questId - Quest to check
+   * @returns Mastery percentage (0-1)
+   */
+  getQuestMasteryPercent(questId: QuestId): AsyncAppResult<number>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROGRESS SERVICE INTERFACE (NEW)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Weekly summary for display.
+ */
+export interface WeeklySummary {
+  /** Week number */
+  readonly weekNumber: number;
+
+  /** Week theme */
+  readonly theme: string;
+
+  /** Quest title */
+  readonly questTitle: string;
+
+  /** Skills mastered this week */
+  readonly skillsMastered: readonly string[];
+
+  /** Skills in progress */
+  readonly skillsInProgress: readonly string[];
+
+  /** Cross-quest skills completed */
+  readonly crossQuestSkills: readonly {
+    readonly skillTitle: string;
+    readonly combinedFromQuests: readonly string[];
+  }[];
+
+  /** Days practiced */
+  readonly daysPracticed: number;
+
+  /** Days total */
+  readonly daysTotal: number;
+
+  /** Pass rate (0-1) */
   readonly passRate: number;
 
-  /** Newly completed skills */
-  readonly newlyCompletedSkillIds: readonly SkillId[];
+  /** Current streak */
+  readonly currentStreak: number;
+
+  /** Whether milestone is available */
+  readonly milestoneAvailable: boolean;
+
+  /** Milestone title */
+  readonly milestoneTitle: string;
+
+  /** Next week preview (if any) */
+  readonly nextWeekPreview?: string;
 }
 
 /**
- * Tracks week-level progress and transitions.
- *
- * The tracker:
- *   - Manages week lifecycle (pending → active → completed)
- *   - Updates progress after each drill
- *   - Handles week transitions with carry-forward
- *   - Generates weekly summaries
+ * Provides progress tracking and summaries.
  */
-export interface IWeekTracker {
+export interface IProgressService {
   /**
-   * Get or create the current week plan for a goal.
+   * Get overall goal progress.
    *
-   * @param goalId - Goal identifier
-   * @returns Current active week plan
+   * @param goalId - Goal to check
+   * @returns Full progress summary
    */
-  getCurrentWeek(goalId: GoalId): AsyncAppResult<WeekPlan | null>;
+  getGoalProgress(goalId: GoalId): AsyncAppResult<GoalProgress>;
 
   /**
-   * Activate a week plan (pending → active).
+   * Get current quest progress.
    *
-   * @param weekPlanId - Week plan to activate
-   * @returns Activated week plan
+   * @param questId - Quest to check
+   * @returns Quest progress
    */
-  activateWeek(weekPlanId: WeekPlanId): AsyncAppResult<WeekPlan>;
+  getQuestProgress(questId: QuestId): AsyncAppResult<QuestProgress>;
 
   /**
-   * Complete a week and prepare the next one.
+   * Get weekly summary.
    *
-   * @param weekPlanId - Week plan to complete
-   * @returns Completion result with next week info
+   * @param weekPlanId - Week to summarize
+   * @returns Weekly summary
    */
-  completeWeek(weekPlanId: WeekPlanId): AsyncAppResult<WeekCompletionResult>;
+  getWeeklySummary(weekPlanId: WeekPlanId): AsyncAppResult<WeeklySummary>;
 
   /**
-   * Update week progress after drill completion.
+   * Calculate current streak.
    *
-   * @param weekPlanId - Week plan to update
-   * @param drillOutcome - Outcome of the completed drill
-   * @param skillId - The skill that was practiced
-   * @returns Updated progress
+   * @param userId - User to check
+   * @param goalId - Goal to check
+   * @returns Current streak in days
    */
-  updateProgress(
-    weekPlanId: WeekPlanId,
-    drillOutcome: DrillOutcome,
-    skillId: SkillId
-  ): AsyncAppResult<WeekProgressUpdate>;
+  calculateStreak(userId: UserId, goalId: GoalId): AsyncAppResult<number>;
 
   /**
-   * Get week plan by week number.
+   * Check if user is on track.
    *
-   * @param goalId - Goal identifier
-   * @param weekNumber - Week number (1-based)
-   * @returns Week plan if exists
+   * @param goalId - Goal to check
+   * @returns Whether on track and days behind
    */
-  getWeekByNumber(goalId: GoalId, weekNumber: number): AsyncAppResult<WeekPlan | null>;
-
-  /**
-   * Get all week plans for a goal.
-   *
-   * @param goalId - Goal identifier
-   * @returns All week plans in order
-   */
-  getAllWeeks(goalId: GoalId): AsyncAppResult<readonly WeekPlan[]>;
+  checkScheduleStatus(goalId: GoalId): AsyncAppResult<{
+    readonly onTrack: boolean;
+    readonly daysBehind: number;
+    readonly estimatedCompletionDate: string;
+  }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DELIBERATE PRACTICE ENGINE INTERFACE
+// DELIBERATE PRACTICE ENGINE INTERFACE (ENHANCED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Today's practice result.
+ * ENHANCED with cross-quest context.
  */
 export interface TodayPracticeResult {
   /** Whether there's practice scheduled */
@@ -402,10 +721,7 @@ export interface TodayPracticeResult {
   /** User's timezone */
   readonly timezone: string;
 
-  /**
-   * Roll-forward context (why this drill).
-   * Explains the drill selection.
-   */
+  /** Roll-forward context (why this drill) */
   readonly context: string | null;
 
   /** Goal ID */
@@ -413,6 +729,19 @@ export interface TodayPracticeResult {
 
   /** Quest ID */
   readonly questId: QuestId | null;
+
+  // NEW in Phase 19
+  /** Skill type */
+  readonly skillType: SkillType | null;
+
+  /** Component skills (for compound drills) */
+  readonly componentSkills: readonly Skill[] | null;
+
+  /** Review skill from warmup (if any) */
+  readonly reviewSkill: Skill | null;
+
+  /** Review skill's quest title */
+  readonly reviewQuestTitle: string | null;
 }
 
 /**
@@ -445,70 +774,40 @@ export interface DrillCompletionParams {
 }
 
 /**
- * Overall progress for a goal.
+ * Week completion result.
  */
-export interface GoalProgress {
-  /** Goal identifier */
-  readonly goalId: GoalId;
+export interface WeekCompletionResult {
+  /** The completed week plan */
+  readonly completedWeek: WeekPlan;
 
-  /** Skills mastered (passed 3+ times) */
-  readonly skillsMastered: number;
+  /** Skills that need carry-forward */
+  readonly carryForwardSkills: readonly Skill[];
 
-  /** Skills in progress (practicing) */
-  readonly skillsPracticing: number;
+  /** Generated focus for next week */
+  readonly nextWeekFocus: string;
 
-  /** Skills not started */
-  readonly skillsNotStarted: number;
+  /** Weekly summary for user */
+  readonly summary: WeeklySummary;
 
-  /** Total skills */
-  readonly skillsTotal: number;
+  /** Next week plan (if created) */
+  readonly nextWeek?: WeekPlan;
 
-  /** Weeks completed */
-  readonly weeksCompleted: number;
+  /** Whether milestone was completed */
+  readonly milestoneCompleted: boolean;
 
-  /** Weeks total */
-  readonly weeksTotal: number;
-
-  /** Current week number */
-  readonly currentWeek: number;
-
-  /** Current streak (consecutive days practiced) */
-  readonly currentStreak: number;
-
-  /** Longest streak achieved */
-  readonly longestStreak: number;
-
-  /** Overall pass rate (0-1) */
-  readonly overallPassRate: number;
-
-  /** Days completed */
-  readonly daysCompleted: number;
-
-  /** Days total (planned) */
-  readonly daysTotal: number;
-
-  /** On track with schedule? */
-  readonly onTrack: boolean;
-
-  /** Days behind (if any) */
-  readonly daysBehind: number;
-
-  /** Estimated completion date */
-  readonly estimatedCompletionDate: string;
-
-  /** Last practice date */
-  readonly lastPracticeDate: string | null;
+  /** Whether next quest was unlocked */
+  readonly nextQuestUnlocked: boolean;
 }
 
 /**
  * Main orchestrator for the Deliberate Practice system.
  *
- * Coordinates:
- *   - Learning plan initialization from goals
- *   - Daily drill generation with roll-forward
- *   - Outcome recording and mastery updates
- *   - Week transitions and carry-forward
- *   - Progress tracking
+ * ENHANCED in Phase 19:
+ *   - Multi-week quest support
+ *   - Skill tree generation
+ *   - Cross-quest dependency tracking
+ *   - Structured drill generation
+ *   - Milestone management
  */
 export interface IDeliberatePracticeEngine {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -518,15 +817,11 @@ export interface IDeliberatePracticeEngine {
   /**
    * Initialize a learning plan from goal and quests.
    *
-   * Steps:
-   *   1. Decompose each quest into skills
-   *   2. Create week plans with skill allocation
-   *   3. Activate first week
-   *   4. Generate first drill
+   * ENHANCED: Handles multi-week quests, generates skill trees.
    *
    * @param goal - The learning goal
-   * @param quests - The goal's quests
-   * @param stages - Capability stages (from LessonPlanGenerator)
+   * @param quests - The goal's quests (with durations)
+   * @param stages - Capability stages by quest
    * @returns The created learning plan
    */
   initializePlan(
@@ -542,11 +837,7 @@ export interface IDeliberatePracticeEngine {
   /**
    * Get today's practice for a user.
    *
-   * If no drill exists for today:
-   *   1. Analyze yesterday's drill (roll-forward)
-   *   2. Select skill for today
-   *   3. Generate drill
-   *   4. Create spark with reminders
+   * ENHANCED: Returns structured drill with warmup/main/stretch.
    *
    * @param userId - User identifier
    * @param goalId - Goal identifier
@@ -556,8 +847,6 @@ export interface IDeliberatePracticeEngine {
 
   /**
    * Generate a drill for a specific date.
-   *
-   * Used by scheduler for pre-generation.
    *
    * @param userId - User identifier
    * @param goalId - Goal identifier
@@ -572,19 +861,11 @@ export interface IDeliberatePracticeEngine {
 
   /**
    * Get drill by ID.
-   *
-   * @param drillId - Drill identifier
-   * @returns Drill if found
    */
   getDrill(drillId: DrillId): AsyncAppResult<DailyDrill | null>;
 
   /**
    * Get drill for a specific date.
-   *
-   * @param userId - User identifier
-   * @param goalId - Goal identifier
-   * @param date - Date (YYYY-MM-DD)
-   * @returns Drill if found
    */
   getDrillByDate(
     userId: UserId,
@@ -599,38 +880,24 @@ export interface IDeliberatePracticeEngine {
   /**
    * Record drill outcome and update mastery.
    *
-   * Steps:
-   *   1. Update drill with outcome
-   *   2. Update skill mastery
-   *   3. Update week progress
-   *   4. Generate carry-forward for tomorrow
-   *   5. Complete associated spark
+   * ENHANCED: Triggers unlock checks, updates cross-quest stats.
    *
    * @param drillId - Drill identifier
    * @param params - Completion parameters
-   * @returns Updated drill
+   * @returns Updated drill with unlock info
    */
   recordOutcome(
     drillId: DrillId,
     params: DrillCompletionParams
-  ): AsyncAppResult<DailyDrill>;
+  ): AsyncAppResult<DailyDrill & { readonly analysis: DrillCompletionAnalysis }>;
 
   /**
    * Skip a drill with reason.
-   *
-   * The skill will be scheduled for retry tomorrow.
-   *
-   * @param drillId - Drill identifier
-   * @param reason - Why skipped (optional)
-   * @returns Updated drill
    */
   skipDrill(drillId: DrillId, reason?: string): AsyncAppResult<DailyDrill>;
 
   /**
-   * Mark a drill as missed (end of day reconciliation).
-   *
-   * @param drillId - Drill identifier
-   * @returns Updated drill
+   * Mark a drill as missed.
    */
   markMissed(drillId: DrillId): AsyncAppResult<DailyDrill>;
 
@@ -640,28 +907,31 @@ export interface IDeliberatePracticeEngine {
 
   /**
    * Get skill by ID.
-   *
-   * @param skillId - Skill identifier
-   * @returns Skill if found
    */
   getSkill(skillId: SkillId): AsyncAppResult<Skill | null>;
 
   /**
    * Get skills for a quest.
-   *
-   * @param questId - Quest identifier
-   * @returns Skills in order
    */
   getSkillsByQuest(questId: QuestId): AsyncAppResult<readonly Skill[]>;
 
   /**
+   * Get skills for a goal.
+   */
+  getSkillsByGoal(goalId: GoalId): AsyncAppResult<readonly Skill[]>;
+
+  /**
+   * Get available skills (unlocked, not mastered).
+   */
+  getAvailableSkills(goalId: GoalId): AsyncAppResult<readonly Skill[]>;
+
+  /**
+   * Get locked skills with their missing prerequisites.
+   */
+  getLockedSkills(goalId: GoalId): AsyncAppResult<ReadonlyMap<SkillId, readonly Skill[]>>;
+
+  /**
    * Update skill mastery manually.
-   *
-   * Used for admin corrections or external validation.
-   *
-   * @param skillId - Skill identifier
-   * @param mastery - New mastery level
-   * @returns Updated skill
    */
   updateSkillMastery(skillId: SkillId, mastery: SkillMastery): AsyncAppResult<Skill>;
 
@@ -671,27 +941,23 @@ export interface IDeliberatePracticeEngine {
 
   /**
    * Get current week plan for a goal.
-   *
-   * @param goalId - Goal identifier
-   * @returns Current active week plan
    */
   getCurrentWeek(goalId: GoalId): AsyncAppResult<WeekPlan | null>;
 
   /**
    * Get all week plans for a goal.
-   *
-   * @param goalId - Goal identifier
-   * @returns All week plans in order
    */
   getWeeks(goalId: GoalId): AsyncAppResult<readonly WeekPlan[]>;
 
   /**
    * Complete the current week and transition to next.
-   *
-   * @param weekPlanId - Week plan to complete
-   * @returns Completion result
    */
   completeWeek(weekPlanId: WeekPlanId): AsyncAppResult<WeekCompletionResult>;
+
+  /**
+   * Get weekly summary.
+   */
+  getWeeklySummary(weekPlanId: WeekPlanId): AsyncAppResult<WeeklySummary>;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Progress
@@ -699,28 +965,49 @@ export interface IDeliberatePracticeEngine {
 
   /**
    * Get overall progress for a goal.
-   *
-   * @param goalId - Goal identifier
-   * @returns Progress summary
    */
   getProgress(goalId: GoalId): AsyncAppResult<GoalProgress>;
 
   /**
+   * Get quest progress.
+   */
+  getQuestProgress(questId: QuestId): AsyncAppResult<QuestProgress>;
+
+  /**
    * Get learning plan for a goal.
-   *
-   * @param goalId - Goal identifier
-   * @returns Learning plan if initialized
    */
   getLearningPlan(goalId: GoalId): AsyncAppResult<LearningPlan | null>;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Milestone Management (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get milestone status for a quest.
+   */
+  getMilestone(questId: QuestId): AsyncAppResult<QuestMilestone | null>;
+
+  /**
+   * Start working on a milestone.
+   */
+  startMilestone(questId: QuestId): AsyncAppResult<QuestMilestone>;
+
+  /**
+   * Complete a milestone.
+   */
+  completeMilestone(
+    questId: QuestId,
+    selfAssessment: readonly { criterion: string; met: boolean }[]
+  ): AsyncAppResult<QuestMilestone>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STORE INTERFACES
+// STORE INTERFACES (ENHANCED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Skill store interface.
- * Follows IGoalStore pattern from spark-engine/store/types.ts.
+ * ENHANCED with skill type and status queries.
  */
 export interface ISkillStore {
   save(skill: Skill, options?: SaveOptions): AsyncAppResult<SaveResult<Skill>>;
@@ -729,6 +1016,13 @@ export interface ISkillStore {
   getByQuest(questId: QuestId, options?: ListOptions): AsyncAppResult<ListResult<Skill>>;
   getByGoal(goalId: GoalId, options?: ListOptions): AsyncAppResult<ListResult<Skill>>;
   getByUser(userId: UserId, options?: ListOptions): AsyncAppResult<ListResult<Skill>>;
+  
+  // ENHANCED methods
+  getByStatus(goalId: GoalId, status: SkillStatus): AsyncAppResult<readonly Skill[]>;
+  getByType(questId: QuestId, skillType: SkillType): AsyncAppResult<readonly Skill[]>;
+  getAvailable(goalId: GoalId): AsyncAppResult<readonly Skill[]>;
+  getLocked(goalId: GoalId): AsyncAppResult<readonly Skill[]>;
+  
   updateMastery(
     skillId: SkillId,
     mastery: SkillMastery,
@@ -736,10 +1030,13 @@ export interface ISkillStore {
     failCount: number,
     consecutivePasses: number
   ): AsyncAppResult<Skill>;
+  
+  updateStatus(skillId: SkillId, status: SkillStatus): AsyncAppResult<Skill>;
 }
 
 /**
  * Drill store interface.
+ * ENHANCED with section queries.
  */
 export interface IDrillStore {
   save(drill: DailyDrill, options?: SaveOptions): AsyncAppResult<SaveResult<DailyDrill>>;
@@ -754,6 +1051,14 @@ export interface IDrillStore {
     endDate: string
   ): AsyncAppResult<readonly DailyDrill[]>;
   getActiveForUser(userId: UserId): AsyncAppResult<DailyDrill | null>;
+  
+  // ENHANCED methods
+  getBySkillType(
+    goalId: GoalId,
+    skillType: SkillType
+  ): AsyncAppResult<readonly DailyDrill[]>;
+  getCompoundDrills(goalId: GoalId): AsyncAppResult<readonly DailyDrill[]>;
+  
   updateOutcome(
     drillId: DrillId,
     outcome: DrillOutcome,
@@ -764,6 +1069,7 @@ export interface IDrillStore {
 
 /**
  * Week plan store interface.
+ * ENHANCED with quest-level queries.
  */
 export interface IWeekPlanStore {
   save(weekPlan: WeekPlan, options?: SaveOptions): AsyncAppResult<SaveResult<WeekPlan>>;
@@ -772,13 +1078,19 @@ export interface IWeekPlanStore {
   getByGoal(goalId: GoalId, options?: ListOptions): AsyncAppResult<ListResult<WeekPlan>>;
   getActiveByGoal(goalId: GoalId): AsyncAppResult<WeekPlan | null>;
   getByWeekNumber(goalId: GoalId, weekNumber: number): AsyncAppResult<WeekPlan | null>;
+  
+  // ENHANCED methods
+  getByQuest(questId: QuestId): AsyncAppResult<readonly WeekPlan[]>;
+  getLastWeekOfQuest(questId: QuestId): AsyncAppResult<WeekPlan | null>;
+  
   updateStatus(weekPlanId: WeekPlanId, status: 'pending' | 'active' | 'completed'): AsyncAppResult<WeekPlan>;
   updateProgress(
     weekPlanId: WeekPlanId,
     drillsCompleted: number,
     drillsPassed: number,
     drillsFailed: number,
-    drillsSkipped: number
+    drillsSkipped: number,
+    skillsMastered: number
   ): AsyncAppResult<WeekPlan>;
 }
 

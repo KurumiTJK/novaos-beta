@@ -1,20 +1,24 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// DELIBERATE PRACTICE ENGINE TYPES — Core Entity Definitions
-// NovaOS — Phase 18: Deliberate Practice Engine
+// DELIBERATE PRACTICE ENGINE TYPES — Phase 19: Skill Tree & Multi-Week Quests
+// NovaOS — Phase 19A: Enhanced Type Definitions
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// This module defines the core types for the Deliberate Practice system:
-//   - Skill: Atomic competence unit from CapabilityStage decomposition
-//   - DailyDrill: Single day's practice session with pass/fail outcome
-//   - WeekPlan: Week-level learning plan with skill scheduling
-//   - DrillOutcome: Binary outcome with nuance
-//   - LearningPlan: Complete plan for a goal
+// This module defines the enhanced types for the Deliberate Practice system:
 //
-// Design Principles:
+// KEY ENHANCEMENTS:
+//   - QuestDuration: Flexible 1-day to multi-week quest durations
+//   - SkillType: Foundation → Building → Compound → Synthesis progression
+//   - Cross-quest skill dependencies: Skills can build on ANY previous quest
+//   - Structured daily drills: Warmup → Main → Stretch sections
+//   - Milestone: End-of-quest proof of competence
+//   - Enhanced WeekPlan: Multi-week quest tracking with cross-quest context
+//
+// DESIGN PRINCIPLES:
 //   - Every Skill is actionable (verb-first)
-//   - Every Drill has a binary pass signal (no ambiguity)
-//   - Locked variables isolate feedback (clean signal)
-//   - Roll-forward logic connects days (continuity)
+//   - Skills form a tree with prerequisites (not a flat list)
+//   - Compound skills explicitly combine skills from ANY quest
+//   - Synthesis skill at end of each quest proves mastery
+//   - Weekly tracking works for any quest duration
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -30,51 +34,178 @@ import type {
 } from '../../types/branded.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SKILL TYPES
+// QUEST DURATION TYPES (NEW)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Duration unit for quest timing.
+ */
+export type DurationUnit = 'days' | 'weeks';
+
+/**
+ * Flexible duration for a quest.
+ * Supports anything from 1 day to multiple weeks.
+ *
+ * Examples:
+ *   - { unit: 'days', value: 3 } → 3-day mini-quest
+ *   - { unit: 'weeks', value: 1 } → Standard 1-week quest (5 practice days)
+ *   - { unit: 'weeks', value: 3 } → Multi-week quest (15 practice days)
+ */
+export interface QuestDuration {
+  /** Duration unit */
+  readonly unit: DurationUnit;
+
+  /** Number of units */
+  readonly value: number;
+
+  /** Total practice days (computed: weeks × 5 or days × 1) */
+  readonly practiceDays: number;
+
+  /** Starting week number within the goal (1-based) */
+  readonly weekStart: number;
+
+  /** Ending week number within the goal (same as start for ≤1 week) */
+  readonly weekEnd: number;
+
+  /** Display label (e.g., "Week 1", "Weeks 2-4", "Days 1-3") */
+  readonly displayLabel: string;
+}
+
+/**
+ * Create a QuestDuration from weeks.
+ */
+export function createWeeksDuration(
+  weeks: number,
+  weekStart: number
+): QuestDuration {
+  const practiceDays = weeks * 5;
+  const weekEnd = weekStart + weeks - 1;
+  const displayLabel =
+    weeks === 1 ? `Week ${weekStart}` : `Weeks ${weekStart}-${weekEnd}`;
+
+  return {
+    unit: 'weeks',
+    value: weeks,
+    practiceDays,
+    weekStart,
+    weekEnd,
+    displayLabel,
+  };
+}
+
+/**
+ * Create a QuestDuration from days.
+ */
+export function createDaysDuration(
+  days: number,
+  weekStart: number
+): QuestDuration {
+  const weeksNeeded = Math.ceil(days / 5);
+  const weekEnd = weekStart + weeksNeeded - 1;
+  const displayLabel =
+    days <= 5
+      ? `Week ${weekStart}`
+      : `Weeks ${weekStart}-${weekEnd}`;
+
+  return {
+    unit: 'days',
+    value: days,
+    practiceDays: days,
+    weekStart,
+    weekEnd,
+    displayLabel,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SKILL TYPE DEFINITIONS (ENHANCED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SKILL DIFFICULTY
+// SKILL TYPE (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Skill type in the learning progression.
+ *
+ * - foundation: Core concept, no prereqs within quest (may depend on previous quests)
+ * - building: Builds on foundations within same quest
+ * - compound: Combines 2+ skills (can span quests)
+ * - synthesis: Final skill of quest, combines everything (IS the milestone)
+ */
+export type SkillType = 'foundation' | 'building' | 'compound' | 'synthesis';
+
+/**
+ * All valid skill types in progression order.
+ */
+export const SKILL_TYPES: readonly SkillType[] = [
+  'foundation',
+  'building',
+  'compound',
+  'synthesis',
+] as const;
+
+/**
+ * Check if a value is a valid SkillType.
+ */
+export function isSkillType(value: unknown): value is SkillType {
+  return typeof value === 'string' && SKILL_TYPES.includes(value as SkillType);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SKILL DIFFICULTY (unchanged from Phase 18)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Skill difficulty tier for scheduling.
  *
- * - foundation: Core skill, must pass before others
- * - practice: Regular skill, can be interleaved
- * - challenge: Advanced skill, scheduled after foundations
+ * - intro: Entry-level, first exposure
+ * - practice: Standard practice difficulty
+ * - challenge: Advanced, requires solid foundations
+ * - synthesis: Combines multiple concepts
  */
-export type SkillDifficulty = 'foundation' | 'practice' | 'challenge';
+export type SkillDifficulty = 'intro' | 'practice' | 'challenge' | 'synthesis';
 
 /**
  * All valid skill difficulties.
  */
 export const SKILL_DIFFICULTIES: readonly SkillDifficulty[] = [
-  'foundation',
+  'intro',
   'practice',
   'challenge',
+  'synthesis',
 ] as const;
 
+/**
+ * Check if a value is a valid SkillDifficulty.
+ */
+export function isSkillDifficulty(value: unknown): value is SkillDifficulty {
+  return (
+    typeof value === 'string' &&
+    SKILL_DIFFICULTIES.includes(value as SkillDifficulty)
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────
-// SKILL MASTERY
+// SKILL MASTERY (unchanged from Phase 18)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Skill mastery status progression.
  *
  * - not_started: Never attempted
- * - attempted: Tried at least once, not yet passed
+ * - attempting: Tried at least once, not yet passed
  * - practicing: Passed at least once, needs reinforcement
  * - mastered: Passed consistently (3+ times)
  */
-export type SkillMastery = 'not_started' | 'attempted' | 'practicing' | 'mastered';
+export type SkillMastery = 'not_started' | 'attempting' | 'practicing' | 'mastered';
 
 /**
  * All valid skill mastery levels.
  */
 export const SKILL_MASTERY_LEVELS: readonly SkillMastery[] = [
   'not_started',
-  'attempted',
+  'attempting',
   'practicing',
   'mastered',
 ] as const;
@@ -91,19 +222,63 @@ export const MASTERY_THRESHOLDS = {
   CONSECUTIVE_FOR_MASTERY: 2,
 } as const;
 
+/**
+ * Check if a value is a valid SkillMastery.
+ */
+export function isSkillMastery(value: unknown): value is SkillMastery {
+  return (
+    typeof value === 'string' &&
+    SKILL_MASTERY_LEVELS.includes(value as SkillMastery)
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────
-// SKILL
+// SKILL STATUS (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Skill availability status based on prerequisites.
+ *
+ * - locked: Prerequisites not yet mastered
+ * - available: Can be practiced (prereqs met)
+ * - in_progress: Currently being practiced
+ * - mastered: Fully mastered
+ */
+export type SkillStatus = 'locked' | 'available' | 'in_progress' | 'mastered';
+
+/**
+ * All valid skill statuses.
+ */
+export const SKILL_STATUSES: readonly SkillStatus[] = [
+  'locked',
+  'available',
+  'in_progress',
+  'mastered',
+] as const;
+
+/**
+ * Check if a value is a valid SkillStatus.
+ */
+export function isSkillStatus(value: unknown): value is SkillStatus {
+  return (
+    typeof value === 'string' &&
+    SKILL_STATUSES.includes(value as SkillStatus)
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SKILL (ENHANCED)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Atomic competence unit — what the learner can DO.
  *
- * Skills are decomposed from Quest capability stages.
- * Each skill is:
- *   - Actionable (verb-first statement)
- *   - Measurable (binary pass/fail signal)
- *   - Scoped (fits daily time budget)
- *   - Isolated (locked variables for clean feedback)
+ * ENHANCED in Phase 19:
+ *   - skillType: foundation/building/compound/synthesis
+ *   - Cross-quest dependencies: prerequisiteSkillIds can reference ANY quest
+ *   - Compound skill support: componentSkillIds lists skills being combined
+ *   - Enhanced scheduling: weekNumber, dayInWeek, dayInQuest
+ *   - Depth in skill tree: 0=foundation, 1=building, 2=compound, 3=synthesis
  *
  * The resilience layer (adversarialElement, failureMode, recoverySteps)
  * comes directly from CapabilityStage's designedFailure/consequence/recovery.
@@ -126,23 +301,35 @@ export interface Skill {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
+   * Skill title (human-readable name).
+   * @example "For Loops", "Type Conversion", "Loop + Condition"
+   */
+  readonly title: string;
+
+  /**
+   * Topic this skill belongs to (from quest.topics).
+   * @example "for loops", "type conversion"
+   */
+  readonly topic: string;
+
+  /**
    * Verb-first actionable statement.
-   * Must start with an action verb (e.g., "Profile", "Refactor", "Debug").
-   * @example "Profile the calculateTax() function and identify the slowest path"
+   * Must start with an action verb (e.g., "Write", "Build", "Debug").
+   * @example "Write a for loop that iterates over a list and prints each item"
    */
   readonly action: string;
 
   /**
    * Binary pass criteria — how do we know it worked?
    * Must be observable and unambiguous.
-   * @example "Baseline runtime recorded, slowest path identified in notes"
+   * @example "Loop correctly prints each item without errors"
    */
   readonly successSignal: string;
 
   /**
    * What to hold constant for clean feedback.
    * Isolates the skill from confounding variables.
-   * @example ["Don't change the algorithm", "Don't optimize yet", "Use the same dataset"]
+   * @example ["Don't use while loops", "Use only basic iteration"]
    */
   readonly lockedVariables: readonly string[];
 
@@ -153,31 +340,108 @@ export interface Skill {
   readonly estimatedMinutes: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Sequencing
+  // Skill Type & Tree Structure (NEW)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Prerequisite skills (must pass before this one).
+   * Type of skill in the progression.
+   */
+  readonly skillType: SkillType;
+
+  /**
+   * Depth in the skill tree.
+   * 0 = foundation (root), 1 = building, 2 = compound, 3 = synthesis
+   */
+  readonly depth: number;
+
+  /**
+   * Prerequisite skills (must master before this one).
+   * CAN REFERENCE SKILLS FROM ANY QUEST (cross-quest dependencies).
    * Empty array = no prerequisites (foundation skill).
    */
   readonly prerequisiteSkillIds: readonly SkillId[];
 
   /**
-   * Difficulty tier for scheduling.
+   * Quest IDs that prerequisites come from.
+   * Used for quick filtering and display.
+   * Computed from prerequisiteSkillIds.
    */
-  readonly difficulty: SkillDifficulty;
+  readonly prerequisiteQuestIds: readonly QuestId[];
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Compound Skill Support (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Order within the quest (1-based).
+   * Whether this is a compound skill (combines multiple skills).
+   */
+  readonly isCompound: boolean;
+
+  /**
+   * Skills being combined (for compound/synthesis skills).
+   * These are the "building blocks" this skill integrates.
+   */
+  readonly componentSkillIds?: readonly SkillId[];
+
+  /**
+   * Quests the component skills come from.
+   * For cross-quest compounds, lists all source quests.
+   */
+  readonly componentQuestIds?: readonly QuestId[];
+
+  /**
+   * Context for how components are combined.
+   * Explains the integration.
+   * @example "Filter items in a loop using conditional logic"
+   */
+  readonly combinationContext?: string;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scheduling (ENHANCED)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Week number in the goal (1-based).
+   * For multi-week quests, tracks which week within the goal.
+   */
+  readonly weekNumber: number;
+
+  /**
+   * Day within the week (1-5 for weekdays).
+   */
+  readonly dayInWeek: number;
+
+  /**
+   * Day within the quest (1-based).
+   * For a 3-week quest, ranges from 1-15.
+   */
+  readonly dayInQuest: number;
+
+  /**
+   * Scheduled date (YYYY-MM-DD).
+   * Computed when the goal starts.
+   */
+  readonly scheduledDate?: string;
+
+  /**
+   * Order within the quest (1-based, for sorting).
    */
   readonly order: number;
 
+  /**
+   * Difficulty tier for adaptive scheduling.
+   */
+  readonly difficulty: SkillDifficulty;
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Mastery Tracking
+  // Mastery Tracking (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Current mastery status */
   readonly mastery: SkillMastery;
+
+  /** Availability status based on prerequisites */
+  readonly status: SkillStatus;
 
   /** Total number of times passed */
   readonly passCount: number;
@@ -194,6 +458,12 @@ export interface Skill {
   /** When last practiced */
   readonly lastPracticedAt?: Timestamp;
 
+  /** When mastered */
+  readonly masteredAt?: Timestamp;
+
+  /** When unlocked (prerequisites met) */
+  readonly unlockedAt?: Timestamp;
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Resilience Layer (from CapabilityStage)
   // ─────────────────────────────────────────────────────────────────────────────
@@ -201,31 +471,25 @@ export interface Skill {
   /**
    * Intentional failure scenario — the adversary.
    * A specific way to break the skill to learn from.
-   * From CapabilityStage.designedFailure.
-   * @example "Profile without clearing cache between runs"
+   * @example "Use wrong loop variable"
    */
   readonly adversarialElement?: string;
 
   /**
    * What happens when it fails — visible impact.
-   * The observable consequence that teaches.
-   * From CapabilityStage.consequence.
-   * @example "Timings will be inconsistent, making comparisons meaningless"
+   * @example "Infinite loop or index error"
    */
   readonly failureMode?: string;
 
   /**
    * How to recover and learn from failure.
-   * The fix + prevention pattern.
-   * From CapabilityStage.recovery.
-   * @example "Always run warmup iterations, document cache clearing protocol"
+   * @example "Add print statements to trace execution"
    */
   readonly recoverySteps?: string;
 
   /**
    * How to generalize the skill to new contexts.
-   * From CapabilityStage.transfer.
-   * @example "Profile a different function type (I/O bound vs CPU bound)"
+   * @example "Apply to different data structures"
    */
   readonly transferScenario?: string;
 
@@ -254,11 +518,77 @@ export interface Skill {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DAILY DRILL TYPES
+// DAILY DRILL TYPES (ENHANCED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DRILL OUTCOME
+// DRILL SECTION TYPE (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Type of drill section.
+ *
+ * - warmup: Review of prerequisites or previous quest skills (5 min)
+ * - main: Today's primary skill practice (15-25 min)
+ * - stretch: Optional challenge extension (5 min)
+ */
+export type DrillSectionType = 'warmup' | 'main' | 'stretch';
+
+/**
+ * All valid drill section types.
+ */
+export const DRILL_SECTION_TYPES: readonly DrillSectionType[] = [
+  'warmup',
+  'main',
+  'stretch',
+] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// DRILL SECTION (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A section within a daily drill.
+ *
+ * Drills now have structure:
+ *   - warmup: Review prerequisite or previous quest skill
+ *   - main: Today's skill practice
+ *   - stretch: Optional challenge
+ */
+export interface DrillSection {
+  /** Section type */
+  readonly type: DrillSectionType;
+
+  /** Section title */
+  readonly title: string;
+
+  /** What to do */
+  readonly action: string;
+
+  /** Success criteria (for main section) */
+  readonly passSignal?: string;
+
+  /** Constraint to follow */
+  readonly constraint?: string;
+
+  /** Estimated time in minutes */
+  readonly estimatedMinutes: number;
+
+  /** Whether this section is optional */
+  readonly isOptional?: boolean;
+
+  /** Whether this reviews a skill from a previous quest */
+  readonly isFromPreviousQuest?: boolean;
+
+  /** Source quest ID (if from previous quest) */
+  readonly sourceQuestId?: QuestId;
+
+  /** Source skill ID (if reviewing a specific skill) */
+  readonly sourceSkillId?: SkillId;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// DRILL OUTCOME (unchanged from Phase 18)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -291,8 +621,32 @@ export const ATTEMPTED_OUTCOMES: readonly DrillOutcome[] = ['pass', 'fail', 'par
  */
 export const RETRY_OUTCOMES: readonly DrillOutcome[] = ['fail', 'partial'];
 
+/**
+ * Check if a value is a valid DrillOutcome.
+ */
+export function isDrillOutcome(value: unknown): value is DrillOutcome {
+  return (
+    typeof value === 'string' &&
+    DRILL_OUTCOMES.includes(value as DrillOutcome)
+  );
+}
+
+/**
+ * Check if an outcome requires retry.
+ */
+export function requiresRetry(outcome: DrillOutcome): boolean {
+  return RETRY_OUTCOMES.includes(outcome);
+}
+
+/**
+ * Check if an outcome counts as an attempt.
+ */
+export function countsAsAttempt(outcome: DrillOutcome): boolean {
+  return ATTEMPTED_OUTCOMES.includes(outcome);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────
-// DRILL STATUS
+// DRILL STATUS (unchanged from Phase 18)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -310,23 +664,34 @@ export const DRILL_STATUSES: readonly DrillStatus[] = [
   'missed',
 ] as const;
 
+/**
+ * Check if a value is a valid DrillStatus.
+ */
+export function isDrillStatus(value: unknown): value is DrillStatus {
+  return (
+    typeof value === 'string' &&
+    DRILL_STATUSES.includes(value as DrillStatus)
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────
-// DAILY DRILL
+// DAILY DRILL (ENHANCED)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * A single day's practice session.
+ *
+ * ENHANCED in Phase 19:
+ *   - Structured sections: warmup, main, stretch
+ *   - Cross-quest context tracking
+ *   - Enhanced scheduling: dayInWeek, dayInQuest, weekNumber
+ *   - Skill type awareness
  *
  * DailyDrill replaces Step for deliberate practice:
  *   - One skill per day (focused)
  *   - Binary pass/fail outcome
  *   - Roll-forward context from previous days
  *   - Locked variables for clean feedback
- *
- * The drill may adapt the skill's action based on:
- *   - Previous failures (simplified retry)
- *   - Carry-forward context (continuation)
- *   - Time constraints (escalation level)
  */
 export interface DailyDrill {
   /** Unique drill identifier */
@@ -344,8 +709,11 @@ export interface DailyDrill {
   /** Goal identifier (denormalized) */
   readonly goalId: GoalId;
 
+  /** Quest identifier (denormalized) */
+  readonly questId: QuestId;
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Scheduling
+  // Scheduling (ENHANCED)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Scheduled date (YYYY-MM-DD) */
@@ -354,43 +722,91 @@ export interface DailyDrill {
   /** Day number in the overall plan (1-based) */
   readonly dayNumber: number;
 
+  /** Week number in the goal (1-based) */
+  readonly weekNumber: number;
+
+  /** Day within the week (1-5) */
+  readonly dayInWeek: number;
+
+  /** Day within the quest (1-based, for multi-week quests) */
+  readonly dayInQuest: number;
+
   /** Current status */
   readonly status: DrillStatus;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Action & Success Criteria
+  // Skill Context (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Type of skill being practiced */
+  readonly skillType: SkillType;
+
+  /** Skill title (denormalized) */
+  readonly skillTitle: string;
+
+  /** Whether this is a compound skill drill */
+  readonly isCompoundDrill: boolean;
+
+  /** Component skill IDs (for compound skills) */
+  readonly componentSkillIds?: readonly SkillId[];
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Cross-Quest Context (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Quest IDs this drill builds on (for compound skills) */
+  readonly buildsOnQuestIds: readonly QuestId[];
+
+  /** Skill ID being reviewed in warmup (if any) */
+  readonly reviewSkillId?: SkillId;
+
+  /** Quest ID the review skill comes from */
+  readonly reviewQuestId?: QuestId;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Structured Sections (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Warmup section (review prerequisite or previous quest skill) */
+  readonly warmup?: DrillSection;
+
+  /** Main practice section */
+  readonly main: DrillSection;
+
+  /** Stretch challenge section (optional) */
+  readonly stretch?: DrillSection;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Legacy Fields (for backward compatibility)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Today's specific action.
-   * May be adapted from skill's action based on context.
+   * Today's specific action (from main section).
+   * @deprecated Use main.action instead
    */
   readonly action: string;
 
   /**
-   * Binary success criteria for today.
-   * May be adapted from skill's successSignal based on context.
+   * Binary success criteria (from main section).
+   * @deprecated Use main.passSignal instead
    */
   readonly passSignal: string;
 
   /**
-   * What NOT to change today (for clean feedback).
-   * Typically inherited from skill.
+   * What NOT to change today.
    */
   readonly lockedVariables: readonly string[];
 
   /**
-   * Single focus enforcement — the constraint.
-   * What to focus on exclusively today.
-   * @example "Only measure, don't optimize"
+   * Single focus constraint.
    */
   readonly constraint: string;
 
-  /** Estimated time in minutes */
+  /** Estimated time in minutes (total) */
   readonly estimatedMinutes: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Outcome Tracking
+  // Outcome Tracking (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Drill outcome (set on completion) */
@@ -418,7 +834,7 @@ export interface DailyDrill {
   readonly actualMinutes?: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Roll-Forward Context
+  // Roll-Forward Context (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Link to previous drill (for continuation) */
@@ -442,7 +858,7 @@ export interface DailyDrill {
   readonly retryCount: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Spark Integration
+  // Spark Integration (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Associated spark ID (for reminder system) */
@@ -466,11 +882,11 @@ export interface DailyDrill {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// WEEK PLAN TYPES
+// WEEK PLAN TYPES (ENHANCED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// WEEK PLAN STATUS
+// WEEK PLAN STATUS (unchanged from Phase 18)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -487,12 +903,69 @@ export const WEEK_PLAN_STATUSES: readonly WeekPlanStatus[] = [
   'completed',
 ] as const;
 
+/**
+ * Check if a value is a valid WeekPlanStatus.
+ */
+export function isWeekPlanStatus(value: unknown): value is WeekPlanStatus {
+  return (
+    typeof value === 'string' &&
+    WEEK_PLAN_STATUSES.includes(value as WeekPlanStatus)
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────
-// WEEK PLAN
+// DAY PLAN (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A single day's plan within a week.
+ * Captures what skill is scheduled and its context.
+ */
+export interface DayPlan {
+  /** Day number within the week (1-5) */
+  readonly dayNumber: number;
+
+  /** Day number within the quest (1-based) */
+  readonly dayInQuest: number;
+
+  /** Scheduled date (YYYY-MM-DD) */
+  readonly scheduledDate?: string;
+
+  /** Skill scheduled for this day */
+  readonly skillId: SkillId;
+
+  /** Skill type */
+  readonly skillType: SkillType;
+
+  /** Skill title (denormalized) */
+  readonly skillTitle: string;
+
+  /** Skill to review in warmup (from previous quest) */
+  readonly reviewSkillId?: SkillId;
+
+  /** Quest the review skill comes from */
+  readonly reviewQuestId?: QuestId;
+
+  /** Day status */
+  readonly status: 'pending' | 'completed' | 'skipped';
+
+  /** Associated drill ID (when generated) */
+  readonly drillId?: DrillId;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// WEEK PLAN (ENHANCED)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Weekly learning plan — groups drills into a focused week.
+ *
+ * ENHANCED in Phase 19:
+ *   - weekInQuest: Track position within multi-week quests
+ *   - isFirstWeekOfQuest/isLastWeekOfQuest: Milestone triggers
+ *   - days: Structured day plans
+ *   - Cross-quest context: reviewsFromQuestIds, buildsOnSkillIds
+ *   - Skill type counts
  *
  * WeekPlan provides:
  *   - Week-level competence target (what you can DO after this week)
@@ -510,12 +983,24 @@ export interface WeekPlan {
   /** User identifier (denormalized) */
   readonly userId: UserId;
 
+  /** Quest this week belongs to */
+  readonly questId: QuestId;
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Week Timing
+  // Week Timing (ENHANCED)
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /** Week number in the plan (1-based) */
+  /** Week number in the goal (1-based) */
   readonly weekNumber: number;
+
+  /** Week number within the quest (1-based, for multi-week quests) */
+  readonly weekInQuest: number;
+
+  /** Whether this is the first week of the quest */
+  readonly isFirstWeekOfQuest: boolean;
+
+  /** Whether this is the last week of the quest (has milestone) */
+  readonly isLastWeekOfQuest: boolean;
 
   /** Start date (YYYY-MM-DD, typically Monday) */
   readonly startDate: string;
@@ -527,30 +1012,35 @@ export interface WeekPlan {
   readonly status: WeekPlanStatus;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Weekly Focus
+  // Weekly Focus (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Capability gained by week end.
    * Verb-based, verifiable outcome.
-   * @example "Debug memory-related issues in Rust programs"
+   * @example "Implement conditional logic and loops"
    */
   readonly weeklyCompetence: string;
 
   /**
    * Theme for the week.
    * Human-friendly label.
-   * @example "Memory Safety & Ownership"
+   * @example "Control Flow Fundamentals"
    */
   readonly theme: string;
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Day Plans (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
   /**
-   * Quest this week belongs to.
+   * Structured day plans for this week.
+   * 5 practice days (Monday-Friday).
    */
-  readonly questId: QuestId;
+  readonly days: readonly DayPlan[];
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Skill Scheduling
+  // Skill Scheduling (ENHANCED)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -571,7 +1061,39 @@ export interface WeekPlan {
   readonly completedSkillIds: readonly SkillId[];
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Progress Tracking
+  // Skill Type Counts (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Number of foundation skills this week */
+  readonly foundationCount: number;
+
+  /** Number of building skills this week */
+  readonly buildingCount: number;
+
+  /** Number of compound skills this week */
+  readonly compoundCount: number;
+
+  /** Whether this week has the synthesis skill (milestone) */
+  readonly hasSynthesis: boolean;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Cross-Quest Context (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Previous quest IDs that skills this week review.
+   * For warmup selection.
+   */
+  readonly reviewsFromQuestIds: readonly QuestId[];
+
+  /**
+   * Key prerequisite skill IDs from previous quests.
+   * These are the foundations this week builds on.
+   */
+  readonly buildsOnSkillIds: readonly SkillId[];
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Progress Tracking (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Number of drills completed */
@@ -595,8 +1117,11 @@ export interface WeekPlan {
    */
   readonly passRate?: number;
 
+  /** Number of skills mastered this week */
+  readonly skillsMastered: number;
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // Weekly Review
+  // Weekly Review (unchanged from Phase 18)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -632,11 +1157,79 @@ export interface WeekPlan {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// LEARNING PLAN TYPES
+// MILESTONE TYPES (NEW)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Milestone status in the quest lifecycle.
+ */
+export type MilestoneStatus = 'locked' | 'available' | 'in_progress' | 'completed';
+
+/**
+ * All valid milestone statuses.
+ */
+export const MILESTONE_STATUSES: readonly MilestoneStatus[] = [
+  'locked',
+  'available',
+  'in_progress',
+  'completed',
+] as const;
+
+/**
+ * Check if a value is a valid MilestoneStatus.
+ */
+export function isMilestoneStatus(value: unknown): value is MilestoneStatus {
+  return (
+    typeof value === 'string' &&
+    MILESTONE_STATUSES.includes(value as MilestoneStatus)
+  );
+}
+
+/**
+ * A milestone is the capstone project at the end of a quest.
+ * It proves mastery by combining all skills learned.
+ *
+ * The synthesis skill IS the milestone.
+ */
+export interface QuestMilestone {
+  /** Milestone title */
+  readonly title: string;
+
+  /** Detailed description */
+  readonly description: string;
+
+  /** The deliverable (what you build) */
+  readonly artifact: string;
+
+  /** Acceptance criteria (checkable items) */
+  readonly acceptanceCriteria: readonly string[];
+
+  /** Estimated time in minutes */
+  readonly estimatedMinutes: number;
+
+  /** Required mastery percentage to unlock (e.g., 0.75 = 75%) */
+  readonly requiredMasteryPercent: number;
+
+  /** Current status */
+  readonly status: MilestoneStatus;
+
+  /** When unlocked */
+  readonly unlockedAt?: Timestamp;
+
+  /** When completed */
+  readonly completedAt?: Timestamp;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEARNING PLAN TYPES (ENHANCED)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Complete learning plan for a goal.
+ *
+ * ENHANCED in Phase 19:
+ *   - questDurations: Track multi-week quest durations
+ *   - totalPracticeDays: Actual practice days (not calendar days)
  *
  * Created when a goal is initialized, maps out:
  *   - Total weeks and skills
@@ -651,11 +1244,14 @@ export interface LearningPlan {
   readonly userId: UserId;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Plan Overview
+  // Plan Overview (ENHANCED)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Total weeks in the plan */
   readonly totalWeeks: number;
+
+  /** Total practice days (sum of all quest practice days) */
+  readonly totalPracticeDays: number;
 
   /** Total skills to master */
   readonly totalSkills: number;
@@ -667,7 +1263,7 @@ export interface LearningPlan {
   readonly estimatedCompletionDate: string;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Quest Mapping
+  // Quest Mapping (ENHANCED)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -682,6 +1278,28 @@ export interface LearningPlan {
    */
   readonly questWeekMapping: readonly QuestWeekMapping[];
 
+  /**
+   * Quest durations (NEW).
+   * Duration for each quest, indexed by quest order.
+   */
+  readonly questDurations: readonly QuestDuration[];
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Skill Type Summary (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Total foundation skills */
+  readonly foundationSkillCount: number;
+
+  /** Total building skills */
+  readonly buildingSkillCount: number;
+
+  /** Total compound skills */
+  readonly compoundSkillCount: number;
+
+  /** Total synthesis skills (equals number of quests) */
+  readonly synthesisSkillCount: number;
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Metadata
   // ─────────────────────────────────────────────────────────────────────────────
@@ -695,6 +1313,7 @@ export interface LearningPlan {
 
 /**
  * Maps a quest to its decomposed skills.
+ * ENHANCED with skill type counts.
  */
 export interface QuestSkillMapping {
   /** Quest identifier */
@@ -714,10 +1333,27 @@ export interface QuestSkillMapping {
 
   /** Estimated days for all skills */
   readonly estimatedDays: number;
+
+  // NEW in Phase 19
+  /** Foundation skill count */
+  readonly foundationCount: number;
+
+  /** Building skill count */
+  readonly buildingCount: number;
+
+  /** Compound skill count */
+  readonly compoundCount: number;
+
+  /** Whether this quest has a synthesis skill */
+  readonly hasSynthesis: boolean;
+
+  /** Milestone for this quest */
+  readonly milestone?: QuestMilestone;
 }
 
 /**
  * Maps a quest to its allocated weeks.
+ * ENHANCED with duration info.
  */
 export interface QuestWeekMapping {
   /** Quest identifier */
@@ -728,10 +1364,167 @@ export interface QuestWeekMapping {
 
   /** Week plan IDs */
   readonly weekPlanIds: readonly WeekPlanId[];
+
+  /** Quest duration (NEW) */
+  readonly duration: QuestDuration;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ESCALATION CONFIGURATION
+// PROGRESS TYPES (ENHANCED)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Overall goal progress.
+ * ENHANCED with skill type breakdown and cross-quest stats.
+ */
+export interface GoalProgress {
+  /** Goal identifier */
+  readonly goalId: GoalId;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Overall
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Total practice days */
+  readonly totalDays: number;
+
+  /** Days completed */
+  readonly daysCompleted: number;
+
+  /** Overall progress percentage (0-100) */
+  readonly percentComplete: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Quest Progress
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Total quests */
+  readonly questsTotal: number;
+
+  /** Quests completed */
+  readonly questsCompleted: number;
+
+  /** Current quest progress */
+  readonly currentQuest: QuestProgress;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Skill Progress (ENHANCED)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Total skills */
+  readonly skillsTotal: number;
+
+  /** Skills mastered */
+  readonly skillsMastered: number;
+
+  /** Skills in progress */
+  readonly skillsPracticing: number;
+
+  /** Skills locked (prereqs not met) */
+  readonly skillsLocked: number;
+
+  /** Skills not started (available but not attempted) */
+  readonly skillsNotStarted: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Skill Type Breakdown (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Foundation skills mastered */
+  readonly foundationSkillsMastered: number;
+
+  /** Building skills mastered */
+  readonly buildingSkillsMastered: number;
+
+  /** Compound skills mastered */
+  readonly compoundSkillsMastered: number;
+
+  /** Synthesis skills mastered (milestones completed) */
+  readonly synthesisSkillsMastered: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Cross-Quest Stats (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Number of compound skills that use previous quest skills */
+  readonly crossQuestSkillsCompleted: number;
+
+  /** Number of connections formed between quests */
+  readonly questConnectionsFormed: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Streaks & Performance
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Current practice streak (consecutive days) */
+  readonly currentStreak: number;
+
+  /** Longest streak achieved */
+  readonly longestStreak: number;
+
+  /** Overall pass rate (0-1) */
+  readonly overallPassRate: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Schedule
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Whether on track with schedule */
+  readonly onTrack: boolean;
+
+  /** Days behind schedule */
+  readonly daysBehind: number;
+
+  /** Estimated completion date */
+  readonly estimatedCompletionDate: string;
+
+  /** Last practice date */
+  readonly lastPracticeDate: string | null;
+}
+
+/**
+ * Progress within a specific quest.
+ */
+export interface QuestProgress {
+  /** Quest identifier */
+  readonly questId: QuestId;
+
+  /** Quest title */
+  readonly title: string;
+
+  /** Duration display label (e.g., "Weeks 2-4") */
+  readonly durationLabel: string;
+
+  /** Current week number within the quest */
+  readonly currentWeek: number;
+
+  /** Total weeks in this quest */
+  readonly totalWeeks: number;
+
+  /** Current day within the quest */
+  readonly currentDay: number;
+
+  /** Total practice days in this quest */
+  readonly totalDays: number;
+
+  /** Skills in this quest */
+  readonly skillsTotal: number;
+
+  /** Skills mastered in this quest */
+  readonly skillsMastered: number;
+
+  /** Progress percentage for this quest (0-100) */
+  readonly percentComplete: number;
+
+  /** Milestone status */
+  readonly milestoneStatus: MilestoneStatus;
+
+  /** Milestone title */
+  readonly milestoneTitle: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ESCALATION CONFIGURATION (unchanged from Phase 18)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -776,11 +1569,6 @@ export interface EscalationLevelConfig {
 
 /**
  * Default escalation configuration.
- *
- * Level 0 (9 AM): Full scope, encouraging
- * Level 1 (12 PM): Full scope, gentle reminder
- * Level 2 (3 PM): Reduced scope (half time), urgent
- * Level 3 (6 PM): Minimal scope (quarter time), last chance
  */
 export const DEFAULT_ESCALATION_CONFIG: readonly EscalationLevelConfig[] = [
   {
@@ -816,91 +1604,36 @@ export const DEFAULT_ESCALATION_CONFIG: readonly EscalationLevelConfig[] = [
 ] as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TYPE GUARDS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Check if a value is a valid SkillDifficulty.
- */
-export function isSkillDifficulty(value: unknown): value is SkillDifficulty {
-  return (
-    typeof value === 'string' &&
-    SKILL_DIFFICULTIES.includes(value as SkillDifficulty)
-  );
-}
-
-/**
- * Check if a value is a valid SkillMastery.
- */
-export function isSkillMastery(value: unknown): value is SkillMastery {
-  return (
-    typeof value === 'string' &&
-    SKILL_MASTERY_LEVELS.includes(value as SkillMastery)
-  );
-}
-
-/**
- * Check if a value is a valid DrillOutcome.
- */
-export function isDrillOutcome(value: unknown): value is DrillOutcome {
-  return (
-    typeof value === 'string' &&
-    DRILL_OUTCOMES.includes(value as DrillOutcome)
-  );
-}
-
-/**
- * Check if a value is a valid DrillStatus.
- */
-export function isDrillStatus(value: unknown): value is DrillStatus {
-  return (
-    typeof value === 'string' &&
-    DRILL_STATUSES.includes(value as DrillStatus)
-  );
-}
-
-/**
- * Check if a value is a valid WeekPlanStatus.
- */
-export function isWeekPlanStatus(value: unknown): value is WeekPlanStatus {
-  return (
-    typeof value === 'string' &&
-    WEEK_PLAN_STATUSES.includes(value as WeekPlanStatus)
-  );
-}
-
-/**
- * Check if an outcome requires retry.
- */
-export function requiresRetry(outcome: DrillOutcome): boolean {
-  return RETRY_OUTCOMES.includes(outcome);
-}
-
-/**
- * Check if an outcome counts as an attempt.
- */
-export function countsAsAttempt(outcome: DrillOutcome): boolean {
-  return ATTEMPTED_OUTCOMES.includes(outcome);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // UTILITY TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Parameters for creating a new skill.
+ * ENHANCED with Phase 19 fields.
  */
 export interface CreateSkillParams {
   readonly questId: QuestId;
   readonly goalId: GoalId;
   readonly userId: UserId;
+  readonly title: string;
+  readonly topic: string;
   readonly action: string;
   readonly successSignal: string;
   readonly lockedVariables: readonly string[];
   readonly estimatedMinutes: number;
+  readonly skillType: SkillType;
+  readonly depth: number;
   readonly difficulty: SkillDifficulty;
   readonly order: number;
+  readonly weekNumber: number;
+  readonly dayInWeek: number;
+  readonly dayInQuest: number;
   readonly prerequisiteSkillIds?: readonly SkillId[];
+  readonly prerequisiteQuestIds?: readonly QuestId[];
+  readonly isCompound?: boolean;
+  readonly componentSkillIds?: readonly SkillId[];
+  readonly componentQuestIds?: readonly QuestId[];
+  readonly combinationContext?: string;
   readonly adversarialElement?: string;
   readonly failureMode?: string;
   readonly recoverySteps?: string;
@@ -912,14 +1645,29 @@ export interface CreateSkillParams {
 
 /**
  * Parameters for creating a new drill.
+ * ENHANCED with Phase 19 fields.
  */
 export interface CreateDrillParams {
   readonly weekPlanId: WeekPlanId;
   readonly skillId: SkillId;
   readonly userId: UserId;
   readonly goalId: GoalId;
+  readonly questId: QuestId;
   readonly scheduledDate: string;
   readonly dayNumber: number;
+  readonly weekNumber: number;
+  readonly dayInWeek: number;
+  readonly dayInQuest: number;
+  readonly skillType: SkillType;
+  readonly skillTitle: string;
+  readonly isCompoundDrill: boolean;
+  readonly componentSkillIds?: readonly SkillId[];
+  readonly buildsOnQuestIds?: readonly QuestId[];
+  readonly reviewSkillId?: SkillId;
+  readonly reviewQuestId?: QuestId;
+  readonly warmup?: DrillSection;
+  readonly main: DrillSection;
+  readonly stretch?: DrillSection;
   readonly action: string;
   readonly passSignal: string;
   readonly lockedVariables: readonly string[];
@@ -933,18 +1681,29 @@ export interface CreateDrillParams {
 
 /**
  * Parameters for creating a new week plan.
+ * ENHANCED with Phase 19 fields.
  */
 export interface CreateWeekPlanParams {
   readonly goalId: GoalId;
   readonly userId: UserId;
   readonly questId: QuestId;
   readonly weekNumber: number;
+  readonly weekInQuest: number;
+  readonly isFirstWeekOfQuest: boolean;
+  readonly isLastWeekOfQuest: boolean;
   readonly startDate: string;
   readonly endDate: string;
   readonly weeklyCompetence: string;
   readonly theme: string;
+  readonly days: readonly DayPlan[];
   readonly scheduledSkillIds: readonly SkillId[];
   readonly carryForwardSkillIds?: readonly SkillId[];
+  readonly foundationCount: number;
+  readonly buildingCount: number;
+  readonly compoundCount: number;
+  readonly hasSynthesis: boolean;
+  readonly reviewsFromQuestIds?: readonly QuestId[];
+  readonly buildsOnSkillIds?: readonly SkillId[];
   readonly drillsTotal: number;
 }
 
@@ -954,6 +1713,9 @@ export interface CreateWeekPlanParams {
 export interface DrillCompletionAnalysis {
   /** Updated skill mastery */
   readonly newMastery: SkillMastery;
+
+  /** Updated skill status */
+  readonly newStatus: SkillStatus;
 
   /** Whether skill should be retried tomorrow */
   readonly shouldRetry: boolean;
@@ -969,4 +1731,38 @@ export interface DrillCompletionAnalysis {
 
   /** Updated consecutive passes */
   readonly newConsecutivePasses: number;
+
+  /** Skills unlocked by this completion */
+  readonly unlockedSkillIds: readonly SkillId[];
+
+  /** Whether milestone is now available */
+  readonly milestoneUnlocked: boolean;
 }
+
+/**
+ * Skill generation distribution targets.
+ * Controls how many of each skill type to generate.
+ */
+export interface SkillDistribution {
+  /** Percentage of skills that should be foundation (0-1) */
+  readonly foundationPercent: number;
+
+  /** Percentage of skills that should be building (0-1) */
+  readonly buildingPercent: number;
+
+  /** Percentage of skills that should be compound (0-1) */
+  readonly compoundPercent: number;
+
+  /** Percentage of skills that should be synthesis (0-1, typically small) */
+  readonly synthesisPercent: number;
+}
+
+/**
+ * Default skill distribution for a quest.
+ */
+export const DEFAULT_SKILL_DISTRIBUTION: SkillDistribution = {
+  foundationPercent: 0.35,
+  buildingPercent: 0.25,
+  compoundPercent: 0.30,
+  synthesisPercent: 0.10,
+} as const;

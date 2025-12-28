@@ -1,30 +1,32 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE — Goal Creation Pipeline Gate
 // NovaOS Gates — Phase 14A: SwordGate Explore Module
+// Phase 18: SwordGateHook integration for Deliberate Practice Engine
+// Phase 18B: Practice Mode for chat-based drill interaction
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Constitution §2.3: Sword — Forward Motion
 //
 // SwordGate orchestrates goal creation through:
-//   1. Mode Detection — Determine capture/explore/refine/suggest/create/modify
-//   2. Goal Exploration — NEW: Dialogue for crystallizing vague goals
+//   1. Mode Detection — Determine capture/explore/refine/suggest/create/modify/view/practice
+//   2. Goal Exploration — Dialogue for crystallizing vague goals
 //   3. Goal Capture — Extract and sanitize goal statement
 //   4. Refinement Flow — Multi-turn clarification conversation
 //   5. Plan Generation — Create lesson plan proposal
 //   6. Confirmation — User confirms before creation
 //   7. Goal Creation — Create goal via SparkEngine
+//   8. Practice Mode — Chat-based drill interaction (Phase 18B)
 //
 // Integration points:
 //   - ModeDetector: Classify user intent
-//   - ExploreFlow: Goal crystallization dialogue (NEW)
+//   - ExploreFlow: Goal crystallization dialogue
 //   - RefinementFlow: Manage multi-turn conversation
 //   - SwordRefinementStore: Persist refinement state
-//   - ExploreStore: Persist exploration state (NEW)
+//   - ExploreStore: Persist exploration state
 //   - GoalStatementSanitizer: Validate and sanitize input
 //   - LessonPlanGenerator: Generate curriculum proposals
 //   - ISparkEngine: Create goals and quests
-//
-// Phase 18: SwordGateHook integration for Deliberate Practice Engine
+//   - PracticeFlow: Chat-based practice interaction (Phase 18B)
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -82,6 +84,10 @@ import { ClarityDetector, createClarityDetector } from './explore/clarity-detect
 
 // Phase 14B: Import view components
 import { ViewFlow, createViewFlow } from './view-flow.js';
+
+// Phase 18B: Import practice components
+import { PracticeFlow, createPracticeFlow } from './practice-flow.js';
+import type { PracticeIntent } from './types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PHASE 18: DELIBERATE PRACTICE IMPORTS
@@ -146,6 +152,9 @@ export class SwordGate {
   // Phase 18: Deliberate Practice Hook
   private readonly swordGateHook?: SwordGateHook;
 
+  // Phase 18B: Practice Flow
+  private readonly practiceFlow: PracticeFlow | null = null;
+
   constructor(
     baseRefinementStore: IRefinementStore,
     config: Partial<SwordGateConfig> = {},
@@ -207,6 +216,13 @@ export class SwordGate {
         },
       });
       console.log('[SWORD_GATE] SwordGateHook initialized for Deliberate Practice');
+
+      // Phase 18B: Initialize PracticeFlow for chat-based practice interaction
+      this.practiceFlow = createPracticeFlow({
+        practiceEngine: options.practiceEngine,
+        sparkEngine: this.sparkEngine,
+      });
+      console.log('[SWORD_GATE] PracticeFlow initialized for chat-based practice');
     }
   }
 
@@ -285,7 +301,14 @@ export class SwordGate {
     input: SwordGateInput,
     refinementState: SwordRefinementState | null,
     exploreState: ExploreState | null,
-    modeResult: { mode: SwordGateMode; bypassExplore?: boolean; bypassReason?: string; viewTarget?: ViewTarget; viewRequest?: ViewRequest }
+    modeResult: { 
+      mode: SwordGateMode; 
+      bypassExplore?: boolean; 
+      bypassReason?: string; 
+      viewTarget?: ViewTarget; 
+      viewRequest?: ViewRequest;
+      practiceIntent?: PracticeIntent;  // Phase 18B
+    }
   ): Promise<SwordGateOutput> {
     const { mode, bypassExplore, bypassReason } = modeResult;
 
@@ -319,6 +342,10 @@ export class SwordGate {
       // Phase 14B: View mode
       case 'view':
         return this.handleView(input, modeResult.viewTarget, modeResult.viewRequest);
+
+      // Phase 18B: Practice mode
+      case 'practice':
+        return this.handlePractice(input, modeResult.practiceIntent);
 
       default:
         return {
@@ -950,6 +977,64 @@ export class SwordGate {
       viewHasContent: viewResult.hasContent,
       viewSuggestedActions: viewResult.suggestedActions,
       responseMessage: viewResult.message,
+      suppressModelGeneration: true,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PRACTICE MODE (Phase 18B - NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handle practice mode - chat-based drill interaction.
+   * Phase 18B: Practice mode for viewing/completing daily drills.
+   */
+  private async handlePractice(
+    input: SwordGateInput,
+    practiceIntent?: PracticeIntent
+  ): Promise<SwordGateOutput> {
+    // Check if PracticeFlow is available
+    if (!this.practiceFlow) {
+      return {
+        mode: 'practice',
+        responseMessage: '⚠️ Practice mode is not available. Please ensure the Deliberate Practice Engine is configured.',
+        suppressModelGeneration: true,
+      };
+    }
+
+    // Execute practice flow
+    const result = await this.practiceFlow.execute(
+      input.userId,
+      input.message,
+      input.existingGoalId
+    );
+
+    if (!result.ok) {
+      console.error('[SWORD_GATE] Practice error:', result.error);
+      return {
+        mode: 'practice',
+        responseMessage: `❌ Practice error: ${result.error.message}`,
+        suppressModelGeneration: true,
+      };
+    }
+
+    const practiceResult = result.value;
+
+    return {
+      mode: 'practice',
+      practiceIntent: practiceResult.intent,
+      todayDrill: practiceResult.drill,
+      practiceCompleted: practiceResult.completed,
+      practiceSkipped: practiceResult.skipped,
+      practiceProgress: practiceResult.progress ? {
+        totalSkills: practiceResult.progress.totalSkills,
+        mastered: practiceResult.progress.skillsByMastery?.mastered ?? 0,
+        practicing: practiceResult.progress.skillsByMastery?.practicing ?? 0,
+        attempted: practiceResult.progress.skillsByMastery?.attempted ?? 0,
+        notStarted: practiceResult.progress.skillsByMastery?.not_started ?? 0,
+        streakDays: practiceResult.progress.streakDays,
+      } : undefined,
+      responseMessage: practiceResult.response,
       suppressModelGeneration: true,
     };
   }

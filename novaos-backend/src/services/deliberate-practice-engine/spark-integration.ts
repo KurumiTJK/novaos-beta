@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SPARK INTEGRATION — Bridges Deliberate Practice with SparkEngine
 // NovaOS Deliberate Practice Engine — Phase 18: SparkEngine Integration
+// Phase 19G: Drill-Aware Reminder Templates
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // This service bridges the two systems:
@@ -8,11 +9,17 @@
 //   - Converts Spark completions to Drill outcomes
 //   - Coordinates escalation between both systems
 //   - Syncs mastery tracking
+//   - Generates drill-aware reminder messages (Phase 19G)
 //
 // Flow:
 //   1. Drill generated → createSparkFromDrill() → Spark created → reminders scheduled
 //   2. User completes Spark → completeSparkWithOutcome() → Drill outcome recorded
 //   3. Escalation: retry drills get escalated sparks (reduced/minimal variants)
+//
+// Phase 19G Enhancements:
+//   - Drill-specific reminder message templates
+//   - Escalation-aware message content
+//   - Skill type and retry context in messages
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -38,6 +45,17 @@ import type {
   DrillSparkCompletionResult,
 } from './spark-integration-types.js';
 
+// Phase 19G: Import reminder templates
+import {
+  generateDrillReminderMessage,
+  generateRetryReminderMessage,
+  generateCompoundSkillMessage,
+  generateSynthesisSkillMessage,
+  type DrillReminderContext,
+  type DrillReminderMessage,
+  type EscalationLevel,
+} from './drill-reminder-templates.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -57,6 +75,16 @@ const RETRY_TO_VARIANT: Record<number, SparkVariant> = {
  */
 const DEFAULT_HIGH_RETRY_VARIANT: SparkVariant = 'minimal';
 
+/**
+ * Default reminder times by escalation level (hour of day).
+ */
+const DEFAULT_REMINDER_HOURS: Record<EscalationLevel, number> = {
+  0: 9,   // 9 AM - Morning
+  1: 12,  // 12 PM - Midday
+  2: 15,  // 3 PM - Afternoon
+  3: 18,  // 6 PM - Evening
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SPARK INTEGRATION SERVICE
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -67,6 +95,12 @@ const DEFAULT_HIGH_RETRY_VARIANT: SparkVariant = 'minimal';
 export interface SparkIntegrationConfig {
   /** Default timezone */
   timezone?: string;
+  /** First reminder hour (default: 9) */
+  firstReminderHour?: number;
+  /** Last reminder hour (default: 18) */
+  lastReminderHour?: number;
+  /** Enable drill-aware reminder messages (Phase 19G) */
+  useDrillAwareReminders?: boolean;
 }
 
 /**
@@ -90,6 +124,7 @@ export interface SparkIntegrationDependencies {
  * - Create Sparks from Drills (for reminder scheduling)
  * - Complete Sparks and record Drill outcomes
  * - Coordinate escalation between systems
+ * - Generate drill-aware reminder messages (Phase 19G)
  */
 export class SparkIntegration {
   private readonly sparkStore: ISparkEngineStore;
@@ -103,6 +138,9 @@ export class SparkIntegration {
     this.practiceEngine = deps.practiceEngine;
     this.config = {
       timezone: deps.config?.timezone ?? 'UTC',
+      firstReminderHour: deps.config?.firstReminderHour ?? 9,
+      lastReminderHour: deps.config?.lastReminderHour ?? 18,
+      useDrillAwareReminders: deps.config?.useDrillAwareReminders ?? true,
     };
   }
 
@@ -115,6 +153,8 @@ export class SparkIntegration {
    *
    * This is called after drill generation to create the corresponding
    * spark for reminder scheduling.
+   *
+   * Phase 19G: Now uses drill-aware reminder templates.
    */
   async createSparkFromDrill(
     drill: DailyDrill,
@@ -125,13 +165,18 @@ export class SparkIntegration {
 
     // Determine variant based on retry count
     const variant = this.getVariantForRetryCount(drill.retryCount);
-    const escalationLevel = Math.min(drill.retryCount, 3);
+    const escalationLevel = Math.min(drill.retryCount, 3) as EscalationLevel;
+
+    // Phase 19G: Generate drill-aware action text
+    const action = this.config.useDrillAwareReminders
+      ? this.generateDrillAwareAction(drill, skill, variant, goal.title)
+      : this.formatAction(drill, skill, variant);
 
     // Create the spark
     const spark: DrillSpark = {
       id: createSparkId(),
       stepId: this.getDummyStepId(drill), // Drills don't have steps, use placeholder
-      action: this.formatAction(drill, skill, variant),
+      action,
       status: 'pending' as SparkStatus,
       createdAt: now,
       updatedAt: now,
@@ -153,8 +198,14 @@ export class SparkIntegration {
       return err(saveResult.error);
     }
 
-    // Schedule reminders
-    const reminderResult = await this.reminderService.scheduleReminders(spark, goal);
+    // Schedule reminders with drill context
+    const reminderResult = await this.scheduleRemindersWithDrillContext(
+      spark,
+      drill,
+      skill,
+      goal
+    );
+
     if (isOk(reminderResult)) {
       // Update spark with reminder IDs
       const reminderIds = reminderResult.value.map(r => r.id);
@@ -167,6 +218,139 @@ export class SparkIntegration {
     }
 
     return ok(spark);
+  }
+
+  /**
+   * Schedule reminders with drill-aware context.
+   * Phase 19G: Uses drill reminder templates for message content.
+   */
+  private async scheduleRemindersWithDrillContext(
+    spark: DrillSpark,
+    drill: DailyDrill,
+    skill: Skill,
+    goal: Goal
+  ): AsyncAppResult<readonly { id: ReminderId }[]> {
+    // If not using drill-aware reminders, delegate to standard scheduling
+    if (!this.config.useDrillAwareReminders) {
+      return this.reminderService.scheduleReminders(spark, goal);
+    }
+
+    // Generate drill-aware reminder messages for each escalation level
+    const reminderContexts = this.buildReminderContexts(drill, skill, goal);
+
+    // Store messages in spark metadata for reminder service to use
+    // The reminder service will pull these when sending
+    const sparkWithMessages: DrillSpark = {
+      ...spark,
+      // Store reminder messages as metadata
+      // @ts-expect-error - extending spark with drill-specific fields
+      drillReminderMessages: reminderContexts.map(ctx => {
+        const message = this.generateReminderMessage(ctx, drill, skill);
+        return {
+          escalationLevel: ctx.escalationLevel,
+          text: message.text,
+          subject: message.subject,
+          shortText: message.shortText,
+        };
+      }),
+    };
+
+    // Save spark with reminder messages
+    await this.sparkStore.saveSpark(sparkWithMessages);
+
+    // Delegate to standard reminder scheduling
+    return this.reminderService.scheduleReminders(sparkWithMessages, goal);
+  }
+
+  /**
+   * Build reminder contexts for all escalation levels.
+   */
+  private buildReminderContexts(
+    drill: DailyDrill,
+    skill: Skill,
+    goal: Goal
+  ): DrillReminderContext[] {
+    const variants: SparkVariant[] = ['full', 'full', 'reduced', 'minimal'];
+
+    return ([0, 1, 2, 3] as EscalationLevel[]).map((level) => ({
+      drill,
+      skill,
+      goalTitle: goal.title,
+      escalationLevel: level,
+      variant: variants[level]!,
+    }));
+  }
+
+  /**
+   * Generate appropriate reminder message based on context.
+   */
+  private generateReminderMessage(
+    context: DrillReminderContext,
+    drill: DailyDrill,
+    skill: Skill
+  ): DrillReminderMessage {
+    // Check for special cases
+    if (drill.isRetry || drill.retryCount > 0) {
+      return generateRetryReminderMessage(context);
+    }
+
+    if (skill.skillType === 'compound' && skill.componentSkillIds) {
+      // In production, we'd look up component skill titles
+      return generateCompoundSkillMessage(context, []);
+    }
+
+    if (skill.skillType === 'synthesis') {
+      // In production, we'd look up milestone title
+      return generateSynthesisSkillMessage(context, 'Quest Milestone');
+    }
+
+    // Standard drill reminder
+    return generateDrillReminderMessage(context);
+  }
+
+  /**
+   * Generate drill-aware action text.
+   * Phase 19G: Creates more informative action text for sparks.
+   */
+  private generateDrillAwareAction(
+    drill: DailyDrill,
+    skill: Skill,
+    variant: SparkVariant,
+    goalTitle: string
+  ): string {
+    const skillType = skill.skillType ?? 'foundation';
+    const skillEmoji = this.getSkillTypeEmoji(skillType);
+
+    switch (variant) {
+      case 'full':
+        return `${skillEmoji} ${skill.action}\n\n${drill.action}`;
+
+      case 'reduced':
+        // Take first sentence
+        const firstSentence = drill.action.split(/[.!?]/)[0] ?? drill.action;
+        return `${skillEmoji} ${firstSentence.slice(0, 100).trim()}`;
+
+      case 'minimal':
+        // Just the skill name and a hint
+        const firstClause = drill.action.split(/[,;]/)[0] ?? drill.action;
+        return `Just: ${firstClause.slice(0, 50).trim()}`;
+
+      default:
+        return drill.action;
+    }
+  }
+
+  /**
+   * Get emoji for skill type.
+   */
+  private getSkillTypeEmoji(skillType: string): string {
+    const emojiMap: Record<string, string> = {
+      foundation: '🧱',
+      building: '🔨',
+      compound: '🔗',
+      synthesis: '⭐',
+    };
+    return emojiMap[skillType] ?? '📚';
   }
 
   /**
@@ -320,6 +504,7 @@ export class SparkIntegration {
    * Escalate a spark to a smaller variant.
    *
    * Called by the reminder service when reminders escalate.
+   * Phase 19G: Updates message content based on new escalation level.
    */
   async escalateSpark(
     sparkId: SparkId,
@@ -402,6 +587,79 @@ export class SparkIntegration {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // REMINDER MESSAGE ACCESS (Phase 19G)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get drill-aware reminder message for a spark at a specific escalation level.
+   * Phase 19G: Used by reminder service to get appropriate message.
+   */
+  async getDrillReminderMessage(
+    sparkId: SparkId,
+    escalationLevel: EscalationLevel
+  ): AsyncAppResult<DrillReminderMessage | null> {
+    const sparkResult = await this.sparkStore.getSpark(sparkId);
+    if (!isOk(sparkResult) || !sparkResult.value) {
+      return ok(null);
+    }
+
+    const spark = sparkResult.value as DrillSpark & {
+      drillReminderMessages?: Array<{
+        escalationLevel: number;
+        text: string;
+        subject: string;
+        shortText: string;
+      }>;
+    };
+
+    // Check for pre-generated messages
+    if (spark.drillReminderMessages) {
+      const message = spark.drillReminderMessages.find(
+        m => m.escalationLevel === escalationLevel
+      );
+      if (message) {
+        return ok({
+          text: message.text,
+          subject: message.subject,
+          shortText: message.shortText,
+          escalationLevel,
+          variant: this.getVariantForEscalationLevel(escalationLevel),
+        });
+      }
+    }
+
+    // Generate message on-demand if drill context available
+    if (spark.drillId) {
+      const drillResult = await this.practiceEngine.getDrill(spark.drillId);
+      if (isOk(drillResult) && drillResult.value) {
+        const drill = drillResult.value;
+        let skill: Skill | null = null;
+
+        if (drill.skillId) {
+          const skillResult = await this.practiceEngine.getSkill(drill.skillId);
+          if (isOk(skillResult)) {
+            skill = skillResult.value;
+          }
+        }
+
+        if (skill) {
+          const context: DrillReminderContext = {
+            drill,
+            skill,
+            goalTitle: 'Your Learning Goal', // Would need goal lookup
+            escalationLevel,
+            variant: this.getVariantForEscalationLevel(escalationLevel),
+          };
+
+          return ok(generateDrillReminderMessage(context));
+        }
+      }
+    }
+
+    return ok(null);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // PRIVATE HELPERS
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -422,7 +680,7 @@ export class SparkIntegration {
   }
 
   /**
-   * Format action text based on variant.
+   * Format action text based on variant (legacy method).
    */
   private formatAction(
     drill: DailyDrill,
@@ -456,7 +714,12 @@ export class SparkIntegration {
       .replace(/^\[Retry\]\s*/i, '')
       .replace(/^\[Simplified\]\s*/i, '')
       .replace(/^\[Foundation\]\s*/i, '')
-      .replace(/^Just:\s*/i, '');
+      .replace(/^Just:\s*/i, '')
+      .replace(/^🧱\s*/g, '')
+      .replace(/^🔨\s*/g, '')
+      .replace(/^🔗\s*/g, '')
+      .replace(/^⭐\s*/g, '')
+      .replace(/^📚\s*/g, '');
 
     switch (variant) {
       case 'reduced':
@@ -485,8 +748,9 @@ export class SparkIntegration {
    * Format scheduled date to ISO time string.
    */
   private formatScheduledTime(date: string): string {
-    // Add default time (9 AM in configured timezone)
-    return `${date}T09:00:00`;
+    // Add default time (first reminder hour in configured timezone)
+    const hour = this.config.firstReminderHour.toString().padStart(2, '0');
+    return `${date}T${hour}:00:00`;
   }
 }
 

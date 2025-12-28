@@ -1,15 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORDGATE TYPES — Goal Creation Pipeline Gate
 // NovaOS Gates — Phase 14B: SwordGate View Mode Extension
+// Phase 18B: Practice Mode Extension
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Type definitions for SwordGate:
-//   - SwordGateMode: Operating modes (capture, explore, refine, suggest, create, modify, view)
+//   - SwordGateMode: Operating modes (capture, explore, refine, suggest, create, modify, view, practice)
 //   - SwordGateInput: Pipeline input to the gate
 //   - SwordGateOutput: Gate result with mode-specific data
 //   - SwordRefinementState: Extended refinement state for goal creation
 //   - LessonPlanProposal: Proposed plan shown before creation
 //   - ViewTarget/ViewRequest: View mode types (Phase 14B)
+//   - PracticeIntent: Practice mode types (Phase 18B)
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -51,6 +53,8 @@ export type { ExploreContext };
  * 4. suggest  → Generate and display lesson plan proposal
  * 5. create   → Create goal and quests after user confirmation
  * 6. modify   → Update existing goals
+ * 7. view     → View existing goals/lessons/progress (Phase 14B)
+ * 8. practice → Interactive practice flow (Phase 18B)
  */
 export type SwordGateMode =
   | 'capture'   // Initial goal statement extraction
@@ -59,7 +63,8 @@ export type SwordGateMode =
   | 'suggest'   // Show proposed lesson plan
   | 'create'    // Create goal after confirmation
   | 'modify'    // Modify existing goal
-  | 'view';     // View existing goals/lessons/progress (Phase 14B)
+  | 'view'      // View existing goals/lessons/progress (Phase 14B)
+  | 'practice'; // Interactive practice flow (Phase 18B)
 
 /**
  * All valid SwordGate modes.
@@ -72,6 +77,7 @@ export const SWORD_GATE_MODES: readonly SwordGateMode[] = [
   'create',
   'modify',
   'view',     // Phase 14B
+  'practice', // Phase 18B
 ] as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -124,6 +130,53 @@ export interface ViewRequest {
 
   /** Whether to include detailed information */
   readonly detailed?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRACTICE MODE TYPES (Phase 18B)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Practice intent detected from user message.
+ * Phase 18B: Practice mode for chat-based drill interaction.
+ */
+export type PracticeIntent =
+  | 'view_today'      // "What's my lesson today?"
+  | 'complete_pass'   // "I finished", "I did it", "Done"
+  | 'complete_fail'   // "I couldn't do it", "I failed"
+  | 'skip'            // "Skip today", "I'll do it tomorrow"
+  | 'view_progress'   // "Show my progress", "How am I doing?"
+  | 'view_week'       // "What's this week's plan?"
+  | 'view_goals'      // "Show my goals", "List goals"
+  | 'delete_goal'     // "Delete goal 1", "Remove this goal"
+  | 'delete_all'      // "Delete all goals", "Clear all"
+  | 'start_now'       // "Start now", "Begin today"
+  | 'switch_goal'     // "Switch to goal 2"
+  | 'unknown';
+
+/**
+ * All valid practice intents.
+ */
+export const PRACTICE_INTENTS: readonly PracticeIntent[] = [
+  'view_today',
+  'complete_pass',
+  'complete_fail',
+  'skip',
+  'view_progress',
+  'view_week',
+  'view_goals',
+  'delete_goal',
+  'delete_all',
+  'start_now',
+  'switch_goal',
+  'unknown',
+] as const;
+
+/**
+ * Type guard for PracticeIntent.
+ */
+export function isPracticeIntent(value: unknown): value is PracticeIntent {
+  return typeof value === 'string' && PRACTICE_INTENTS.includes(value as PracticeIntent);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -307,6 +360,8 @@ export interface CreatedGoalResult {
  * - suggest: Proposed lesson plan for confirmation
  * - create: Created goal and quests
  * - modify: Updated goal
+ * - view: View content (Phase 14B)
+ * - practice: Practice interaction (Phase 18B)
  */
 export interface SwordGateOutput {
   /** Detected/executed mode */
@@ -396,6 +451,51 @@ export interface SwordGateOutput {
 
   /** Suggested actions after viewing */
   readonly viewSuggestedActions?: readonly string[];
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Practice Flow (Phase 18B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Practice intent that was handled */
+  readonly practiceIntent?: PracticeIntent;
+
+  /** Today's drill info (for practice mode) */
+  readonly todayDrill?: {
+    readonly action: string;
+    readonly passSignal: string;
+    readonly constraint?: string;
+    readonly skillName?: string;
+  };
+
+  /** Whether practice was completed */
+  readonly practiceCompleted?: boolean;
+
+  /** Whether practice was skipped */
+  readonly practiceSkipped?: boolean;
+
+  /** Practice progress summary */
+  readonly practiceProgress?: {
+    readonly totalSkills: number;
+    readonly mastered: number;
+    readonly practicing: number;
+    readonly attempted: number;
+    readonly notStarted: number;
+    readonly streakDays?: number;
+  };
+
+  /** List of user's goals (for view_goals) */
+  readonly practiceGoals?: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly status: string;
+    readonly createdAt: string;
+  }[];
+
+  /** Whether a goal was deleted */
+  readonly practiceDeleted?: boolean;
+
+  /** Count of deleted goals */
+  readonly practiceDeletedCount?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

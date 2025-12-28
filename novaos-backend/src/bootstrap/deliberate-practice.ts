@@ -7,7 +7,7 @@
 // Engine when needed outside of ExecutionPipeline.
 //
 // Usage:
-//   const { engine, stores, orchestrator } = await bootstrapDeliberatePractice({
+//   const { engine, stores } = await bootstrapDeliberatePractice({
 //     kvStore,
 //     encryptionService,
 //     config: { openaiApiKey: '...' }
@@ -23,11 +23,6 @@ import {
   DeliberatePracticeEngine,
   type DeliberatePracticeEngineConfig,
 } from '../services/deliberate-practice-engine/deliberate-practice-engine.js';
-import {
-  PracticeOrchestrator,
-  type PracticeOrchestratorConfig,
-} from '../services/deliberate-practice-engine/practice-orchestrator.js';
-import type { ISparkEngineStore } from '../services/spark-engine/interfaces.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -43,10 +38,6 @@ export interface DeliberatePracticeBootstrapOptions {
   encryptionService?: EncryptionService;
   /** Engine configuration */
   config?: DeliberatePracticeEngineConfig;
-  /** SparkEngine store (for orchestrator) */
-  sparkEngineStore?: ISparkEngineStore;
-  /** Orchestrator configuration */
-  orchestratorConfig?: PracticeOrchestratorConfig;
 }
 
 /**
@@ -57,8 +48,6 @@ export interface DeliberatePracticeBootstrapResult {
   engine: IDeliberatePracticeEngine;
   /** The stores */
   stores: IDeliberatePracticeStores;
-  /** The orchestrator (if SparkEngine store provided) */
-  orchestrator: PracticeOrchestrator | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -68,7 +57,11 @@ export interface DeliberatePracticeBootstrapResult {
 /**
  * Bootstrap the Deliberate Practice Engine.
  *
- * Creates stores, engine, and optionally orchestrator.
+ * Creates stores and engine.
+ * 
+ * Note: To create a PracticeOrchestrator, you need to do that separately
+ * after this bootstrap, providing the sparkIntegration and sparkStore
+ * from your SparkEngine setup.
  */
 export async function bootstrapDeliberatePractice(
   options: DeliberatePracticeBootstrapOptions
@@ -77,8 +70,6 @@ export async function bootstrapDeliberatePractice(
     kvStore,
     encryptionService,
     config,
-    sparkEngineStore,
-    orchestratorConfig,
   } = options;
 
   console.log('[BOOTSTRAP] Initializing Deliberate Practice Engine...');
@@ -98,26 +89,10 @@ export async function bootstrapDeliberatePractice(
     config,
   });
 
-  console.log('[BOOTSTRAP] Engine created');
-
-  // Create orchestrator if SparkEngine store is provided
-  let orchestrator: PracticeOrchestrator | null = null;
-
-  if (sparkEngineStore) {
-    orchestrator = new PracticeOrchestrator({
-      practiceEngine: engine,
-      sparkEngineStore,
-      config: orchestratorConfig,
-    });
-
-    console.log('[BOOTSTRAP] Orchestrator created');
-  }
-
   console.log('[BOOTSTRAP] Deliberate Practice Engine ready');
 
   return {
     engine,
     stores,
-    orchestrator,
   };
 }
