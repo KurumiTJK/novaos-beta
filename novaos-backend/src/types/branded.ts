@@ -73,6 +73,24 @@ export type ReminderId = Brand<string, 'ReminderId'>;
 export type ResourceId = Brand<string, 'ResourceId'>;
 
 /**
+ * Skill identifier.
+ * Represents an atomic competence unit derived from CapabilityStage.
+ */
+export type SkillId = Brand<string, 'SkillId'>;
+
+/**
+ * DailyDrill identifier.
+ * Represents a single day's practice session.
+ */
+export type DrillId = Brand<string, 'DrillId'>;
+
+/**
+ * WeekPlan identifier.
+ * Represents a week-level learning plan.
+ */
+export type WeekPlanId = Brand<string, 'WeekPlanId'>;
+
+/**
  * Conversation identifier.
  */
 export type ConversationId = Brand<string, 'ConversationId'>;
@@ -238,6 +256,27 @@ export function createReminderId(value?: string): ReminderId {
  */
 export function createResourceId(value?: string): ResourceId {
   return (value ?? `resource-${uuidv4()}`) as ResourceId;
+}
+
+/**
+ * Create a new SkillId.
+ */
+export function createSkillId(value?: string): SkillId {
+  return (value ?? `skill-${uuidv4()}`) as SkillId;
+}
+
+/**
+ * Create a new DrillId.
+ */
+export function createDrillId(value?: string): DrillId {
+  return (value ?? `drill-${uuidv4()}`) as DrillId;
+}
+
+/**
+ * Create a new WeekPlanId.
+ */
+export function createWeekPlanId(value?: string): WeekPlanId {
+  return (value ?? `week-${uuidv4()}`) as WeekPlanId;
 }
 
 /**
@@ -482,6 +521,27 @@ export function isStepId(value: string): value is StepId {
  */
 export function isSparkId(value: string): value is SparkId {
   return isValidPrefixedId(value, 'spark');
+}
+
+/**
+ * Check if a value is a valid SkillId.
+ */
+export function isSkillId(value: string): value is SkillId {
+  return isValidPrefixedId(value, 'skill');
+}
+
+/**
+ * Check if a value is a valid DrillId.
+ */
+export function isDrillId(value: string): value is DrillId {
+  return isValidPrefixedId(value, 'drill');
+}
+
+/**
+ * Check if a value is a valid WeekPlanId.
+ */
+export function isWeekPlanId(value: string): value is WeekPlanId {
+  return isValidPrefixedId(value, 'week');
 }
 
 /**

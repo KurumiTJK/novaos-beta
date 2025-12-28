@@ -27,6 +27,9 @@ import type {
   MessageId,
   MemoryId,
   SessionId,
+  SkillId,
+  DrillId,
+  WeekPlanId,
 } from '../../types/branded.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -299,6 +302,97 @@ export const SwordKeys = {
   /** Get key for user's reminder queue */
   userReminders(userId: UserId): string {
     return buildKey(KeyNamespace.SWORD, 'user', userId, 'reminders');
+  },
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Skills (Deliberate Practice)
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /** Get key for a skill entity */
+  skill(skillId: SkillId): string {
+    return buildKey(KeyNamespace.SWORD, 'skill', skillId);
+  },
+  
+  /** Get key for quest's skill list */
+  questSkills(questId: QuestId): string {
+    return buildKey(KeyNamespace.SWORD, 'quest', questId, 'skills');
+  },
+  
+  /** Get key for goal's skill list (denormalized) */
+  goalSkills(goalId: GoalId): string {
+    return buildKey(KeyNamespace.SWORD, 'goal', goalId, 'skills');
+  },
+  
+  /** Get key for user's skill list */
+  userSkills(userId: UserId): string {
+    return buildKey(KeyNamespace.SWORD, 'user', userId, 'skills');
+  },
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Daily Drills (Deliberate Practice)
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /** Get key for a drill entity */
+  drill(drillId: DrillId): string {
+    return buildKey(KeyNamespace.SWORD, 'drill', drillId);
+  },
+  
+  /** Get key for week's drill list */
+  weekDrills(weekPlanId: WeekPlanId): string {
+    return buildKey(KeyNamespace.SWORD, 'week', weekPlanId, 'drills');
+  },
+  
+  /** Get key for drill by date (goalId + date lookup) */
+  drillByDate(goalId: GoalId, date: string): string {
+    return buildKey(KeyNamespace.SWORD, 'goal', goalId, 'drill', date);
+  },
+  
+  /** Get key for user's active drill */
+  userActiveDrill(userId: UserId): string {
+    return buildKey(KeyNamespace.SWORD, 'user', userId, 'drill');
+  },
+  
+  /** Get key for user's drill history */
+  userDrillHistory(userId: UserId): string {
+    return buildKey(KeyNamespace.SWORD, 'user', userId, 'drills');
+  },
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Week Plans (Deliberate Practice)
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /** Get key for a week plan entity */
+  weekPlan(weekPlanId: WeekPlanId): string {
+    return buildKey(KeyNamespace.SWORD, 'week', weekPlanId);
+  },
+  
+  /** Get key for goal's week plan list (sorted set by week number) */
+  goalWeeks(goalId: GoalId): string {
+    return buildKey(KeyNamespace.SWORD, 'goal', goalId, 'weeks');
+  },
+  
+  /** Get key for goal's active week plan */
+  goalActiveWeek(goalId: GoalId): string {
+    return buildKey(KeyNamespace.SWORD, 'goal', goalId, 'activeweek');
+  },
+  
+  /** Get key for user's current week plan */
+  userCurrentWeek(userId: UserId): string {
+    return buildKey(KeyNamespace.SWORD, 'user', userId, 'week');
+  },
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Learning Plans (Deliberate Practice)
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /** Get key for a learning plan (keyed by goalId) */
+  learningPlan(goalId: GoalId): string {
+    return buildKey(KeyNamespace.SWORD, 'plan', goalId);
+  },
+  
+  /** Get key for user's learning plans */
+  userLearningPlans(userId: UserId): string {
+    return buildKey(KeyNamespace.SWORD, 'user', userId, 'plans');
   },
 } as const;
 

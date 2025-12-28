@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULER MODULE — Background Jobs and Scheduled Tasks
 // NovaOS Scheduler — Phase 15: Enhanced Scheduler & Jobs
+// Phase 18: Deliberate Practice Jobs
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Provides cron-style scheduling for background jobs:
@@ -23,6 +24,11 @@
 // - Known sources health (weekly)
 // - Retention enforcement (daily)
 //
+// Deliberate Practice Jobs (Phase 18):
+// - Generate daily drills (6 AM)
+// - Week transition (Sunday midnight)
+// - Drill reconciliation (11 PM)
+//
 // Enhanced Features (Phase 15):
 // - Distributed locking with fencing tokens
 // - Dead letter queue for failed jobs
@@ -40,6 +46,7 @@ export type {
   JobId,
   SwordJobId,
   CoreJobId,
+  PracticeJobId,  // Phase 18
   JobStatus,
   JobPriority,
   JobSchedule,
@@ -75,6 +82,10 @@ export type {
   DayEndReconciliationJobResult,
   KnownSourcesHealthJobResult,
   RetentionEnforcementJobResult,
+  // Deliberate Practice result types (Phase 18)
+  GenerateDailyDrillsJobResult,
+  WeekTransitionJobResult,
+  DrillReconciliationJobResult,
 } from './types.js';
 
 export {
@@ -87,6 +98,7 @@ export {
   calculateRetryDelay,
   shouldRetry,
   isSwordJobId,
+  isPracticeJobId,  // Phase 18
   isJobId,
 } from './types.js';
 
@@ -121,6 +133,7 @@ export {
   getSwordJobs,
   getCoreJobs,
   getAllJobDefinitions,
+  getPracticeJobs,  // Phase 18
 } from './jobs.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -146,6 +159,10 @@ export {
   dayEndReconciliationHandler,
   knownSourcesHealthHandler,
   retentionEnforcementHandler,
+  // Deliberate Practice handlers (Phase 18)
+  generateDailyDrillsHandler,
+  weekTransitionHandler,
+  drillReconciliationHandler,
 } from './handlers.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -227,3 +244,12 @@ export {
   getSwordRegisteredJobIds,
   hasSwordJobHandler,
 } from './jobs/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PRACTICE JOB HANDLERS (Phase 18 - Direct exports from jobs/)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  PRACTICE_JOB_HANDLERS,
+  getPracticeJobHandler,
+} from './jobs/practice-handlers.js';

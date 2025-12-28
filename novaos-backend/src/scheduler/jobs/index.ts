@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORD JOB HANDLERS — Phase 15 Job Handler Implementations
 // NovaOS Scheduler — Phase 15: Enhanced Scheduler & Jobs
+// Phase 18: Deliberate Practice Jobs
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { JobContext, JobResult, JobHandler, SwordJobId } from '../types.js';
@@ -229,7 +230,7 @@ export const morningSparksHandler: JobHandler = async (context: JobContext): Pro
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Escalates unacknowledged sparks through the reminder ladder.
+ * Escalates unacknowledged sparks through reminder levels.
  * Runs every 3 hours.
  */
 export const reminderEscalationHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
@@ -242,13 +243,11 @@ export const reminderEscalationHandler: JobHandler = async (context: JobContext)
   let sparksExpired = 0;
   let remindersQueued = 0;
   
-  const MAX_ESCALATION = 4;
-  const HOURS_BETWEEN_ESCALATIONS = 3;
+  const MAX_ESCALATION = 3;
   
   try {
     // Find all active sparks
     const sparkKeys = await store.keys('sword:spark:spark_*');
-    const now = Date.now();
     
     for (const key of sparkKeys) {
       const sparkData = await store.get(key);
@@ -262,6 +261,7 @@ export const reminderEscalationHandler: JobHandler = async (context: JobContext)
       try {
         const createdAt = new Date(spark.createdAt).getTime();
         const expiresAt = spark.expiresAt ? new Date(spark.expiresAt).getTime() : null;
+        const now = Date.now();
         
         // Check if expired
         if (expiresAt && now > expiresAt) {
@@ -271,29 +271,25 @@ export const reminderEscalationHandler: JobHandler = async (context: JobContext)
           continue;
         }
         
-        // Check if escalation is due
-        const lastEscalation = spark.lastEscalatedAt 
-          ? new Date(spark.lastEscalatedAt).getTime() 
-          : createdAt;
-        const hoursSinceEscalation = (now - lastEscalation) / (1000 * 60 * 60);
+        // Calculate escalation level based on age
+        const ageHours = (now - createdAt) / (1000 * 60 * 60);
+        const targetLevel = Math.min(Math.floor(ageHours / 3), MAX_ESCALATION);
         
-        if (hoursSinceEscalation >= HOURS_BETWEEN_ESCALATIONS && 
-            spark.escalationLevel < MAX_ESCALATION) {
-          // Escalate
-          spark.escalationLevel++;
+        if (targetLevel > (spark.escalationLevel || 0)) {
+          spark.escalationLevel = targetLevel;
           spark.lastEscalatedAt = new Date().toISOString();
           await store.set(key, JSON.stringify(spark));
+          remindersEscalated++;
           
           // Queue reminder notification
           const reminder = {
             sparkId: spark.id,
             userId: spark.userId,
-            level: spark.escalationLevel,
+            level: targetLevel,
+            action: spark.action,
             queuedAt: new Date().toISOString(),
           };
-          await store.lpush(`notifications:reminders:${spark.userId}`, JSON.stringify(reminder));
-          
-          remindersEscalated++;
+          await store.lpush(`notifications:queue:${spark.userId}`, JSON.stringify(reminder));
           remindersQueued++;
         }
       } catch (error) {
@@ -332,7 +328,7 @@ export const reminderEscalationHandler: JobHandler = async (context: JobContext)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Marks incomplete steps as missed and updates streaks.
+ * Marks incomplete steps as missed at end of day.
  * Runs at 11 PM.
  */
 export const dayEndReconciliationHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
@@ -348,9 +344,9 @@ export const dayEndReconciliationHandler: JobHandler = async (context: JobContex
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    // Find all steps scheduled for today
+    // Find all steps for today
     const stepDateKeys = await store.keys(`sword:step:date:${today}:*`);
-    const userStats = new Map<string, { completed: number; missed: number }>();
+    const processedUsers = new Set<string>();
     
     for (const dateKey of stepDateKeys) {
       const stepId = await store.get(dateKey);
@@ -361,83 +357,65 @@ export const dayEndReconciliationHandler: JobHandler = async (context: JobContex
       
       const step = JSON.parse(stepData);
       
-      // Initialize user stats
-      if (!userStats.has(step.userId)) {
-        userStats.set(step.userId, { completed: 0, missed: 0 });
+      if (!processedUsers.has(step.userId)) {
+        processedUsers.add(step.userId);
+        usersProcessed++;
       }
-      const stats = userStats.get(step.userId)!;
       
       try {
         if (step.status === 'completed') {
           stepsCompleted++;
-          stats.completed++;
-        } else if (step.status === 'pending' || step.status === 'in_progress') {
-          // Mark as missed
-          step.status = 'missed';
-          step.missedAt = new Date().toISOString();
-          await store.set(`sword:step:${stepId}`, JSON.stringify(step));
-          stepsMarkedMissed++;
-          stats.missed++;
+          continue;
         }
-      } catch (error) {
-        const msg = `Error processing step ${stepId}: ${error instanceof Error ? error.message : 'Unknown'}`;
-        errors.push(msg);
-        logger.warn(msg);
-      }
-    }
-    
-    // Update streaks for each user
-    for (const [userId, stats] of userStats) {
-      usersProcessed++;
-      
-      try {
-        const streakKey = `sword:streak:${userId}`;
-        const streakData = await store.get(streakKey);
-        const streak = streakData ? JSON.parse(streakData) : { current: 0, longest: 0 };
         
-        if (stats.completed > 0 && stats.missed === 0) {
-          // Perfect day - continue streak
-          streak.current++;
-          streak.longest = Math.max(streak.longest, streak.current);
-        } else if (stats.missed > 0) {
-          // Broke streak
+        // Mark as missed
+        step.status = 'missed';
+        step.missedAt = new Date().toISOString();
+        await store.set(`sword:step:${stepId}`, JSON.stringify(step));
+        stepsMarkedMissed++;
+        
+        // Check and update streak
+        const streakKey = `sword:streak:${step.userId}:${step.goalId}`;
+        const streakData = await store.get(streakKey);
+        if (streakData) {
+          const streak = JSON.parse(streakData);
           if (streak.current > 0) {
+            streak.current = 0;
+            streak.brokenAt = new Date().toISOString();
+            await store.set(streakKey, JSON.stringify(streak));
             streaksBroken++;
           }
-          streak.current = 0;
         }
         
-        streak.lastUpdated = new Date().toISOString();
-        await store.set(streakKey, JSON.stringify(streak));
-        
-        // Generate daily summary
-        const summary = {
-          userId,
-          date: today,
-          stepsCompleted: stats.completed,
-          stepsMissed: stats.missed,
-          currentStreak: streak.current,
-          generatedAt: new Date().toISOString(),
-        };
-        await store.set(`sword:summary:${userId}:${today}`, JSON.stringify(summary), 365 * 24 * 60 * 60);
+        // Expire associated spark
+        const sparkKeys = await store.keys(`sword:spark:active:${step.userId}:*`);
+        for (const sparkKey of sparkKeys) {
+          const sparkId = await store.get(sparkKey);
+          if (!sparkId) continue;
+          
+          const sparkData = await store.get(`sword:spark:${sparkId}`);
+          if (!sparkData) continue;
+          
+          const spark = JSON.parse(sparkData);
+          if (spark.stepId === stepId) {
+            spark.status = 'expired';
+            spark.expiredAt = new Date().toISOString();
+            await store.set(`sword:spark:${sparkId}`, JSON.stringify(spark));
+            await store.delete(sparkKey);
+          }
+        }
       } catch (error) {
-        const msg = `Error updating streak for user ${userId}: ${error instanceof Error ? error.message : 'Unknown'}`;
+        const msg = `Error reconciling step ${stepId}: ${error instanceof Error ? error.message : 'Unknown'}`;
         errors.push(msg);
         logger.warn(msg);
       }
-    }
-    
-    // Expire active sparks
-    const activeSparkKeys = await store.keys('sword:spark:active:*');
-    for (const key of activeSparkKeys) {
-      await store.delete(key);
     }
     
     logger.info('Day end reconciliation completed', {
       executionId: context.executionId,
       usersProcessed,
-      stepsCompleted,
       stepsMarkedMissed,
+      stepsCompleted,
       streaksBroken,
     });
     
@@ -464,7 +442,7 @@ export const dayEndReconciliationHandler: JobHandler = async (context: JobContex
 
 /**
  * Verifies health of registered data sources.
- * Runs weekly on Sunday at 2 AM.
+ * Runs weekly on Sundays.
  */
 export const knownSourcesHealthHandler: JobHandler = async (context: JobContext): Promise<JobResult> => {
   logger.info('Starting known sources health check job', { executionId: context.executionId });
@@ -591,6 +569,9 @@ export const retentionEnforcementHandler: JobHandler = async (context: JobContex
     summaries: { pattern: 'sword:summary:*', retentionDays: 365, archive: true },
     cache: { pattern: 'cache:*', retentionDays: 1 },
     temp: { pattern: 'temp:*', retentionDays: 1 },
+    // Deliberate Practice retention (Phase 18)
+    drills: { pattern: 'practice:drill:*', retentionDays: 90 },
+    practiceCarryforward: { pattern: 'practice:carryforward:*', retentionDays: 14 },
   };
   
   try {
@@ -679,6 +660,8 @@ export const SWORD_JOB_HANDLERS: Map<SwordJobId, JobHandler> = new Map([
   ['day_end_reconciliation', dayEndReconciliationHandler],
   ['known_sources_health', knownSourcesHealthHandler],
   ['retention_enforcement', retentionEnforcementHandler],
+  // Deliberate Practice handlers (Phase 18) - imported from practice-handlers.ts
+  // Note: These are registered in the main handlers.ts file
 ]);
 
 export const swordJobHandlers = {
@@ -701,3 +684,16 @@ export function getSwordRegisteredJobIds(): SwordJobId[] {
 export function hasSwordJobHandler(jobId: string): boolean {
   return SWORD_JOB_HANDLERS.has(jobId as SwordJobId);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RE-EXPORTS (Phase 18)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// Re-export practice handlers for convenience
+export {
+  generateDailyDrillsHandler,
+  weekTransitionHandler,
+  drillReconciliationHandler,
+  PRACTICE_JOB_HANDLERS,
+  getPracticeJobHandler,
+} from './practice-handlers.js';

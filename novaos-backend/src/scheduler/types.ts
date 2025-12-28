@@ -1,11 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULER TYPES — Job Definitions and Status Tracking
 // NovaOS Scheduler — Phase 15: Enhanced Scheduler & Jobs
+// Phase 18: Deliberate Practice Jobs
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Combined types for:
 // - Core scheduler jobs (memory, sessions, cleanup, health)
 // - Sword system jobs (daily steps, sparks, reminders, reconciliation)
+// - Deliberate Practice jobs (drills, week transitions) ← Phase 18
 // - Phase 15 enhancements (locking, dead letter, retry)
 //
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -33,10 +35,14 @@ export type JobId =
   | 'reminder_escalation'
   | 'day_end_reconciliation'
   | 'known_sources_health'
-  | 'retention_enforcement';
+  | 'retention_enforcement'
+  // Deliberate Practice jobs (Phase 18)
+  | 'generate_daily_drills'
+  | 'week_transition'
+  | 'drill_reconciliation';
 
 /**
- * Sword-specific job identifiers.
+ * Sword-specific job identifiers (includes Deliberate Practice).
  */
 export type SwordJobId = 
   | 'generate_daily_steps'
@@ -44,7 +50,19 @@ export type SwordJobId =
   | 'reminder_escalation'
   | 'day_end_reconciliation'
   | 'known_sources_health'
-  | 'retention_enforcement';
+  | 'retention_enforcement'
+  // Deliberate Practice (Phase 18)
+  | 'generate_daily_drills'
+  | 'week_transition'
+  | 'drill_reconciliation';
+
+/**
+ * Deliberate Practice job identifiers (Phase 18).
+ */
+export type PracticeJobId =
+  | 'generate_daily_drills'
+  | 'week_transition'
+  | 'drill_reconciliation';
 
 /**
  * Core scheduler job identifiers.
@@ -444,6 +462,34 @@ export interface RetentionEnforcementJobResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// DELIBERATE PRACTICE JOB RESULT TYPES (Phase 18)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface GenerateDailyDrillsJobResult {
+  usersProcessed: number;
+  drillsGenerated: number;
+  sparksCreated: number;
+  usersSkipped: number;
+  errorsByUser?: Record<string, string>;
+}
+
+export interface WeekTransitionJobResult {
+  goalsProcessed: number;
+  weeksCompleted: number;
+  weeksCreated: number;
+  skillsCarriedForward: number;
+  goalsCompleted: number;
+}
+
+export interface DrillReconciliationJobResult {
+  usersProcessed: number;
+  drillsMarkedMissed: number;
+  drillsAlreadyComplete: number;
+  skillMasteryUpdates: number;
+  carryForwardsCreated: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // TYPE GUARDS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -454,10 +500,24 @@ const SWORD_JOB_IDS: Set<string> = new Set([
   'day_end_reconciliation',
   'known_sources_health',
   'retention_enforcement',
+  // Deliberate Practice (Phase 18)
+  'generate_daily_drills',
+  'week_transition',
+  'drill_reconciliation',
+]);
+
+const PRACTICE_JOB_IDS: Set<string> = new Set([
+  'generate_daily_drills',
+  'week_transition',
+  'drill_reconciliation',
 ]);
 
 export function isSwordJobId(jobId: string): jobId is SwordJobId {
   return SWORD_JOB_IDS.has(jobId);
+}
+
+export function isPracticeJobId(jobId: string): jobId is PracticeJobId {
+  return PRACTICE_JOB_IDS.has(jobId);
 }
 
 export function isJobId(value: string): value is JobId {

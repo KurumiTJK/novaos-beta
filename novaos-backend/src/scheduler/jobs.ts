@@ -1,11 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // JOB DEFINITIONS — All Scheduled Jobs Configuration
 // NovaOS Scheduler — Phase 15: Enhanced Scheduler & Jobs
+// Phase 18: Deliberate Practice Jobs
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Contains definitions for:
 // - Core scheduler jobs (memory, sessions, cleanup, health)
 // - Sword system jobs (daily steps, sparks, reminders, reconciliation)
+// - Deliberate Practice jobs (drills, week transitions) ← Phase 18
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -308,6 +310,82 @@ export const SWORD_JOB_DEFINITIONS: Record<string, JobDefinition> = {
     alertOnFailure: true,
     deadLetterOnFailure: true,
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DELIBERATE PRACTICE JOBS (Phase 18)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GENERATE DAILY DRILLS
+  // Creates practice drills at 6 AM
+  // ─────────────────────────────────────────────────────────────────────────────
+  generate_daily_drills: {
+    id: 'generate_daily_drills',
+    name: 'Generate Daily Drills',
+    description: 'Generates daily practice drills for all users with active learning plans. Creates sparks and schedules reminders.',
+    schedule: { cron: '0 6 * * *' }, // 6 AM daily
+    handler: 'generate_daily_drills',
+    priority: 'high',
+    timeout: 300000,       // 5 minutes
+    retryAttempts: 3,
+    retryDelayMs: 30000,
+    maxRetryDelayMs: 120000,
+    exponentialBackoff: true,
+    enabled: true,
+    requiresRedis: false,
+    runOnStartup: false,
+    exclusive: true,
+    alertOnFailure: true,
+    deadLetterOnFailure: true,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // WEEK TRANSITION
+  // Handles weekly transitions at Sunday midnight
+  // ─────────────────────────────────────────────────────────────────────────────
+  week_transition: {
+    id: 'week_transition',
+    name: 'Week Transition',
+    description: 'Completes current week plans, calculates weekly stats, creates next week plans, and identifies carry-forward skills.',
+    schedule: { cron: '0 0 * * 0' }, // Sunday midnight
+    handler: 'week_transition',
+    priority: 'high',
+    timeout: 300000,       // 5 minutes
+    retryAttempts: 3,
+    retryDelayMs: 60000,
+    maxRetryDelayMs: 180000,
+    exponentialBackoff: true,
+    enabled: true,
+    requiresRedis: false,
+    runOnStartup: false,
+    exclusive: true,
+    alertOnFailure: true,
+    deadLetterOnFailure: true,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DRILL RECONCILIATION
+  // Marks incomplete drills at 11 PM
+  // ─────────────────────────────────────────────────────────────────────────────
+  drill_reconciliation: {
+    id: 'drill_reconciliation',
+    name: 'Drill Reconciliation',
+    description: 'Reconciles incomplete drills at end of day. Marks missed drills, updates skill mastery, creates carry-forwards.',
+    schedule: { cron: '0 23 * * *' }, // 11 PM daily
+    handler: 'drill_reconciliation',
+    priority: 'high',
+    timeout: 180000,       // 3 minutes
+    retryAttempts: 2,
+    retryDelayMs: 20000,
+    maxRetryDelayMs: 60000,
+    exponentialBackoff: true,
+    enabled: true,
+    requiresRedis: false,
+    runOnStartup: false,
+    exclusive: true,
+    alertOnFailure: true,
+    deadLetterOnFailure: true,
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -352,7 +430,7 @@ export function getJobsByPriority(priority: JobDefinition['priority']): JobDefin
 }
 
 /**
- * Get all Sword system jobs.
+ * Get all Sword system jobs (includes Deliberate Practice).
  */
 export function getSwordJobs(): JobDefinition[] {
   return Object.values(SWORD_JOB_DEFINITIONS);
@@ -370,4 +448,15 @@ export function getCoreJobs(): JobDefinition[] {
  */
 export function getAllJobDefinitions(): JobDefinition[] {
   return Object.values(JOB_DEFINITIONS);
+}
+
+/**
+ * Get Deliberate Practice jobs only.
+ */
+export function getPracticeJobs(): JobDefinition[] {
+  return [
+    SWORD_JOB_DEFINITIONS['generate_daily_drills']!,
+    SWORD_JOB_DEFINITIONS['week_transition']!,
+    SWORD_JOB_DEFINITIONS['drill_reconciliation']!,
+  ];
 }

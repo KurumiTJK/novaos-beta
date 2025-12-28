@@ -1,11 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // JOB HANDLERS — Implementation of Scheduled Tasks
 // NovaOS Scheduler — Phase 15: Enhanced Scheduler & Jobs
+// Phase 18: Deliberate Practice Jobs
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Contains handlers for:
 // - Core scheduler jobs (memory, sessions, cleanup, health)
 // - Sword system jobs (imported from ./jobs/ directory)
+// - Deliberate Practice jobs (imported from ./jobs/) ← Phase 18
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -24,6 +26,13 @@ import {
   knownSourcesHealthHandler,
   retentionEnforcementHandler,
 } from './jobs/index.js';
+
+// Import Deliberate Practice job handlers (Phase 18)
+import {
+  generateDailyDrillsHandler,
+  weekTransitionHandler,
+  drillReconciliationHandler,
+} from './jobs/practice-handlers.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER
@@ -560,6 +569,10 @@ export const JOB_HANDLERS: Record<JobId, JobHandler> = {
   day_end_reconciliation: dayEndReconciliationHandler,
   known_sources_health: knownSourcesHealthHandler,
   retention_enforcement: retentionEnforcementHandler,
+  // Deliberate Practice handlers (Phase 18)
+  generate_daily_drills: generateDailyDrillsHandler,
+  week_transition: weekTransitionHandler,
+  drill_reconciliation: drillReconciliationHandler,
 };
 
 export function getJobHandler(jobId: JobId): JobHandler | undefined {
@@ -574,4 +587,11 @@ export {
   dayEndReconciliationHandler,
   knownSourcesHealthHandler,
   retentionEnforcementHandler,
+};
+
+// Re-export Deliberate Practice handlers (Phase 18)
+export {
+  generateDailyDrillsHandler,
+  weekTransitionHandler,
+  drillReconciliationHandler,
 };
