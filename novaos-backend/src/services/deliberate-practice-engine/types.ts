@@ -33,6 +33,35 @@ import type {
   Timestamp,
 } from '../../types/branded.js';
 
+// Phase 21: Science-Based Learning Types
+import type {
+  DrillDayType,
+  LearningDomain,
+  ResourcePolicy,
+  GivenMaterialType,
+} from './phase21/types/enhanced-types.js';
+
+import type { DurationType } from '../spark-engine/types.js';
+
+// Re-export for convenience
+export type { DurationType };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// JIT GENERATION CONSTANTS (Phase 19A)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Placeholder WeekPlanId for JIT-generated drills.
+ * These drills don't belong to a pre-generated week plan.
+ */
+export const JIT_WEEK_PLAN_ID = 'wp_jit_00000000' as WeekPlanId;
+
+/**
+ * Default planning horizon for ongoing goals (in days).
+ * Used for initial skill distribution calculations.
+ */
+export const ONGOING_PLANNING_HORIZON_DAYS = 28;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // QUEST DURATION TYPES (NEW)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -221,24 +250,6 @@ export const MASTERY_THRESHOLDS = {
   /** Consecutive passes required for mastery */
   CONSECUTIVE_FOR_MASTERY: 2,
 } as const;
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// JIT GENERATION CONSTANTS (Phase 19A)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Placeholder WeekPlan ID for JIT-generated drills.
- * JIT drills don't belong to a pre-generated week plan.
- * Phase 19A: JIT drill generation.
- */
-export const JIT_WEEK_PLAN_ID = 'wp_jit_00000000' as WeekPlanId;
-
-/**
- * Planning horizon for ongoing goals in days.
- * Used for skill distribution visualization.
- * Phase 19A: Ongoing goal support.
- */
-export const ONGOING_PLANNING_HORIZON_DAYS = 28;
 
 /**
  * Check if a value is a valid SkillMastery.
@@ -903,23 +914,68 @@ export interface DailyDrill {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Whether this drill was generated just-in-time.
-   * JIT drills use JIT_WEEK_PLAN_ID as weekPlanId.
-   * Phase 19A: JIT drill generation.
+   * Whether this drill was generated JIT (just-in-time).
+   * True for drills generated on-demand, false for pre-generated drills.
    */
   readonly isJIT?: boolean;
 
   /**
-   * Context explaining why this skill was selected for JIT generation.
-   * Phase 19A: JIT drill generation.
+   * Context explaining why this skill was selected.
+   * Examples: "Retry needed", "Next skill in sequence", "Reinforcing mastered skill"
    */
   readonly generationContext?: string;
 
   /**
-   * When the drill was generated (for JIT drills).
-   * Phase 19A: JIT drill generation.
+   * Timestamp when drill was generated.
+   * For JIT drills, this is when getTodayPractice() was called.
    */
   readonly generatedAt?: Timestamp;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PHASE 21: Science-Based Learning Fields
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Day type based on 5-day E/S/C/F/P pattern. */
+  readonly dayType?: DrillDayType;
+
+  /** Global day number across entire goal (1, 2, 3... N). */
+  readonly globalDayNumber?: number;
+
+  /** Quick recall question from previous day. Null for Week 1 Day 1. */
+  readonly prime?: string | null;
+
+  /** Answer to prime question. */
+  readonly primeAnswer?: string | null;
+
+  /** Concrete action for today. Verb-first, specific. */
+  readonly do?: string;
+
+  /** Given material for ENCOUNTER and FAIL days. */
+  readonly givenMaterial?: string | null;
+
+  /** Type of given material for rendering. */
+  readonly givenMaterialType?: GivenMaterialType | null;
+
+  /** Binary (yes/no) success signal. Observable, verifiable. */
+  readonly done?: string;
+
+  /** Where 80% of learners fail. Specific error/problem. */
+  readonly stuck?: string;
+
+  /** Single concrete recovery action. Verb-first, actionable. */
+  readonly unstuck?: string;
+
+  /** Why this matters. Connection to bigger picture. */
+  readonly why?: string;
+
+  /** End-of-session reflection prompt. */
+  readonly reflect?: string;
+
+  /** Topics for fresh resource search at drill start. */
+  readonly resourceTopics?: readonly string[];
+
+  /** Resource availability policy based on day type. */
+  readonly resourcePolicy?: ResourcePolicy;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1195,6 +1251,19 @@ export interface WeekPlan {
 
   /** When completed */
   readonly completedAt?: Timestamp;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PHASE 21: Science-Based Learning Fields
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** The ONE skill for this week. Verb-first, specific, domain-appropriate. */
+  readonly skill?: string;
+
+  /** Day 5 PROVE criteria. Binary, observable, achievable with Days 1-4 knowledge. */
+  readonly competenceProof?: string;
+
+  /** Learning domain for this week's content. */
+  readonly domain?: LearningDomain;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1285,28 +1354,29 @@ export interface LearningPlan {
   readonly userId: UserId;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Duration Type (Phase 19A)
+  // Duration Configuration (Phase 19A)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Duration type for this learning plan.
-   * Phase 19A: Flexible duration support.
+   * Duration type - fixed or ongoing.
+   * Required field that determines plan behavior.
+   * Phase 19A addition.
    */
-  readonly durationType: 'fixed' | 'ongoing';
+  readonly durationType: DurationType;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Plan Overview (ENHANCED - Phase 19A)
+  // Plan Overview (ENHANCED - Phase 19A: optional for ongoing)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Total weeks in the plan.
-   * Phase 19A: Undefined for ongoing goals.
+   * Undefined for ongoing goals.
    */
   readonly totalWeeks?: number;
 
   /**
    * Total practice days (sum of all quest practice days).
-   * Phase 19A: Undefined for ongoing goals.
+   * Undefined for ongoing goals.
    */
   readonly totalPracticeDays?: number;
 
@@ -1315,56 +1385,56 @@ export interface LearningPlan {
 
   /**
    * Total drills planned (approximate).
-   * Phase 19A: Undefined for ongoing goals.
+   * Undefined for ongoing goals.
    */
   readonly totalDrills?: number;
 
   /**
    * Estimated completion date (YYYY-MM-DD).
-   * Phase 19A: Undefined for ongoing goals.
+   * Undefined for ongoing goals.
    */
   readonly estimatedCompletionDate?: string;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Quest Mapping (ENHANCED - Phase 19A)
+  // Quest Mapping (ENHANCED - Phase 19A: some optional for JIT)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Quest to skills mapping.
    * Each quest's decomposed skills.
-   * Always required (skills decomposed upfront even for JIT).
+   * Always required - skills are decomposed upfront even for JIT.
    */
   readonly questSkillMapping: readonly QuestSkillMapping[];
 
   /**
    * Quest to weeks mapping.
    * Which weeks cover which quests.
-   * Phase 19A: Optional, not used in JIT mode.
+   * Optional in JIT mode - weeks not pre-generated.
    */
   readonly questWeekMapping?: readonly QuestWeekMapping[];
 
   /**
    * Quest durations (NEW).
    * Duration for each quest, indexed by quest order.
-   * Phase 19A: Optional, not used in JIT mode.
+   * Optional in JIT mode.
    */
   readonly questDurations?: readonly QuestDuration[];
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Skill Type Summary (NEW)
+  // Skill Type Summary (NEW - Phase 19A: optional)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /** Total foundation skills */
-  readonly foundationSkillCount: number;
+  readonly foundationSkillCount?: number;
 
   /** Total building skills */
-  readonly buildingSkillCount: number;
+  readonly buildingSkillCount?: number;
 
   /** Total compound skills */
-  readonly compoundSkillCount: number;
+  readonly compoundSkillCount?: number;
 
   /** Total synthesis skills (equals number of quests) */
-  readonly synthesisSkillCount: number;
+  readonly synthesisSkillCount?: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Metadata
@@ -1832,3 +1902,34 @@ export const DEFAULT_SKILL_DISTRIBUTION: SkillDistribution = {
   compoundPercent: 0.30,
   synthesisPercent: 0.10,
 } as const;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// JIT HELPER FUNCTIONS (Phase 19A)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Check if a drill was generated JIT (just-in-time).
+ *
+ * @param drill - The drill to check
+ * @returns true if drill was JIT-generated
+ */
+export function isJITDrill(drill: DailyDrill): boolean {
+  return drill.isJIT === true || drill.weekPlanId === JIT_WEEK_PLAN_ID;
+}
+
+/**
+ * Check if a learning plan uses JIT generation.
+ * Currently, all ongoing plans use JIT, but fixed plans may also opt-in.
+ *
+ * @param plan - The learning plan to check
+ * @returns true if plan uses JIT generation
+ */
+export function usesJITGeneration(plan: LearningPlan): boolean {
+  // All ongoing plans use JIT
+  if (plan.durationType === 'ongoing') {
+    return true;
+  }
+
+  // Fixed plans use JIT if they don't have week mappings
+  return !plan.questWeekMapping || plan.questWeekMapping.length === 0;
+}

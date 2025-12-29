@@ -298,10 +298,13 @@ const LESSON_MODE_PATTERNS: RegExp[] = [
   /this\s+week/i,
   /weekly/i,
 
-  // General lesson/practice keywords (broad catch)
-  /lesson/i,
-  /practice/i,
-  /drill/i,
+  // General lesson/practice keywords (more specific to avoid matching "create a lesson")
+  /^lesson$/i,           // Only standalone "lesson"
+  /^practice$/i,         // Only standalone "practice"
+  /^drill$/i,            // Only standalone "drill"
+  /my\s+lesson/i,       // "my lesson"
+  /the\s+lesson/i,      // "the lesson"
+  /(today.?s?|current|active)\s+(lesson|practice|drill)/i,
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════

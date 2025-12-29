@@ -35,6 +35,12 @@ import type { Intent, RiskSummary, Stance } from '../../helpers/types.js';
 // Phase 14A: Import ExploreContext
 import type { ExploreContext } from './explore/types.js';
 
+// Phase 21: Science-Based Learning
+import type {
+  LearningDomain,
+  GeneratedLessonPlan,
+} from '../../services/deliberate-practice-engine/phase21/index.js';
+
 // Re-export for convenience
 export type { ExploreContext };
 
@@ -288,6 +294,9 @@ export interface ProposedQuest {
 
   /** Order in the plan (1-based) */
   readonly order: number;
+
+  /** Phase 21: Full week data for downstream use */
+  readonly phase21Data?: any;
 }
 
 /**
@@ -332,6 +341,13 @@ export interface LessonPlanProposal {
 
   /** Generation timestamp */
   readonly generatedAt: Timestamp;
+
+  // Phase 21: Science-Based Learning
+  /** Learning domain detected for this content */
+  readonly domain?: LearningDomain;
+
+  /** Full Phase 21 plan data for downstream use */
+  readonly phase21Plan?: GeneratedLessonPlan;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -812,6 +828,13 @@ export interface SwordGateConfig {
 
   /** Whether to include progress in goal list (default: true) */
   readonly viewIncludeProgressInList: boolean;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Phase 21: Science-Based Learning
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Enable Phase 21 science-based learning (E/S/C/F/P pattern) */
+  readonly usePhase21?: boolean;
 }
 
 /**
@@ -840,6 +863,9 @@ export const DEFAULT_SWORD_GATE_CONFIG: SwordGateConfig = {
   viewDefaultUpcomingDays: 7,
   viewMaxGoalsToList: 20,
   viewIncludeProgressInList: true,
+
+  // Phase 21
+  usePhase21: true,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════

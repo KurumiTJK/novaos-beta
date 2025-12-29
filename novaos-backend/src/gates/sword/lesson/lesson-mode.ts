@@ -25,7 +25,14 @@ import type { IRefinementStore } from '../../../services/spark-engine/store/type
 import type { IDeliberatePracticeEngine } from '../../../services/deliberate-practice-engine/interfaces.js';
 import type { ISparkEngine } from '../../../services/spark-engine/interfaces.js';
 import type { Goal } from '../../../services/spark-engine/types.js';
-import type { DailyDrill } from '../../../services/deliberate-practice-engine/types.js';
+import type { 
+  DailyDrill, 
+  Skill, 
+  WeekPlan,
+  SkillMastery,
+} from '../../../services/deliberate-practice-engine/types.js';
+import type { TodayPracticeResult } from '../../../services/deliberate-practice-engine/interfaces.js';
+import type { Quest, QuestResource } from '../../../services/spark-engine/types.js';
 
 import type {
   LessonIntent,
@@ -781,33 +788,56 @@ export class LessonMode {
       });
     }
 
-    // Generate or get today's drill
+    // Get today's practice with full context
     const today = new Date().toISOString().split('T')[0]!;
-    let drill: DailyDrill | null = null;
+    let practiceResult: TodayPracticeResult | null = null;
 
     try {
-      // Try to get existing drill first
-      const practiceResult = await this.practiceEngine.getTodayPractice(userId, goal.id);
-      if (practiceResult.ok && practiceResult.value.drill) {
-        drill = practiceResult.value.drill;
-      } else {
-        // Generate new drill
+      const result = await this.practiceEngine.getTodayPractice(userId, goal.id);
+      if (result.ok && result.value.drill) {
+        practiceResult = result.value;
+      } else if (result.ok && !result.value.drill) {
+        // No drill exists, try to generate one
         const generateResult = await this.practiceEngine.generateDrill(userId, goal.id, today);
         if (generateResult.ok) {
-          drill = generateResult.value;
+          // Re-fetch to get full context
+          const refetch = await this.practiceEngine.getTodayPractice(userId, goal.id);
+          if (refetch.ok) {
+            practiceResult = refetch.value;
+          }
         }
       }
     } catch (error) {
       console.error('[LESSON_MODE] Failed to get/generate drill:', error);
     }
 
-    if (!drill) {
+    if (!practiceResult?.drill) {
       return ok({
         response: `⚠️ Couldn't load lesson for **${goal.title}**.\n\nThe learning plan may not be fully initialized. Try again in a moment.`,
         stage: 'idle',
         suppressModelGeneration: true,
         intent: 'start',
       });
+    }
+
+    const drill = practiceResult.drill;
+
+    // Fetch quest resources if available
+    let questResources: readonly QuestResource[] = [];
+    if (practiceResult.questId && practiceResult.goalId) {
+      try {
+        // getQuest doesn't exist, so we fetch all quests and filter
+        const questsResult = await this.sparkEngine.getQuestsForGoal(practiceResult.goalId);
+        if (questsResult.ok) {
+          const quest = questsResult.value.find(q => q.id === practiceResult.questId);
+          if (quest?.verifiedResources) {
+            questResources = quest.verifiedResources;
+          }
+        }
+      } catch (error) {
+        // Resources are optional, don't fail
+        console.log('[LESSON_MODE] Could not fetch quest resources:', error);
+      }
     }
 
     // Enter active mode
@@ -820,7 +850,7 @@ export class LessonMode {
       `Practicing: ${drill.action}`
     );
 
-    const response = this.formatDrill(drill, goal.title, false);
+    const response = this.formatRichDrill(practiceResult, goal.title, questResources, false);
 
     return ok({
       response,
@@ -845,19 +875,19 @@ export class LessonMode {
     userId: UserId,
     goal: GoalSummary
   ): AsyncAppResult<LessonModeOutput> {
-    // Get today's drill for review
-    let drill: DailyDrill | null = null;
+    // Get today's practice with full context
+    let practiceResult: TodayPracticeResult | null = null;
 
     try {
-      const practiceResult = await this.practiceEngine.getTodayPractice(userId, goal.id);
-      if (practiceResult.ok && practiceResult.value.drill) {
-        drill = practiceResult.value.drill;
+      const result = await this.practiceEngine.getTodayPractice(userId, goal.id);
+      if (result.ok && result.value.drill) {
+        practiceResult = result.value;
       }
     } catch (error) {
       console.error('[LESSON_MODE] Failed to get drill for review:', error);
     }
 
-    if (!drill) {
+    if (!practiceResult?.drill) {
       await this.store.exitToIdle(userId);
       return ok({
         response: `⚠️ Couldn't load the lesson for review. Try again later.`,
@@ -865,6 +895,25 @@ export class LessonMode {
         suppressModelGeneration: true,
         intent: 'start',
       });
+    }
+
+    const drill = practiceResult.drill;
+
+    // Fetch quest resources if available
+    let questResources: readonly QuestResource[] = [];
+    if (practiceResult.questId && practiceResult.goalId) {
+      try {
+        // getQuest doesn't exist, so we fetch all quests and filter
+        const questsResult = await this.sparkEngine.getQuestsForGoal(practiceResult.goalId);
+        if (questsResult.ok) {
+          const quest = questsResult.value.find(q => q.id === practiceResult.questId);
+          if (quest?.verifiedResources) {
+            questResources = quest.verifiedResources;
+          }
+        }
+      } catch (error) {
+        console.log('[LESSON_MODE] Could not fetch quest resources:', error);
+      }
     }
 
     // Enter active mode as review
@@ -877,7 +926,7 @@ export class LessonMode {
       `Reviewing: ${drill.action}`
     );
 
-    const response = this.formatDrill(drill, goal.title, true);
+    const response = this.formatRichDrill(practiceResult, goal.title, questResources, true);
 
     return ok({
       response,
@@ -896,7 +945,7 @@ export class LessonMode {
   }
 
   /**
-   * Format drill for display.
+   * Format drill for display (legacy fallback).
    */
   private formatDrill(
     drill: DailyDrill,
@@ -929,6 +978,293 @@ export class LessonMode {
     lines.push('Say **\"complete\"** when done, **\"pause\"** to save for later.');
 
     return lines.join('\n');
+  }
+
+  /**
+   * Format rich drill display with full context.
+   */
+  private formatRichDrill(
+    practice: TodayPracticeResult,
+    goalTitle: string,
+    resources: readonly QuestResource[],
+    isReview: boolean
+  ): string {
+    const { drill, skill, weekPlan, context } = practice;
+    
+    if (!drill) {
+      return 'No drill available.';
+    }
+
+    // Check if this is a Phase 21 drill (has dayType field)
+    const isPhase21 = !!(drill as any).dayType;
+    
+    if (isPhase21) {
+      return this.formatPhase21Drill(drill, weekPlan, goalTitle, resources, isReview);
+    }
+
+    // Legacy format for non-Phase 21 drills
+    return this.formatLegacyDrill(drill, skill, weekPlan, goalTitle, resources, isReview, context);
+  }
+
+  /**
+   * Format Phase 21 drill with science-based display.
+   */
+  private formatPhase21Drill(
+    drill: DailyDrill,
+    weekPlan: WeekPlan | null,
+    goalTitle: string,
+    resources: readonly QuestResource[],
+    isReview: boolean
+  ): string {
+    const d = drill as any;
+    const lines: string[] = [];
+    
+    const dayTypeIcons: Record<string, string> = {
+      encounter: '👋',
+      struggle: '💪',
+      connect: '🔗',
+      fail: '🔧',
+      prove: '🎯',
+    };
+    const dayTypeLabels: Record<string, string> = {
+      encounter: 'ENCOUNTER — First Exposure',
+      struggle: 'STRUGGLE — Try Without Aids',
+      connect: 'CONNECT — Link Knowledge',
+      fail: 'FAIL — Diagnose & Repair',
+      prove: 'PROVE — Demonstrate Mastery',
+    };
+
+    // Header
+    const icon = dayTypeIcons[d.dayType] ?? '📚';
+    const reviewTag = isReview ? ' 🔄' : '';
+    if (weekPlan) {
+      lines.push(`${icon} **${goalTitle}** — Week ${weekPlan.weekNumber}${reviewTag}`);
+      if ((weekPlan as any).skill) {
+        lines.push(`   *Skill: ${(weekPlan as any).skill}*`);
+      }
+    } else {
+      lines.push(`${icon} **${goalTitle}**${reviewTag}`);
+    }
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('');
+
+    // Day Type Banner
+    const dayLabel = dayTypeLabels[d.dayType] ?? d.dayType?.toUpperCase();
+    lines.push(`📅 **Day ${d.globalDayNumber ?? drill.dayNumber}** | ${dayLabel}`);
+    lines.push('');
+
+    // PRIME (if present)
+    if (d.prime) {
+      lines.push(`🧠 **PRIME** *(recall from yesterday)*`);
+      lines.push(`   ${d.prime}`);
+      lines.push('');
+      lines.push(`   💡 Answer: ||${d.primeAnswer}||`);
+      lines.push('');
+      lines.push('───────────────────────────────────────');
+      lines.push('');
+    }
+
+    // DO (main action)
+    lines.push(`📝 **DO:**`);
+    lines.push(`   ${d.do ?? drill.action}`);
+    
+    // Given Material (for ENCOUNTER/FAIL days)
+    if (d.givenMaterial) {
+      lines.push('');
+      if (d.givenMaterialType === 'code' || d.givenMaterialType === 'broken_code') {
+        lines.push('```');
+        lines.push(d.givenMaterial);
+        lines.push('```');
+      } else {
+        lines.push(`   📋 ${d.givenMaterial}`);
+      }
+    }
+    lines.push('');
+
+    // DONE (success signal)
+    lines.push(`✅ **DONE WHEN:**`);
+    lines.push(`   ${d.done ?? drill.passSignal}`);
+    lines.push('');
+
+    // STUCK/UNSTUCK
+    if (d.stuck) {
+      lines.push(`⚠️ **IF STUCK:** ${d.stuck}`);
+      lines.push(`🔧 **FIX:** ${d.unstuck}`);
+      lines.push('');
+    }
+
+    // WHY (motivation)
+    if (d.why) {
+      lines.push(`💡 **WHY:** ${d.why}`);
+      lines.push('');
+    }
+
+    // Resources (based on policy)
+    const policy = d.resourcePolicy ?? 'available';
+    if (policy !== 'none' && resources.length > 0) {
+      const policyNote = policy === 'after_attempt' 
+        ? ' *(only after 5-min attempt)*'
+        : policy === 'hint_only'
+        ? ' *(hint only)*'
+        : '';
+      lines.push(`📖 **RESOURCES**${policyNote}:`);
+      for (const resource of resources.slice(0, 3)) {
+        lines.push(`   • ${resource.title}`);
+      }
+      lines.push('');
+    } else if (policy === 'none') {
+      lines.push(`📖 **RESOURCES:** *None — prove it from memory!*`);
+      lines.push('');
+    }
+
+    // Time
+    if (drill.estimatedMinutes) {
+      lines.push(`⏱️ ~${drill.estimatedMinutes} minutes`);
+      lines.push('');
+    }
+
+    // REFLECT (end of session prompt)
+    if (d.reflect) {
+      lines.push('───────────────────────────────────────');
+      lines.push(`💭 **REFLECT (after):** ${d.reflect}`);
+      lines.push('');
+    }
+
+    // Footer
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('Say **"done"** when complete, **"stuck"** for help, **"pause"** to save.');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Format legacy drill (non-Phase 21).
+   */
+  private formatLegacyDrill(
+    drill: DailyDrill,
+    skill: Skill | null,
+    weekPlan: WeekPlan | null,
+    goalTitle: string,
+    resources: readonly QuestResource[],
+    isReview: boolean,
+    context: string | null
+  ): string {
+    const lines: string[] = [];
+    const reviewTag = isReview ? ' 🔄 REVIEW' : '';
+
+    if (weekPlan) {
+      lines.push(`📚 **${goalTitle}** — Week ${weekPlan.weekNumber}: ${weekPlan.theme}${reviewTag}`);
+    } else {
+      lines.push(`📚 **${goalTitle}**${reviewTag}`);
+    }
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('');
+
+    const skillName = skill?.action?.split(' ').slice(0, 6).join(' ') || 'Practice';
+    lines.push(`📅 **Day ${drill.dayNumber}** | Skill: ${skillName}`);
+    
+    if (skill) {
+      const masteryIcon = this.getMasteryIcon(skill.mastery);
+      const masteryLabel = this.getMasteryLabel(skill.mastery);
+      lines.push(`   Mastery: ${masteryIcon} ${masteryLabel}`);
+    }
+    lines.push('');
+
+    lines.push(`📝 **TODAY'S ACTION:**`);
+    lines.push(`   ${drill.action}`);
+    lines.push('');
+
+    lines.push(`✅ **YOU'LL KNOW IT WORKED WHEN:**`);
+    lines.push(`   ${drill.passSignal}`);
+    lines.push('');
+
+    if (drill.lockedVariables && drill.lockedVariables.length > 0) {
+      lines.push(`🔒 **KEEP THESE CONSTANT:**`);
+      for (const locked of drill.lockedVariables) {
+        lines.push(`   • ${locked}`);
+      }
+      lines.push('');
+    } else if (drill.constraint) {
+      lines.push(`🔒 **FOCUS:** ${drill.constraint}`);
+      lines.push('');
+    }
+
+    if (skill?.adversarialElement) {
+      lines.push(`⚠️ **WATCH OUT FOR:**`);
+      lines.push(`   ${skill.adversarialElement}`);
+      lines.push('');
+    }
+
+    if (drill.isRetry && skill?.recoverySteps) {
+      lines.push(`🔁 **RETRY TIP (attempt ${drill.retryCount + 1}):**`);
+      lines.push(`   ${skill.recoverySteps}`);
+      lines.push('');
+    }
+
+    if (drill.continuationContext) {
+      lines.push(`📌 **CONTINUING FROM YESTERDAY:**`);
+      lines.push(`   ${drill.continuationContext}`);
+      lines.push('');
+    }
+
+    if (resources.length > 0) {
+      lines.push(`📖 **RESOURCES:**`);
+      for (const resource of resources.slice(0, 3)) {
+        const typeIcon = this.getResourceTypeIcon(resource.type);
+        lines.push(`   ${typeIcon} ${resource.title}`);
+        lines.push(`      ${resource.url}`);
+      }
+      if (resources.length > 3) {
+        lines.push(`   ... and ${resources.length - 3} more`);
+      }
+      lines.push('');
+    }
+
+    if (drill.estimatedMinutes) {
+      lines.push(`⏱️ ~${drill.estimatedMinutes} minutes`);
+      lines.push('');
+    }
+
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('Say **"complete"** when done, **"pause"** to save for later.');
+
+    return lines.join('\n');
+  }
+  private getMasteryIcon(mastery: SkillMastery): string {
+    switch (mastery) {
+      case 'not_started': return '⚪';
+      case 'practicing': return '🔵';
+      case 'mastered': return '🟢';
+      default: return '⚪';
+    }
+  }
+
+  /**
+   * Get mastery label for display.
+   */
+  private getMasteryLabel(mastery: SkillMastery): string {
+    switch (mastery) {
+      case 'not_started': return 'Not Started (needs 3 passes)';
+      case 'practicing': return 'Practicing (1+ passes)';
+      case 'mastered': return 'Mastered ✓';
+      default: return 'Unknown';
+    }
+  }
+
+  /**
+   * Get resource type icon.
+   */
+  private getResourceTypeIcon(type: string): string {
+    switch (type) {
+      case 'video': return '📺';
+      case 'article': return '📄';
+      case 'tutorial': return '📝';
+      case 'documentation': return '📚';
+      case 'course': return '🎓';
+      case 'book': return '📖';
+      case 'interactive': return '🎮';
+      default: return '🔗';
+    }
   }
 }
 

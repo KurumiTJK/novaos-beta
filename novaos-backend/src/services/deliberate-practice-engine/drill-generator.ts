@@ -37,6 +37,15 @@ import type {
   RollForwardResult,
 } from './interfaces.js';
 
+// Phase 21: Science-Based Learning
+import {
+  getDayType,
+  DAY_TYPE_CONFIGS,
+  type DrillDayType,
+  type ResourcePolicy,
+  type GivenMaterialType,
+} from './phase21/types/enhanced-types.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -197,6 +206,22 @@ export class DrillGenerator implements IDrillGenerator {
       // Timestamps
       createdAt: now,
       updatedAt: now,
+
+      // Phase 21: Science-Based Learning Fields
+      dayType: getDayType(((dayPlan.dayNumber - 1) % 5 + 1) as 1 | 2 | 3 | 4 | 5),
+      globalDayNumber: dayPlan.dayNumber,
+      prime: (skill as any).prime ?? null,
+      primeAnswer: (skill as any).primeAnswer ?? null,
+      do: (skill as any).do ?? action,
+      givenMaterial: (skill as any).givenMaterial ?? null,
+      givenMaterialType: (skill as any).givenMaterialType ?? null,
+      done: (skill as any).done ?? passSignal,
+      stuck: (skill as any).stuck ?? '',
+      unstuck: (skill as any).unstuck ?? '',
+      why: (skill as any).why ?? '',
+      reflect: (skill as any).reflect ?? '',
+      resourceTopics: (skill as any).resourceTopics ?? [],
+      resourcePolicy: DAY_TYPE_CONFIGS[getDayType(((dayPlan.dayNumber - 1) % 5 + 1) as 1 | 2 | 3 | 4 | 5)].resourcePolicy,
     };
 
     return ok(drill);

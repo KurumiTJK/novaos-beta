@@ -39,6 +39,15 @@ import {
   type CapabilityStage,
 } from './capability-generator.js';
 
+// Phase 21: Science-Based Learning
+import {
+  QualityGenerator,
+  createQualityGenerator,
+  type GenerationContext,
+  type GeneratedLessonPlan,
+  type GeneratedWeek,
+} from '../../services/deliberate-practice-engine/phase21/index.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PHASE 6 & 7 INTEGRATION TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -405,17 +414,20 @@ export class LessonPlanGenerator {
   private readonly resourceService?: IResourceDiscoveryService;
   private readonly curriculumService?: ICurriculumService;
   private readonly capabilityGenerator: CapabilityGenerator;
+  private readonly qualityGenerator?: QualityGenerator;
 
   constructor(
     config: SwordGateConfig,
     resourceService?: IResourceDiscoveryService,
     curriculumService?: ICurriculumService,
-    capabilityGenerator?: CapabilityGenerator
+    capabilityGenerator?: CapabilityGenerator,
+    qualityGenerator?: QualityGenerator
   ) {
     this.config = config;
     this.resourceService = resourceService;
     this.curriculumService = curriculumService;
     this.capabilityGenerator = capabilityGenerator ?? createCapabilityGenerator();
+    this.qualityGenerator = qualityGenerator;
   }
 
   /**
@@ -442,6 +454,93 @@ export class LessonPlanGenerator {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Phase 21: Try science-based generation first (if enabled)
+    // ─────────────────────────────────────────────────────────────────────────
+    if (this.qualityGenerator && this.config.usePhase21) {
+      const topic = inputs.extractedTopic ?? inputs.goalStatement;
+      
+      // Parse totalDuration to get actual week count (user says "4 weeks" = 4 weeks, not 28/5)
+      const durationMatch = inputs.totalDuration?.match(/(\d+)\s*week/i);
+      const totalWeeks = durationMatch ? parseInt(durationMatch[1], 10) : Math.ceil((inputs.totalDays ?? 28) / 7);
+      
+      console.log(`[LESSON_PLAN] Phase 21: Generating science-based curriculum for: "${topic.substring(0, 50)}..." (${totalWeeks} weeks)`);
+      
+      const phase21Result = await this.qualityGenerator.generate({
+        topic,
+        focus: (inputs.exploreContext as any)?.focus ?? (inputs.exploreContext as any)?.focusArea,
+        motivation: (inputs.exploreContext as any)?.motivation ?? (inputs.exploreContext as any)?.motivations?.[0],
+        priorKnowledge: (inputs.exploreContext as any)?.priorKnowledge ?? (inputs.exploreContext as any)?.priorKnowledgeLevel,
+        level: inputs.userLevel as 'beginner' | 'intermediate' | 'advanced',
+        minutesPerDay: inputs.dailyTimeCommitment,
+        totalWeeks,
+      });
+      
+      if (phase21Result.ok) {
+        console.log(`[LESSON_PLAN] Phase 21: Generated ${phase21Result.value.weeks.length} weeks`);
+        
+        // Run resource discovery for Phase 21
+        let phase21Resources: readonly VerifiedResource[] = [];
+        let phase21Topics: readonly string[] = [];
+        
+        if (this.resourceService) {
+          // Collect topics from drills
+          let allTopics: string[] = phase21Result.value.weeks.flatMap(w => 
+            w.drills.flatMap(d => d.resourceTopics || [])
+          );
+          
+          // Always add the main topic first for better results
+          const mainTopic = topic.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+          if (mainTopic) {
+            allTopics.unshift(mainTopic);
+          }
+          
+          // If still few topics, generate from skills and competence proofs
+          if (allTopics.length < 5) {
+            const skillTopics = phase21Result.value.weeks.flatMap(w => {
+              // Clean up skill and competence proof text
+              const text = `${w.skill} ${w.competenceProof}`.toLowerCase();
+              const words = text
+                .replace(/[^a-z0-9\s]/g, ' ')  // Remove punctuation
+                .split(/\s+/)
+                .filter(word => 
+                  word.length > 4 && 
+                  !['with', 'using', 'from', 'into', 'that', 'this', 'the', 'and', 'for', 'all', 'without'].includes(word)
+                );
+              return words.slice(0, 5);
+            });
+            allTopics.push(...skillTopics);
+          }
+          
+          // Dedupe and format
+          const uniqueTopics = [...new Set(allTopics)]
+            .filter(t => t.length > 2)
+            .slice(0, 15)
+            .map(t => `topic:${t}`);
+          const keywords = this.extractKeywords(topic);
+          
+          console.log(`[LESSON_PLAN] Phase 21: Resource discovery with ${uniqueTopics.length} topics: ${uniqueTopics.slice(0,5).join(', ')}`);
+          
+          const discoveryResult = await this.resourceService.discover({
+            topics: uniqueTopics.length > 0 ? uniqueTopics : [`topic:${mainTopic || 'programming'}`],
+            keywords,
+            maxResults: 50,
+            difficulty: inputs.userLevel,
+          });
+          
+          if (discoveryResult.ok) {
+            phase21Resources = discoveryResult.value.resources;
+            phase21Topics = discoveryResult.value.topicsCovered;
+            console.log(`[LESSON_PLAN] Phase 21: Found ${phase21Resources.length} resources`);
+          }
+        }
+        
+        return ok(this.buildPhase21Proposal(inputs, phase21Result.value, phase21Resources, phase21Topics));
+      } else {
+        console.warn('[LESSON_PLAN] Phase 21 generation failed, falling back to legacy:', phase21Result.error);
+      }
+    }
     // Step 2: Generate capability-based progression (DYNAMIC via LLM)
     // ─────────────────────────────────────────────────────────────────────────
     const topic = inputs.extractedTopic ?? inputs.goalStatement;
@@ -661,6 +760,63 @@ export class LessonPlanGenerator {
     };
   }
 
+
+  /**
+   * Build proposal from Phase 21 quality generator output.
+   * Phase 21 addition.
+   */
+  private buildPhase21Proposal(
+    inputs: SwordRefinementInputs,
+    plan: GeneratedLessonPlan,
+    resources: readonly VerifiedResource[] = [],
+    topicsCovered: readonly string[] = []
+  ): LessonPlanProposal {
+    const topic = inputs.extractedTopic ?? inputs.goalStatement ?? '';
+    
+    // Convert GeneratedWeek to ProposedQuest with detailed drill info
+    const quests: ProposedQuest[] = plan.weeks.map((week, index) => {
+      // Build detailed description with E/S/C/F/P breakdown
+      const drillDetails = week.drills.map((drill, dayIndex) => {
+        const dayNum = dayIndex + 1;
+        const dayLabel = ['Encounter', 'Struggle', 'Connect', 'Fail', 'Prove'][dayIndex] || `Day ${dayNum}`;
+        const doText = drill.do || '[Practice task - see full plan]';
+        const doneText = drill.done || '[Complete the task]';
+        return `**Day ${dayNum} (${dayLabel}):** ${doText}\n   ✓ Done: ${doneText}`;
+      }).join('\n');
+      
+      return {
+        title: week.title || `Week ${week.weekNumber}: ${week.skill}`,
+        description: `**Skill:** ${week.skill}\n\n**Prove it:** ${week.competenceProof}\n\n${drillDetails}`,
+        topics: week.drills.flatMap(d => d.resourceTopics || []),
+        estimatedDays: 5,
+        order: index + 1,
+        phase21Data: week,
+      } as ProposedQuest;
+    });
+
+    // Collect all topics from drills
+    const allTopics = plan.weeks.flatMap(w => 
+      w.drills.flatMap(d => d.resourceTopics || [])
+    );
+    const uniqueTopics = [...new Set(allTopics)];
+
+    return {
+      title: this.generateTitle(inputs),
+      description: `A science-based ${plan.totalWeeks}-week learning path for ${topic}. ` +
+                   `Each week follows the E/S/C/F/P pattern: Encounter → Struggle → Connect → Fail → Prove.`,
+      learningConfig: this.buildLearningConfig(inputs),
+      quests,
+      totalDuration: inputs.totalDuration!,
+      totalDays: plan.totalWeeks * 5,
+      topicsCovered: topicsCovered.length > 0 ? topicsCovered as string[] : uniqueTopics,
+      gaps: undefined,
+      resourcesFound: resources.length,
+      confidence: 'high',
+      generatedAt: createTimestamp(),
+      domain: plan.domain,
+      phase21Plan: plan,
+    };
+  }
   /**
    * Generate description for ongoing goals.
    * Phase 19A addition.
@@ -1171,7 +1327,10 @@ export class LessonPlanGenerator {
 export function createLessonPlanGenerator(
   config: SwordGateConfig,
   resourceService?: IResourceDiscoveryService,
-  curriculumService?: ICurriculumService
+  curriculumService?: ICurriculumService,
+  qualityGenerator?: QualityGenerator
 ): LessonPlanGenerator {
-  return new LessonPlanGenerator(config, resourceService, curriculumService);
+  // Phase 21: Auto-create qualityGenerator if usePhase21 is enabled
+  const qg = qualityGenerator ?? (config.usePhase21 ? createQualityGenerator() : undefined);
+  return new LessonPlanGenerator(config, resourceService, curriculumService, undefined, qg);
 }

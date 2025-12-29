@@ -111,7 +111,7 @@ vi.mock('../capability-generator.js', () => ({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const TEST_USER_ID = createUserId('user_test123');
-const TEST_CONFIG: SwordGateConfig = { ...DEFAULT_SWORD_GATE_CONFIG, useLlmModeDetection: false };
+const TEST_CONFIG: SwordGateConfig = { ...DEFAULT_SWORD_GATE_CONFIG, useLlmModeDetection: false, usePhase21: false };
 
 function createTestRefinementState(
   overrides: Partial<SwordRefinementState> = {}
