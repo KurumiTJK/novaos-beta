@@ -23,6 +23,8 @@ import type {
   Skill,
   SkillDifficulty,
   SkillMastery,
+  SkillType,
+  SkillStatus,
 } from './types.js';
 import type {
   ISkillDecomposer,
@@ -69,11 +71,11 @@ const ACTION_VERBS = [
  * Map stage index (0-4) to difficulty tier.
  */
 const STAGE_DIFFICULTY_MAP: Record<number, SkillDifficulty> = {
-  0: 'foundation', // REPRODUCE
-  1: 'foundation', // MODIFY
-  2: 'practice',   // DIAGNOSE
-  3: 'practice',   // DESIGN
-  4: 'challenge',  // SHIP
+  0: 'intro',     // REPRODUCE
+  1: 'intro',     // MODIFY
+  2: 'practice',  // DIAGNOSE
+  3: 'practice',  // DESIGN
+  4: 'challenge', // SHIP
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -120,7 +122,7 @@ export class SkillDecomposer implements ISkillDecomposer {
    * Decompose a quest's capability stages into skills.
    */
   async decompose(context: SkillDecompositionContext): AsyncAppResult<SkillDecompositionResult> {
-    const { quest, goal, stages, dailyMinutes, userLevel } = context;
+    const { quest, goal, stages, dailyMinutes, userId } = context;
 
     if (stages.length === 0) {
       return err(appError('INVALID_INPUT', 'No capability stages provided for decomposition'));
@@ -140,9 +142,8 @@ export class SkillDecomposer implements ISkillDecomposer {
         stageIndex,
         quest.id,
         goal.id,
-        goal.userId,
+        userId,
         dailyMinutes,
-        userLevel,
         globalOrder
       );
 
@@ -166,14 +167,13 @@ export class SkillDecomposer implements ISkillDecomposer {
 
     // Calculate totals
     const totalMinutes = linkedSkills.reduce((sum, s) => sum + s.estimatedMinutes, 0);
-    const totalDays = Math.ceil(totalMinutes / dailyMinutes);
-    const suggestedWeekCount = Math.ceil(totalDays / 5); // 5 practice days per week
+    const estimatedDays = Math.ceil(totalMinutes / dailyMinutes);
 
     return ok({
       skills: linkedSkills,
-      totalDays,
+      totalMinutes,
+      estimatedDays,
       warnings,
-      suggestedWeekCount,
     });
   }
 
@@ -238,14 +238,28 @@ export class SkillDecomposer implements ISkillDecomposer {
         questId: skill.questId,
         goalId: skill.goalId,
         userId: skill.userId,
+        // Core definition
+        title: `${skill.title ?? skill.action.slice(0, 30)} (Part ${partNumber})`,
+        topic: skill.topic ?? skill.sourceStageTitle ?? 'General',
         action: partAction,
         successSignal: partSignal,
         lockedVariables: skill.lockedVariables,
         estimatedMinutes: Math.min(timePerPart, dailyMinutes),
+        // Skill tree structure
+        skillType: skill.skillType ?? 'foundation',
+        depth: skill.depth ?? 0,
         prerequisiteSkillIds: i === 0 ? skill.prerequisiteSkillIds : [splitSkills[i - 1]!.id],
+        prerequisiteQuestIds: skill.prerequisiteQuestIds ?? [],
+        isCompound: false,
+        // Scheduling
+        weekNumber: skill.weekNumber ?? 1,
+        dayInWeek: skill.dayInWeek ?? 1,
+        dayInQuest: skill.dayInQuest ?? (skill.order + i),
         difficulty: skill.difficulty,
         order: skill.order + i,
+        // Mastery tracking
         mastery: 'not_started',
+        status: i === 0 ? (skill.status ?? 'available') : 'locked',
         passCount: 0,
         failCount: 0,
         consecutivePasses: 0,
@@ -281,14 +295,13 @@ export class SkillDecomposer implements ISkillDecomposer {
     goalId: GoalId,
     userId: UserId,
     dailyMinutes: number,
-    userLevel: 'beginner' | 'intermediate' | 'advanced',
     startOrder: number
   ): AsyncAppResult<Skill[]> {
     const now = createTimestamp();
     const difficulty = STAGE_DIFFICULTY_MAP[stageIndex] ?? 'practice';
 
-    // Estimate time based on user level and stage complexity
-    const baseMinutes = this.estimateStageMinutes(stage, userLevel);
+    // Estimate time based on stage complexity (default to intermediate level)
+    const baseMinutes = this.estimateStageMinutes(stage, 'intermediate');
 
     // Create the primary skill from the stage
     const primarySkill = this.createSkillFromStage(
@@ -349,14 +362,28 @@ export class SkillDecomposer implements ISkillDecomposer {
       questId,
       goalId,
       userId,
+      // Core definition
+      title: stage.title,
+      topic: stage.topics?.[0] ?? stage.title,
       action,
       successSignal,
       lockedVariables,
       estimatedMinutes,
+      // Skill tree structure
+      skillType: 'foundation' as const,
+      depth: 0,
       prerequisiteSkillIds: [],
+      prerequisiteQuestIds: [],
+      isCompound: false,
+      // Scheduling
+      weekNumber: 1,
+      dayInWeek: ((order - 1) % 5) + 1,
+      dayInQuest: order,
       difficulty,
       order,
+      // Mastery tracking
       mastery: 'not_started' as SkillMastery,
+      status: 'available' as const,
       passCount: 0,
       failCount: 0,
       consecutivePasses: 0,

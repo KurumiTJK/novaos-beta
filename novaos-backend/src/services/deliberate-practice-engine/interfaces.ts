@@ -48,7 +48,7 @@ import type {
   SkillDistribution,
 } from './types.js';
 
-// Re-export store types from spark-engine pattern
+// Import store types for local use
 import type {
   SaveOptions,
   GetOptions,
@@ -57,6 +57,16 @@ import type {
   DeleteResult,
   ListResult,
 } from '../spark-engine/store/types.js';
+
+// Re-export store types for consumers
+export type {
+  SaveOptions,
+  GetOptions,
+  ListOptions,
+  SaveResult,
+  DeleteResult,
+  ListResult,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SKILL TREE GENERATOR INTERFACE (NEW)
@@ -1113,3 +1123,168 @@ export interface IDeliberatePracticeStores {
   readonly weekPlans: IWeekPlanStore;
   readonly learningPlans: ILearningPlanStore;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BACKWARD COMPATIBILITY — Legacy Interface Names
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Alias for backward compatibility.
+ * @deprecated Use DailyDrillGenerationContext instead
+ */
+export type DrillGenerationContext = DailyDrillGenerationContext;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SKILL DECOMPOSER INTERFACE (Legacy Support)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Context for skill decomposition.
+ */
+export interface SkillDecompositionContext {
+  /** Quest being decomposed */
+  readonly quest: Quest;
+  
+  /** Parent goal */
+  readonly goal: Goal;
+  
+  /** Capability stages to decompose */
+  readonly stages: readonly CapabilityStage[];
+  
+  /** Daily time budget in minutes */
+  readonly dailyMinutes: number;
+  
+  /** User ID for ownership */
+  readonly userId: UserId;
+}
+
+/**
+ * Result of skill decomposition.
+ */
+export interface SkillDecompositionResult {
+  /** Generated skills */
+  readonly skills: readonly Skill[];
+  
+  /** Total estimated practice time in minutes */
+  readonly totalMinutes: number;
+  
+  /** Estimated practice days */
+  readonly estimatedDays: number;
+  
+  /** Warnings during decomposition */
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Decomposes capability stages into actionable skills.
+ */
+export interface ISkillDecomposer {
+  /**
+   * Decompose stages into skills.
+   */
+  decompose(context: SkillDecompositionContext): AsyncAppResult<SkillDecompositionResult>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DRILL GENERATOR INTERFACE (Legacy Support)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Result of roll-forward logic.
+ */
+export interface RollForwardResult {
+  /** Skill to practice */
+  readonly skill: Skill;
+  
+  /** Is this a retry of a failed skill? */
+  readonly isRetry: boolean;
+  
+  /** Retry count (0 if not a retry) */
+  readonly retryCount: number;
+  
+  /** Previous failure reason (if retry) */
+  readonly previousFailureReason?: string;
+  
+  /** Carry-forward context from previous attempt */
+  readonly carryForwardContext?: string;
+}
+
+/**
+ * Generates daily drills with roll-forward logic.
+ */
+export interface IDrillGenerator {
+  /**
+   * Generate a drill for today.
+   */
+  generate(context: DailyDrillGenerationContext): AsyncAppResult<DailyDrill>;
+  
+  /**
+   * Determine next skill using roll-forward logic.
+   */
+  rollForward(
+    previousDrill: DailyDrill | null,
+    availableSkills: readonly Skill[],
+    weekPlan: WeekPlan
+  ): AsyncAppResult<RollForwardResult>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEEK TRACKER INTERFACE (Legacy Support)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Progress update for a week.
+ */
+export interface WeekProgressUpdate {
+  /** Drills completed */
+  readonly drillsCompleted: number;
+  
+  /** Drills passed */
+  readonly drillsPassed: number;
+  
+  /** Drills failed */
+  readonly drillsFailed: number;
+  
+  /** Drills skipped */
+  readonly drillsSkipped: number;
+  
+  /** Skills mastered */
+  readonly skillsMastered: number;
+}
+
+/**
+ * Tracks week lifecycle and progress.
+ */
+export interface IWeekTracker {
+  /**
+   * Get the current active week for a goal.
+   */
+  getCurrentWeek(goalId: GoalId): AsyncAppResult<WeekPlan | null>;
+  
+  /**
+   * Update week progress after a drill.
+   */
+  updateProgress(
+    weekPlanId: WeekPlanId,
+    update: WeekProgressUpdate
+  ): AsyncAppResult<WeekPlan>;
+  
+  /**
+   * Complete a week and prepare next.
+   */
+  completeWeek(weekPlanId: WeekPlanId): AsyncAppResult<WeekCompletionResult>;
+  
+  /**
+   * Create next week plan.
+   */
+  createNextWeek(
+    goalId: GoalId,
+    previousWeek: WeekPlan
+  ): AsyncAppResult<WeekPlan>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RE-EXPORTS — Types from types.ts for convenience
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type { GoalProgress, QuestProgress } from './types.js';

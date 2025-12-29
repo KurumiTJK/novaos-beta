@@ -18,7 +18,7 @@ import { ok, err, type AsyncAppResult } from '../../../types/result.js';
 import type { SkillId, QuestId, GoalId, UserId, Timestamp } from '../../../types/branded.js';
 import { createTimestamp } from '../../../types/branded.js';
 import { SwordKeys } from '../../../infrastructure/redis/keys.js';
-import type { Skill, SkillMastery } from '../types.js';
+import type { Skill, SkillMastery, SkillStatus, SkillType } from '../types.js';
 import { SecureStore, storeError } from '../../spark-engine/store/secure-store.js';
 import type {
   SecureStoreConfig,
@@ -365,6 +365,87 @@ export class SkillStore extends SecureStore<Skill, SkillId> implements ISkillSto
       failCount,
       consecutivePasses,
       lastPracticedAt: createTimestamp(),
+      updatedAt: createTimestamp(),
+    };
+
+    // Save updated skill
+    const saveResult = await this.saveEntity(updatedSkill);
+    if (!saveResult.ok) {
+      return err(saveResult.error);
+    }
+
+    return ok(updatedSkill);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ENHANCED QUERY METHODS (Phase 19)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get skills by status for a goal.
+   */
+  async getByStatus(goalId: GoalId, status: SkillStatus): AsyncAppResult<readonly Skill[]> {
+    const result = await this.getByGoal(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+    return ok(result.value.items.filter(s => s.status === status));
+  }
+
+  /**
+   * Get skills by type for a quest.
+   */
+  async getByType(questId: QuestId, skillType: SkillType): AsyncAppResult<readonly Skill[]> {
+    const result = await this.getByQuest(questId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+    return ok(result.value.items.filter(s => s.skillType === skillType));
+  }
+
+  /**
+   * Get available (unlocked, not mastered) skills for a goal.
+   */
+  async getAvailable(goalId: GoalId): AsyncAppResult<readonly Skill[]> {
+    const result = await this.getByGoal(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+    return ok(result.value.items.filter(s => s.status === 'available' && s.mastery !== 'mastered'));
+  }
+
+  /**
+   * Get locked skills for a goal.
+   */
+  async getLocked(goalId: GoalId): AsyncAppResult<readonly Skill[]> {
+    const result = await this.getByGoal(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+    return ok(result.value.items.filter(s => s.status === 'locked'));
+  }
+
+  /**
+   * Update skill status.
+   */
+  async updateStatus(skillId: SkillId, status: SkillStatus): AsyncAppResult<Skill> {
+    // Get current skill
+    const result = await this.getEntity(skillId);
+    if (!result.ok) {
+      return result;
+    }
+    if (result.value === null) {
+      return err(
+        storeError(StoreErrorCode.NOT_FOUND, `Skill not found: ${skillId}`, { skillId })
+      );
+    }
+
+    const skill = result.value;
+
+    // Create updated skill
+    const updatedSkill: Skill = {
+      ...skill,
+      status,
       updatedAt: createTimestamp(),
     };
 

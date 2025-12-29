@@ -399,10 +399,10 @@ function buildDayPlans(
       }
 
       days.push({
-        dayNumber: dayPlan.dayInWeek,
-        dayInQuest: dayPlan.dayInQuest ?? dayPlan.dayInWeek,
-        scheduledDate: dayPlan.scheduledDate,
-        dayName: DAY_NAMES[dayPlan.dayInWeek - 1] ?? `Day ${dayPlan.dayInWeek}`,
+        dayNumber: dayPlan.dayNumber,
+        dayInQuest: dayPlan.dayInQuest ?? dayPlan.dayNumber,
+        scheduledDate: dayPlan.scheduledDate ?? '',
+        dayName: DAY_NAMES[dayPlan.dayNumber - 1] ?? `Day ${dayPlan.dayNumber}`,
         skillTitle: skill?.action ?? 'Unknown Skill',
         skillType: skill?.skillType ?? 'foundation',
         skillTypeEmoji: SKILL_TYPE_EMOJI[skill?.skillType ?? 'foundation'],

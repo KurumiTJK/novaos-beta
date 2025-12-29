@@ -18,7 +18,7 @@ import { ok, err, type AsyncAppResult } from '../../../types/result.js';
 import type { DrillId, WeekPlanId, GoalId, UserId, Timestamp } from '../../../types/branded.js';
 import { createTimestamp } from '../../../types/branded.js';
 import { SwordKeys } from '../../../infrastructure/redis/keys.js';
-import type { DailyDrill, DrillOutcome, DrillStatus } from '../types.js';
+import type { DailyDrill, DrillOutcome, DrillStatus, SkillType } from '../types.js';
 import { SecureStore, storeError } from '../../spark-engine/store/secure-store.js';
 import type {
   SecureStoreConfig,
@@ -399,6 +399,56 @@ export class DrillStore extends SecureStore<DailyDrill, DrillId> implements IDri
     }
 
     return ok(updatedDrill);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ENHANCED QUERY METHODS (Phase 19)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get drills by skill type for a goal.
+   */
+  async getBySkillType(
+    goalId: GoalId,
+    skillType: SkillType
+  ): AsyncAppResult<readonly DailyDrill[]> {
+    // Get drills by iterating through goal's week plans
+    // This requires getting drills via week plan index
+    try {
+      // Get week plans for goal first
+      const weekPlanKey = SwordKeys.goalWeeks(goalId);
+      const weekPlanIds = await this.store.smembers(weekPlanKey);
+      
+      const drills: DailyDrill[] = [];
+      for (const weekPlanId of weekPlanIds) {
+        const weekDrillsKey = SwordKeys.weekDrills(weekPlanId as WeekPlanId);
+        const drillIds = await this.store.smembers(weekDrillsKey);
+        
+        for (const drillId of drillIds) {
+          const result = await this.getEntity(drillId as DrillId);
+          if (result.ok && result.value && result.value.skillType === skillType) {
+            drills.push(result.value);
+          }
+        }
+      }
+      
+      return ok(drills);
+    } catch (error) {
+      return err(
+        storeError(
+          StoreErrorCode.BACKEND_ERROR,
+          `Failed to get drills by skill type: ${error instanceof Error ? error.message : String(error)}`,
+          { goalId, skillType }
+        )
+      );
+    }
+  }
+
+  /**
+   * Get compound drills for a goal.
+   */
+  async getCompoundDrills(goalId: GoalId): AsyncAppResult<readonly DailyDrill[]> {
+    return this.getBySkillType(goalId, 'compound');
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

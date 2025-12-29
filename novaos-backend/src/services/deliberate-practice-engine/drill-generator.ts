@@ -19,18 +19,21 @@
 
 import type { AsyncAppResult } from '../../types/result.js';
 import { ok, err, appError } from '../../types/result.js';
-import type { SkillId, DrillId, Timestamp } from '../../types/branded.js';
+import type { SkillId, DrillId, Timestamp, WeekPlanId, QuestId, GoalId, UserId } from '../../types/branded.js';
 import { createDrillId, createTimestamp } from '../../types/branded.js';
 import type {
   Skill,
   DailyDrill,
   DrillOutcome,
   DrillStatus,
+  WeekPlan,
+  DrillSection,
+  DrillSectionType,
 } from './types.js';
 import { RETRY_OUTCOMES, countsAsAttempt } from './types.js';
 import type {
   IDrillGenerator,
-  DrillGenerationContext,
+  DailyDrillGenerationContext,
   RollForwardResult,
 } from './interfaces.js';
 
@@ -96,32 +99,12 @@ export class DrillGenerator implements IDrillGenerator {
   /**
    * Generate a drill for the given context.
    */
-  async generate(context: DrillGenerationContext): AsyncAppResult<DailyDrill> {
-    const { userId, goalId, weekPlan, availableSkills, previousDrill, date, dayNumber, dailyMinutes } = context;
+  async generate(context: DailyDrillGenerationContext): AsyncAppResult<DailyDrill> {
+    const { skill, dayPlan, weekPlan, goal, quest, previousDrill, previousQuestSkills, componentSkills, dailyMinutes } = context;
 
-    if (availableSkills.length === 0) {
-      return err(appError('INVALID_INPUT', 'No skills available for drill generation'));
-    }
-
-    // Analyze previous drill for roll-forward
-    let rollForward: RollForwardResult | null = null;
-    if (previousDrill) {
-      const rfResult = await this.analyzeAndRollForward(previousDrill, availableSkills);
-      if (rfResult.ok) {
-        rollForward = rfResult.value;
-      }
-    }
-
-    // Select skill for today
-    const skillResult = await this.selectSkill(context);
-    if (!skillResult.ok) {
-      return err(skillResult.error);
-    }
-    const skill = skillResult.value;
-
-    // Determine if this is a retry
-    const isRetry = rollForward?.repeatSkill && rollForward.nextSkillId === skill.id;
-    const retryCount = isRetry ? (rollForward?.retryCount ?? 0) : 0;
+    // Determine if this is a retry based on previous drill outcome
+    const isRetry = previousDrill?.outcome && RETRY_OUTCOMES.includes(previousDrill.outcome);
+    const retryCount = isRetry ? (previousDrill?.retryCount ?? 0) + 1 : 0;
 
     // Generate drill content
     let action = skill.action;
@@ -130,8 +113,8 @@ export class DrillGenerator implements IDrillGenerator {
     let estimatedMinutes = skill.estimatedMinutes;
 
     // Adapt for retry if needed
-    if (isRetry && retryCount > 0) {
-      const adapted = await this.adaptSkillForRetry(skill, previousDrill!, retryCount);
+    if (isRetry && previousDrill) {
+      const adapted = await this.adaptSkillForRetry(skill, previousDrill, retryCount);
       if (adapted.ok) {
         action = adapted.value.action;
         passSignal = adapted.value.passSignal;
@@ -149,25 +132,69 @@ export class DrillGenerator implements IDrillGenerator {
 
     const now = createTimestamp();
 
+    // Build main section
+    const main: DrillSection = {
+      type: 'main' as DrillSectionType,
+      title: skill.title,
+      action,
+      passSignal,
+      constraint,
+      estimatedMinutes,
+      isOptional: false,
+      isFromPreviousQuest: false,
+      sourceSkillId: skill.id,
+    };
+
+    // Find review skill if any
+    const reviewSkill = dayPlan.reviewSkillId
+      ? previousQuestSkills.find(s => s.id === dayPlan.reviewSkillId)
+      : undefined;
+
     const drill: DailyDrill = {
       id: createDrillId(),
       weekPlanId: weekPlan.id,
       skillId: skill.id,
-      userId,
-      goalId,
-      scheduledDate: date,
-      dayNumber,
+      userId: skill.userId,
+      goalId: goal.id,
+      questId: quest.id,
+
+      // Scheduling
+      scheduledDate: dayPlan.scheduledDate ?? new Date().toISOString().split('T')[0]!,
+      dayNumber: dayPlan.dayNumber,
+      weekNumber: weekPlan.weekNumber,
+      dayInWeek: dayPlan.dayNumber,
+      dayInQuest: dayPlan.dayInQuest,
       status: 'scheduled' as DrillStatus,
+
+      // Skill context
+      skillType: skill.skillType,
+      skillTitle: skill.title,
+      isCompoundDrill: skill.isCompound,
+      componentSkillIds: skill.componentSkillIds,
+
+      // Cross-quest context
+      buildsOnQuestIds: skill.prerequisiteQuestIds ?? [],
+      reviewSkillId: reviewSkill?.id,
+      reviewQuestId: reviewSkill?.questId,
+
+      // Structured sections
+      main,
+      warmup: undefined,
+      stretch: undefined,
+
+      // Legacy fields
       action,
       passSignal,
       lockedVariables: skill.lockedVariables,
       constraint,
       estimatedMinutes,
+
+      // Status
       repeatTomorrow: false,
-      previousDrillId: previousDrill?.id,
-      continuationContext: rollForward?.carryForward,
       isRetry: isRetry ?? false,
       retryCount,
+
+      // Timestamps
       createdAt: now,
       updatedAt: now,
     };
@@ -176,40 +203,70 @@ export class DrillGenerator implements IDrillGenerator {
   }
 
   /**
-   * Analyze previous drill and determine next action.
+   * Determine next skill using roll-forward logic.
+   */
+  async rollForward(
+    previousDrill: DailyDrill | null,
+    availableSkills: readonly Skill[],
+    weekPlan: WeekPlan
+  ): AsyncAppResult<RollForwardResult> {
+    if (!previousDrill) {
+      // No previous drill - pick first available skill
+      const skill = availableSkills[0];
+      if (!skill) {
+        return err(appError('INVALID_INPUT', 'No skills available'));
+      }
+      return ok({
+        skill,
+        isRetry: false,
+        retryCount: 0,
+      });
+    }
+
+    const outcome = previousDrill.outcome;
+
+    // No outcome means drill wasn't completed - treat as skipped
+    if (!outcome) {
+      return this.handleSkippedDrill(previousDrill, availableSkills);
+    }
+
+    switch (outcome) {
+      case 'pass':
+        return this.handlePassedDrill(previousDrill, availableSkills);
+      case 'fail':
+        return this.handleFailedDrill(previousDrill, availableSkills);
+      case 'partial':
+        return this.handlePartialDrill(previousDrill, availableSkills);
+      case 'skipped':
+        return this.handleSkippedDrill(previousDrill, availableSkills);
+      default:
+        // Unknown outcome - move forward
+        return this.handlePassedDrill(previousDrill, availableSkills);
+    }
+  }
+
+  /**
+   * Legacy method for backward compatibility.
+   * @deprecated Use rollForward instead
    */
   async analyzeAndRollForward(
     previousDrill: DailyDrill,
     skills: readonly Skill[]
   ): AsyncAppResult<RollForwardResult> {
-    const outcome = previousDrill.outcome;
-
-    // No outcome means drill wasn't completed - treat as skipped
-    if (!outcome) {
-      return this.handleSkippedDrill(previousDrill, skills);
-    }
-
-    switch (outcome) {
-      case 'pass':
-        return this.handlePassedDrill(previousDrill, skills);
-      case 'fail':
-        return this.handleFailedDrill(previousDrill, skills);
-      case 'partial':
-        return this.handlePartialDrill(previousDrill, skills);
-      case 'skipped':
-        return this.handleSkippedDrill(previousDrill, skills);
-      default:
-        // Unknown outcome - move forward
-        return this.handlePassedDrill(previousDrill, skills);
-    }
+    return this.rollForward(previousDrill, skills, {} as WeekPlan);
   }
 
   /**
    * Select the optimal skill for today.
+   * 
+   * @deprecated The new DailyDrillGenerationContext provides skill directly.
+   * This method is kept for backward compatibility with standalone skill selection.
    */
-  async selectSkill(context: DrillGenerationContext): AsyncAppResult<Skill> {
-    const { availableSkills, previousDrill, weekPlan } = context;
-
+  async selectSkillFromPool(
+    availableSkills: readonly Skill[],
+    previousDrill: DailyDrill | null,
+    weekPlan: WeekPlan
+  ): AsyncAppResult<Skill> {
     if (availableSkills.length === 0) {
       return err(appError('INVALID_INPUT', 'No skills available'));
     }
@@ -223,7 +280,8 @@ export class DrillGenerator implements IDrillGenerator {
     }
 
     // Priority 2: Carry-forward skills from week plan
-    for (const carryForwardId of weekPlan.carryForwardSkillIds) {
+    const carryForwardIds = weekPlan.carryForwardSkillIds ?? [];
+    for (const carryForwardId of carryForwardIds) {
       const skill = availableSkills.find(s => s.id === carryForwardId);
       if (skill && skill.mastery !== 'mastered') {
         return ok(skill);
@@ -231,7 +289,8 @@ export class DrillGenerator implements IDrillGenerator {
     }
 
     // Priority 3: Next unmastered skill in schedule order
-    const scheduledUnmastered = weekPlan.scheduledSkillIds
+    const scheduledSkillIds = weekPlan.scheduledSkillIds ?? [];
+    const scheduledUnmastered = scheduledSkillIds
       .map(id => availableSkills.find(s => s.id === id))
       .filter((s): s is Skill => s !== undefined && s.mastery !== 'mastered');
 
@@ -244,8 +303,8 @@ export class DrillGenerator implements IDrillGenerator {
 
     // Priority 4: Any skill that needs more practice (practicing status)
     const practicing = availableSkills
-      .filter(s => s.mastery === 'practicing')
-      .sort((a, b) => a.consecutivePasses - b.consecutivePasses);
+      .filter((s: Skill) => s.mastery === 'practicing')
+      .sort((a: Skill, b: Skill) => a.consecutivePasses - b.consecutivePasses);
 
     if (practicing.length > 0) {
       return ok(practicing[0]!);
@@ -253,8 +312,8 @@ export class DrillGenerator implements IDrillGenerator {
 
     // Priority 5: First not-started skill with met prerequisites
     const notStarted = availableSkills
-      .filter(s => s.mastery === 'not_started')
-      .sort((a, b) => a.order - b.order);
+      .filter((s: Skill) => s.mastery === 'not_started')
+      .sort((a: Skill, b: Skill) => a.order - b.order);
 
     for (const skill of notStarted) {
       if (this.arePrerequisitesMet(skill, availableSkills)) {
@@ -319,62 +378,79 @@ export class DrillGenerator implements IDrillGenerator {
     skills: readonly Skill[]
   ): AsyncAppResult<RollForwardResult> {
     // Find next skill in sequence
-    const currentSkill = skills.find(s => s.id === previousDrill.skillId);
-    const currentOrder = currentSkill?.order ?? 0;
+    const skillIndex = skills.findIndex(s => s.id === previousDrill.skillId);
+    const nextSkill = skillIndex >= 0 && skillIndex < skills.length - 1
+      ? skills[skillIndex + 1]
+      : skills.find(s => s.mastery === 'not_started' || s.mastery === 'attempting');
 
-    const nextSkill = skills
-      .filter(s => s.order > currentOrder && s.mastery !== 'mastered')
-      .sort((a, b) => a.order - b.order)[0];
+    const skill = nextSkill ?? skills[0];
+    if (!skill) {
+      return err(appError('INVALID_INPUT', 'No skills available'));
+    }
 
     return ok({
-      repeatSkill: false,
-      carryForward: previousDrill.observation
+      skill,
+      isRetry: false,
+      retryCount: 0,
+      carryForwardContext: previousDrill.observation
         ? `Previous: ${previousDrill.observation}`
         : 'Previous drill completed successfully',
-      nextSkillId: nextSkill?.id ?? previousDrill.skillId,
-      retryCount: 0,
     });
   }
 
   private async handleFailedDrill(
     previousDrill: DailyDrill,
-    _skills: readonly Skill[]
+    skills: readonly Skill[]
   ): AsyncAppResult<RollForwardResult> {
+    const skill = skills.find(s => s.id === previousDrill.skillId);
+    if (!skill) {
+      return err(appError('INVALID_INPUT', 'Failed drill skill not found'));
+    }
+
     return ok({
-      repeatSkill: true,
-      adaptation: 'Retry with additional guidance based on yesterday\'s attempt',
-      carryForward: previousDrill.observation
+      skill,
+      isRetry: true,
+      retryCount: (previousDrill.retryCount ?? 0) + 1,
+      previousFailureReason: previousDrill.observation ?? 'Retry needed — focus on what caused difficulty',
+      carryForwardContext: previousDrill.observation
         ? `Yesterday's issue: ${previousDrill.observation}`
         : 'Retry needed — focus on what caused difficulty',
-      nextSkillId: previousDrill.skillId,
-      retryCount: previousDrill.retryCount + 1,
     });
   }
 
   private async handlePartialDrill(
     previousDrill: DailyDrill,
-    _skills: readonly Skill[]
+    skills: readonly Skill[]
   ): AsyncAppResult<RollForwardResult> {
+    const skill = skills.find(s => s.id === previousDrill.skillId);
+    if (!skill) {
+      return err(appError('INVALID_INPUT', 'Partial drill skill not found'));
+    }
+
     return ok({
-      repeatSkill: true,
-      adaptation: 'Continue from where you left off',
-      carryForward: previousDrill.carryForward
+      skill,
+      isRetry: true,
+      retryCount: previousDrill.retryCount ?? 0, // Don't increment for partial
+      carryForwardContext: previousDrill.carryForward
         ?? previousDrill.observation
         ?? 'Continue from previous progress',
-      nextSkillId: previousDrill.skillId,
-      retryCount: previousDrill.retryCount, // Don't increment for partial
     });
   }
 
   private async handleSkippedDrill(
     previousDrill: DailyDrill,
-    _skills: readonly Skill[]
+    skills: readonly Skill[]
   ): AsyncAppResult<RollForwardResult> {
+    const skill = skills.find(s => s.id === previousDrill.skillId);
+    if (!skill) {
+      return err(appError('INVALID_INPUT', 'Skipped drill skill not found'));
+    }
+
     return ok({
-      repeatSkill: true,
-      carryForward: 'Rescheduled from previous day',
-      nextSkillId: previousDrill.skillId,
-      retryCount: 0, // Fresh start for skipped
+      skill,
+      isRetry: false, // Fresh start for skipped
+      retryCount: 0,
+      carryForwardContext: 'Rescheduled from previous day',
     });
   }
 
@@ -408,12 +484,14 @@ export class DrillGenerator implements IDrillGenerator {
 
     // Default constraint based on difficulty
     switch (skill.difficulty) {
-      case 'foundation':
+      case 'intro':
         return 'Focus on accuracy over speed';
       case 'practice':
         return 'Apply without looking up references';
       case 'challenge':
         return 'Complete independently — no assistance';
+      case 'synthesis':
+        return 'Integrate concepts from multiple areas';
       default:
         return 'Complete in single session';
     }

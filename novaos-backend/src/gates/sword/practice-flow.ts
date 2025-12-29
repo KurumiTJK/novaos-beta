@@ -1126,8 +1126,8 @@ export class PracticeFlow {
     lines.push(`• ⏳ Not Started: ${notStarted}`);
     lines.push(`• **Total:** ${total}\n`);
 
-    if (progress.currentWeek) {
-      lines.push(`**Current Week:** Week ${progress.currentWeek}`);
+    if (progress.currentQuest?.currentWeek) {
+      lines.push(`**Current Week:** Week ${progress.currentQuest.currentWeek}`);
     }
 
     if (progress.currentStreak && progress.currentStreak > 0) {

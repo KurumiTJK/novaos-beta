@@ -15,7 +15,7 @@
 import type { KeyValueStore } from '../../../storage/index.js';
 import type { EncryptionService } from '../../../security/encryption/service.js';
 import { ok, err, type AsyncAppResult } from '../../../types/result.js';
-import type { WeekPlanId, GoalId, UserId, Timestamp } from '../../../types/branded.js';
+import type { WeekPlanId, GoalId, UserId, Timestamp, QuestId } from '../../../types/branded.js';
 import { createTimestamp } from '../../../types/branded.js';
 import { SwordKeys } from '../../../infrastructure/redis/keys.js';
 import type { WeekPlan, WeekPlanStatus } from '../types.js';
@@ -354,7 +354,8 @@ export class WeekPlanStore extends SecureStore<WeekPlan, WeekPlanId> implements 
     drillsCompleted: number,
     drillsPassed: number,
     drillsFailed: number,
-    drillsSkipped: number
+    drillsSkipped: number,
+    skillsMastered: number = 0
   ): AsyncAppResult<WeekPlan> {
     // Get current week plan
     const result = await this.getEntity(weekPlanId);
@@ -380,6 +381,7 @@ export class WeekPlanStore extends SecureStore<WeekPlan, WeekPlanId> implements 
       drillsPassed,
       drillsFailed,
       drillsSkipped,
+      skillsMastered: (weekPlan.skillsMastered ?? 0) + skillsMastered,
       passRate,
       updatedAt: createTimestamp(),
     };
@@ -391,6 +393,74 @@ export class WeekPlanStore extends SecureStore<WeekPlan, WeekPlanId> implements 
     }
 
     return ok(updatedWeekPlan);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ENHANCED QUERY METHODS (Phase 19)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get all week plans for a quest.
+   * Note: Requires iterating through goal's week plans since there's no direct quest→weekplans index.
+   * For efficiency, callers should provide goalId and use getByGoal() when possible.
+   */
+  async getByQuest(questId: QuestId): AsyncAppResult<readonly WeekPlan[]> {
+    try {
+      const weekPlans: WeekPlan[] = [];
+      
+      // Check if store supports keys() method for pattern scanning
+      const keysMethod = (this.store as { keys?: (pattern: string) => Promise<string[]> }).keys;
+      
+      if (keysMethod) {
+        // Use keys() to find goal week plan indexes
+        const goalWeekPlanKeys = await keysMethod.call(this.store, 'sword:weekplan:goal:*');
+        
+        for (const indexKey of goalWeekPlanKeys) {
+          const weekPlanIds = await this.store.zrange(indexKey, 0, -1);
+          for (const weekPlanId of weekPlanIds) {
+            const result = await this.getEntity(weekPlanId as WeekPlanId);
+            if (result.ok && result.value && result.value.questId === questId) {
+              weekPlans.push(result.value);
+            }
+          }
+        }
+      } else {
+        // Fallback: Cannot efficiently get week plans without keys() method
+        // Return empty - callers should use getByGoal() with a known goalId
+        console.warn('[WeekPlanStore] getByQuest: store.keys() not available, returning empty result');
+      }
+      
+      // Sort by week number
+      weekPlans.sort((a, b) => a.weekNumber - b.weekNumber);
+      
+      return ok(weekPlans);
+    } catch (error) {
+      return err(
+        storeError(
+          StoreErrorCode.BACKEND_ERROR,
+          `Failed to get week plans by quest: ${error instanceof Error ? error.message : String(error)}`,
+          { questId }
+        )
+      );
+    }
+  }
+
+  /**
+   * Get the last week of a quest.
+   */
+  async getLastWeekOfQuest(questId: QuestId): AsyncAppResult<WeekPlan | null> {
+    const result = await this.getByQuest(questId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+    
+    const weekPlans = result.value;
+    if (weekPlans.length === 0) {
+      return ok(null);
+    }
+    
+    // Already sorted by weekNumber ascending, get the last one
+    return ok(weekPlans[weekPlans.length - 1]!);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

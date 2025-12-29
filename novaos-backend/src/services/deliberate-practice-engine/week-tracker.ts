@@ -21,6 +21,7 @@ import type {
   WeekPlanStatus,
   DrillOutcome,
   SkillMastery,
+  DayPlan,
 } from './types.js';
 import { MASTERY_THRESHOLDS, countsAsAttempt, requiresRetry } from './types.js';
 import type {
@@ -29,6 +30,7 @@ import type {
   WeekProgressUpdate,
   IWeekPlanStore,
   ISkillStore,
+  WeeklySummary,
 } from './interfaces.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -135,7 +137,7 @@ export class WeekTracker implements IWeekTracker {
     const skills = skillsResult.value;
 
     // Calculate carry-forward skills (not yet mastered or needs retry)
-    const carryForwardSkills = skills.filter(s =>
+    const carryForwardSkills = skills.filter((s: Skill) =>
       s.mastery !== 'mastered' && s.mastery !== 'not_started'
     );
 
@@ -154,7 +156,7 @@ export class WeekTracker implements IWeekTracker {
     const completedWeek = updateResult.value;
 
     // Create next week plan if there are more skills
-    const nextWeekResult = await this.createNextWeek(completedWeek, carryForwardSkills);
+    const nextWeekResult = await this.createNextWeekInternal(completedWeek, carryForwardSkills);
     const nextWeek = nextWeekResult.ok ? nextWeekResult.value : undefined;
 
     // Activate next week if created
@@ -168,6 +170,8 @@ export class WeekTracker implements IWeekTracker {
       nextWeekFocus,
       summary,
       nextWeek,
+      milestoneCompleted: false, // TODO: Check if quest's last week
+      nextQuestUnlocked: false, // TODO: Check unlock logic
     });
   }
 
@@ -176,9 +180,51 @@ export class WeekTracker implements IWeekTracker {
    */
   async updateProgress(
     weekPlanId: WeekPlanId,
+    update: WeekProgressUpdate
+  ): AsyncAppResult<WeekPlan> {
+    // Get current week plan
+    const weekResult = await this.weekPlanStore.get(weekPlanId);
+    if (!weekResult.ok) {
+      return err(weekResult.error);
+    }
+    if (weekResult.value === null) {
+      return err(appError('NOT_FOUND', `Week plan not found: ${weekPlanId}`));
+    }
+
+    const weekPlan = weekResult.value;
+
+    // Calculate new progress
+    const drillsCompleted = weekPlan.drillsCompleted + update.drillsCompleted;
+    const drillsPassed = weekPlan.drillsPassed + update.drillsPassed;
+    const drillsFailed = weekPlan.drillsFailed + update.drillsFailed;
+    const drillsSkipped = weekPlan.drillsSkipped + update.drillsSkipped;
+    const skillsMastered = (weekPlan.skillsMastered ?? 0) + update.skillsMastered;
+
+    // Update week plan progress
+    const updateResult = await this.weekPlanStore.updateProgress(
+      weekPlanId,
+      drillsCompleted,
+      drillsPassed,
+      drillsFailed,
+      drillsSkipped,
+      skillsMastered
+    );
+    if (!updateResult.ok) {
+      return err(updateResult.error);
+    }
+
+    return ok(updateResult.value);
+  }
+
+  /**
+   * Update week progress after drill completion (legacy signature).
+   * @deprecated Use updateProgress(weekPlanId, WeekProgressUpdate) instead
+   */
+  async updateProgressLegacy(
+    weekPlanId: WeekPlanId,
     drillOutcome: DrillOutcome,
     skillId: SkillId
-  ): AsyncAppResult<WeekProgressUpdate> {
+  ): AsyncAppResult<{ drillsCompleted: number; drillsPassed: number; drillsFailed: number; drillsSkipped: number; passRate: number; newlyCompletedSkillIds: SkillId[] }> {
     // Get current week plan
     const weekResult = await this.weekPlanStore.get(weekPlanId);
     if (!weekResult.ok) {
@@ -240,7 +286,8 @@ export class WeekTracker implements IWeekTracker {
       drillsCompleted,
       drillsPassed,
       drillsFailed,
-      drillsSkipped
+      drillsSkipped,
+      newlyCompletedSkillIds.length
     );
     if (!updateResult.ok) {
       return err(updateResult.error);
@@ -274,6 +321,28 @@ export class WeekTracker implements IWeekTracker {
     return ok(result.value.items);
   }
 
+  /**
+   * Get weekly summary for a week plan.
+   */
+  async getWeeklySummary(weekPlanId: WeekPlanId): AsyncAppResult<WeeklySummary> {
+    const weekResult = await this.weekPlanStore.get(weekPlanId);
+    if (!weekResult.ok) {
+      return err(weekResult.error);
+    }
+    if (!weekResult.value) {
+      return err(appError('NOT_FOUND', `Week plan not found: ${weekPlanId}`));
+    }
+
+    const weekPlan = weekResult.value;
+    const skillsResult = await this.getWeekSkills(weekPlan);
+    if (!skillsResult.ok) {
+      return err(skillsResult.error);
+    }
+
+    const summary = this.generateWeeklySummary(weekPlan, skillsResult.value);
+    return ok(summary);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // HELPER METHODS
   // ─────────────────────────────────────────────────────────────────────────────
@@ -301,46 +370,28 @@ export class WeekTracker implements IWeekTracker {
   /**
    * Generate weekly summary based on progress.
    */
-  private generateWeeklySummary(weekPlan: WeekPlan, skills: Skill[]): string {
+  private generateWeeklySummary(weekPlan: WeekPlan, skills: Skill[]): WeeklySummary {
     const passRate = weekPlan.passRate ?? 0;
-    const totalAttempted = weekPlan.drillsPassed + weekPlan.drillsFailed;
 
     // Calculate skill mastery progress
-    const mastered = skills.filter(s => s.mastery === 'mastered').length;
-    const practicing = skills.filter(s => s.mastery === 'practicing').length;
-    const notStarted = skills.filter(s => s.mastery === 'not_started').length;
+    const masteredSkills = skills.filter((s: Skill) => s.mastery === 'mastered');
+    const practicingSkills = skills.filter((s: Skill) => s.mastery === 'practicing');
 
-    let performanceSummary: string;
-    if (passRate >= GOOD_WEEK_PASS_RATE) {
-      performanceSummary = 'Strong week! You maintained good momentum.';
-    } else if (passRate >= NEEDS_IMPROVEMENT_PASS_RATE) {
-      performanceSummary = 'Solid progress. Some skills need more practice.';
-    } else if (totalAttempted > 0) {
-      performanceSummary = 'Challenging week. Focus on fundamentals next week.';
-    } else {
-      performanceSummary = 'No drills completed this week.';
-    }
-
-    const lines = [
-      `Week ${weekPlan.weekNumber}: ${weekPlan.theme}`,
-      '',
-      performanceSummary,
-      '',
-      `📊 Results:`,
-      `   Drills completed: ${weekPlan.drillsCompleted}/${weekPlan.drillsTotal}`,
-      `   Pass rate: ${Math.round(passRate * 100)}%`,
-      '',
-      `🎯 Skills:`,
-      `   Mastered: ${mastered}`,
-      `   Practicing: ${practicing}`,
-      `   Not started: ${notStarted}`,
-    ];
-
-    if (weekPlan.drillsSkipped > 0) {
-      lines.push('', `⏭️ Skipped: ${weekPlan.drillsSkipped} drills`);
-    }
-
-    return lines.join('\n');
+    return {
+      weekNumber: weekPlan.weekNumber,
+      theme: weekPlan.theme ?? `Week ${weekPlan.weekNumber}`,
+      questTitle: '', // Quest title not available on WeekPlan, needs to be fetched separately
+      skillsMastered: masteredSkills.map((s: Skill) => s.title),
+      skillsInProgress: practicingSkills.map((s: Skill) => s.title),
+      crossQuestSkills: [], // TODO: Populate from compound skills
+      daysPracticed: weekPlan.drillsCompleted,
+      daysTotal: weekPlan.drillsTotal,
+      passRate,
+      currentStreak: 0, // TODO: Track streak
+      milestoneAvailable: false, // TODO: Check milestone
+      milestoneTitle: '',
+      nextWeekPreview: undefined,
+    };
   }
 
   /**
@@ -361,16 +412,45 @@ export class WeekTracker implements IWeekTracker {
 
     const skillNames = carryForwardSkills
       .slice(0, 3)
-      .map(s => this.truncate(s.action, 30))
+      .map((s: Skill) => this.truncate(s.action, 30))
       .join(', ');
 
     return `Focus: Complete ${carryForwardSkills.length} skills from this week: ${skillNames}...`;
   }
 
   /**
-   * Create the next week plan.
+   * Create next week plan (public interface method).
    */
-  private async createNextWeek(
+  async createNextWeek(
+    goalId: GoalId,
+    previousWeek: WeekPlan
+  ): AsyncAppResult<WeekPlan> {
+    // Get skills for carry-forward
+    const skillsResult = await this.getWeekSkills(previousWeek);
+    if (!skillsResult.ok) {
+      return err(skillsResult.error);
+    }
+
+    const carryForwardSkills = skillsResult.value.filter((s: Skill) =>
+      s.mastery !== 'mastered' && s.mastery !== 'not_started'
+    );
+
+    const result = await this.createNextWeekInternal(previousWeek, carryForwardSkills);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(appError('INVALID_STATE', 'No more weeks to create'));
+    }
+
+    return ok(result.value);
+  }
+
+  /**
+   * Create the next week plan (internal).
+   */
+  private async createNextWeekInternal(
     completedWeek: WeekPlan,
     carryForwardSkills: Skill[]
   ): AsyncAppResult<WeekPlan | undefined> {
@@ -389,7 +469,7 @@ export class WeekTracker implements IWeekTracker {
       ...completedWeek.scheduledSkillIds,
     ]);
 
-    const unscheduledSkills = allSkills.filter(s =>
+    const unscheduledSkills = allSkills.filter((s: Skill) =>
       !completedSkillIds.has(s.id) &&
       !scheduledSkillIds.has(s.id) &&
       s.mastery !== 'mastered'
@@ -421,25 +501,63 @@ export class WeekTracker implements IWeekTracker {
 
     const now = createTimestamp();
 
+    // Calculate skill type counts
+    const foundationCount = newSkills.filter((s: Skill) => s.skillType === 'foundation').length;
+    const buildingCount = newSkills.filter((s: Skill) => s.skillType === 'building').length;
+    const compoundCount = newSkills.filter((s: Skill) => s.skillType === 'compound').length;
+    const hasSynthesis = newSkills.some((s: Skill) => s.skillType === 'synthesis');
+
+    // Create day plans (5 days per week)
+    const allSkillsForWeek = [...carryForwardSkills, ...newSkills];
+    const days: DayPlan[] = [];
+    for (let dayNumber = 1; dayNumber <= 5; dayNumber++) {
+      const skillForDay = allSkillsForWeek[dayNumber - 1];
+      if (skillForDay) {
+        days.push({
+          dayNumber,
+          dayInQuest: skillForDay.dayInQuest ?? dayNumber,
+          scheduledDate: this.addDays(nextStartDate, dayNumber - 1),
+          skillId: skillForDay.id,
+          skillType: skillForDay.skillType,
+          skillTitle: skillForDay.title,
+          reviewSkillId: undefined,
+          reviewQuestId: undefined,
+          status: 'pending' as const,
+          drillId: undefined,
+        });
+      }
+    }
+
     const nextWeek: WeekPlan = {
       id: createWeekPlanId(),
       goalId: completedWeek.goalId,
       userId: completedWeek.userId,
       questId: completedWeek.questId,
       weekNumber: completedWeek.weekNumber + 1,
+      weekInQuest: completedWeek.weekInQuest + 1,
+      isFirstWeekOfQuest: false,
+      isLastWeekOfQuest: false, // Unknown without more context
       startDate: nextStartDate,
       endDate: nextEndDate,
       status: 'pending',
       weeklyCompetence,
       theme,
-      scheduledSkillIds: newSkills.map(s => s.id),
-      carryForwardSkillIds: carryForwardSkills.map(s => s.id),
+      days,
+      scheduledSkillIds: newSkills.map((s: Skill) => s.id),
+      carryForwardSkillIds: carryForwardSkills.map((s: Skill) => s.id),
       completedSkillIds: [],
+      foundationCount,
+      buildingCount,
+      compoundCount,
+      hasSynthesis,
+      reviewsFromQuestIds: [],
+      buildsOnSkillIds: [],
       drillsCompleted: 0,
       drillsTotal: newSkills.length + carryForwardSkills.length,
       drillsPassed: 0,
       drillsFailed: 0,
       drillsSkipped: 0,
+      skillsMastered: 0,
       createdAt: now,
       updatedAt: now,
     };

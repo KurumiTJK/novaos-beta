@@ -25,102 +25,37 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { AsyncAppResult, AppResult } from '../../types/result.js';
+import type { AsyncAppResult } from '../../types/result.js';
 import { ok, err, appError } from '../../types/result.js';
 import type {
   SkillId,
   QuestId,
   GoalId,
   UserId,
-  Timestamp,
 } from '../../types/branded.js';
 import { createTimestamp } from '../../types/branded.js';
 import type {
   Skill,
   SkillStatus,
   SkillMastery,
-  QuestMilestone,
-  MilestoneStatus,
+  SkillType,
+  DrillOutcome,
 } from './types.js';
 import { MASTERY_THRESHOLDS } from './types.js';
 import type {
   IUnlockService,
   IMasteryService,
   ISkillStore,
+  PrerequisiteCheckResult,
+  UnlockResult,
+  MasteryUpdateResult,
+  SaveOptions,
+  GetOptions,
+  ListOptions,
+  SaveResult,
+  DeleteResult,
+  ListResult,
 } from './interfaces.js';
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Result of checking prerequisites.
- */
-export interface PrerequisiteCheckResult {
-  /** Whether all prerequisites are met */
-  allMet: boolean;
-  /** IDs of met prerequisites */
-  metPrerequisites: readonly SkillId[];
-  /** IDs of unmet prerequisites */
-  unmetPrerequisites: readonly SkillId[];
-  /** Human-readable reasons for unmet prerequisites */
-  reasons: readonly string[];
-}
-
-/**
- * Result of unlocking skills.
- */
-export interface UnlockResult {
-  /** Skills that were unlocked */
-  unlockedSkills: readonly Skill[];
-  /** Skills that remain locked */
-  stillLockedSkills: readonly Skill[];
-  /** Number of skills unlocked */
-  unlockedCount: number;
-}
-
-/**
- * Result of recording an outcome.
- */
-export interface OutcomeResult {
-  /** Updated skill */
-  skill: Skill;
-  /** Previous mastery level */
-  previousMastery: SkillMastery;
-  /** New mastery level */
-  newMastery: SkillMastery;
-  /** Whether mastery level changed */
-  masteryChanged: boolean;
-  /** Skills unlocked as a result (if any) */
-  unlockedSkills: readonly Skill[];
-}
-
-/**
- * Mastery summary for a set of skills.
- */
-export interface MasterySummary {
-  /** Total skill count */
-  total: number;
-  /** Count by mastery level */
-  byMastery: {
-    not_started: number;
-    practicing: number;
-    mastered: number;
-  };
-  /** Percentage mastered */
-  masteredPercent: number;
-  /** Percentage in progress (practicing + mastered) */
-  inProgressPercent: number;
-}
-
-/**
- * Locked skill with reason.
- */
-export interface LockedSkillInfo {
-  skill: Skill;
-  missingPrerequisites: readonly SkillId[];
-  reasons: readonly string[];
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // UNLOCK SERVICE
@@ -135,173 +70,164 @@ export class UnlockService implements IUnlockService {
   /**
    * Check if all prerequisites are met for a skill.
    */
-  async checkPrerequisites(
-    skill: Skill,
-    allSkills: readonly Skill[]
-  ): AsyncAppResult<PrerequisiteCheckResult> {
-    const skillMap = new Map(allSkills.map(s => [s.id, s]));
+  async checkPrerequisites(skillId: SkillId): AsyncAppResult<PrerequisiteCheckResult> {
+    // Get the skill
+    const skillResult = await this.skillStore.get(skillId);
+    if (!skillResult.ok) {
+      return err(skillResult.error);
+    }
+    if (!skillResult.value) {
+      return err(appError('NOT_FOUND', `Skill ${skillId} not found`));
+    }
+
+    const skill = skillResult.value;
     const metPrereqs: SkillId[] = [];
-    const unmetPrereqs: SkillId[] = [];
-    const reasons: string[] = [];
+    const missingPrereqs: SkillId[] = [];
+    const missingFromQuests: QuestId[] = [];
 
     for (const prereqId of skill.prerequisiteSkillIds) {
-      const prereq = skillMap.get(prereqId);
-
-      if (!prereq) {
-        // Prerequisite not found - might be from previous quest
-        // Check if it's in the store
-        const storeResult = await this.skillStore.get(prereqId);
-        if (storeResult.ok && storeResult.value) {
-          const storedPrereq = storeResult.value;
-          if (storedPrereq.mastery === 'mastered') {
-            metPrereqs.push(prereqId);
-          } else {
-            unmetPrereqs.push(prereqId);
-            reasons.push(`"${storedPrereq.title}" not yet mastered (${storedPrereq.mastery})`);
-          }
+      const prereqResult = await this.skillStore.get(prereqId);
+      
+      if (prereqResult.ok && prereqResult.value) {
+        const prereq = prereqResult.value;
+        if (prereq.mastery === 'mastered') {
+          metPrereqs.push(prereqId);
         } else {
-          // Prerequisite truly not found
-          unmetPrereqs.push(prereqId);
-          reasons.push(`Prerequisite ${prereqId} not found`);
+          missingPrereqs.push(prereqId);
+          if (!missingFromQuests.includes(prereq.questId)) {
+            missingFromQuests.push(prereq.questId);
+          }
         }
-      } else if (prereq.mastery === 'mastered') {
-        metPrereqs.push(prereqId);
       } else {
-        unmetPrereqs.push(prereqId);
-        reasons.push(`"${prereq.title}" not yet mastered (${prereq.mastery})`);
+        // Prerequisite not found
+        missingPrereqs.push(prereqId);
       }
     }
 
     return ok({
-      allMet: unmetPrereqs.length === 0,
+      allMet: missingPrereqs.length === 0,
       metPrerequisites: metPrereqs,
-      unmetPrerequisites: unmetPrereqs,
-      reasons,
+      missingPrerequisites: missingPrereqs,
+      missingFromQuests,
     });
   }
 
   /**
    * Unlock all eligible skills after a mastery change.
    */
-  async unlockEligibleSkills(
-    questId: QuestId,
-    allSkills: readonly Skill[]
-  ): AsyncAppResult<UnlockResult> {
-    const questSkills = allSkills.filter(s => s.questId === questId);
-    const lockedSkills = questSkills.filter(s => s.status === 'locked');
+  async unlockEligibleSkills(masteredSkillId: SkillId): AsyncAppResult<UnlockResult> {
+    // Get the mastered skill to find its goal
+    const masteredResult = await this.skillStore.get(masteredSkillId);
+    if (!masteredResult.ok || !masteredResult.value) {
+      return ok({
+        unlockedSkillIds: [],
+        stillLockedSkillIds: [],
+        milestoneUnlocked: false,
+      });
+    }
 
-    const unlockedSkills: Skill[] = [];
-    const stillLockedSkills: Skill[] = [];
+    const masteredSkill = masteredResult.value;
+    
+    // Get all locked skills in the goal
+    const lockedResult = await this.skillStore.getLocked(masteredSkill.goalId);
+    if (!lockedResult.ok) {
+      return err(lockedResult.error);
+    }
 
-    for (const skill of lockedSkills) {
-      const prereqCheck = await this.checkPrerequisites(skill, allSkills);
+    const unlockedSkillIds: SkillId[] = [];
+    const stillLockedSkillIds: SkillId[] = [];
 
+    for (const skill of lockedResult.value) {
+      // Check if this skill depends on the mastered skill
+      if (!skill.prerequisiteSkillIds.includes(masteredSkillId)) {
+        stillLockedSkillIds.push(skill.id);
+        continue;
+      }
+
+      // Check all prerequisites
+      const prereqCheck = await this.checkPrerequisites(skill.id);
       if (!prereqCheck.ok) {
-        stillLockedSkills.push(skill);
+        stillLockedSkillIds.push(skill.id);
         continue;
       }
 
       if (prereqCheck.value.allMet) {
         // Unlock this skill
-        const now = createTimestamp();
-        const unlockedSkill: Skill = {
-          ...skill,
-          status: 'available',
-          unlockedAt: now,
-          updatedAt: now,
-        };
-
-        // Update in store
-        const updateResult = await this.skillStore.update(unlockedSkill);
+        const updateResult = await this.skillStore.updateStatus(skill.id, 'available');
         if (updateResult.ok) {
-          unlockedSkills.push(unlockedSkill);
-          console.log(`[UNLOCK] Unlocked skill: "${skill.title}"`);
+          unlockedSkillIds.push(skill.id);
         } else {
-          stillLockedSkills.push(skill);
+          stillLockedSkillIds.push(skill.id);
         }
       } else {
-        stillLockedSkills.push(skill);
+        stillLockedSkillIds.push(skill.id);
       }
     }
 
+    // Check if milestone should be unlocked
+    const milestoneCheck = await this.checkMilestoneAvailability(masteredSkill.questId, 0.75);
+    const milestoneUnlocked = milestoneCheck.ok && milestoneCheck.value;
+
     return ok({
-      unlockedSkills,
-      stillLockedSkills,
-      unlockedCount: unlockedSkills.length,
+      unlockedSkillIds,
+      stillLockedSkillIds,
+      milestoneUnlocked,
     });
   }
 
   /**
-   * Check if milestone is available (all skills mastered).
+   * Check if milestone is available based on mastery percentage.
    */
   async checkMilestoneAvailability(
     questId: QuestId,
-    allSkills: readonly Skill[],
-    requiredMasteryPercent: number = 0.75
-  ): AsyncAppResult<{ available: boolean; masteryPercent: number; reason?: string }> {
-    const questSkills = allSkills.filter(s => s.questId === questId);
-
-    if (questSkills.length === 0) {
-      return ok({
-        available: false,
-        masteryPercent: 0,
-        reason: 'No skills found for quest',
-      });
+    requiredMasteryPercent: number
+  ): AsyncAppResult<boolean> {
+    // Get all skills for the quest
+    const skillsResult = await this.skillStore.getByQuest(questId);
+    if (!skillsResult.ok) {
+      return err(skillsResult.error);
     }
 
-    // Exclude synthesis skill from count (it IS the milestone)
-    const nonSynthesisSkills = questSkills.filter(s => s.skillType !== 'synthesis');
-    const masteredCount = nonSynthesisSkills.filter(s => s.mastery === 'mastered').length;
+    const skills = skillsResult.value.items;
+    if (skills.length === 0) {
+      return ok(false);
+    }
+
+    // Exclude synthesis skills from the calculation
+    const nonSynthesisSkills = skills.filter((s: Skill) => s.skillType !== 'synthesis');
+    if (nonSynthesisSkills.length === 0) {
+      return ok(true);
+    }
+
+    const masteredCount = nonSynthesisSkills.filter((s: Skill) => s.mastery === 'mastered').length;
     const masteryPercent = masteredCount / nonSynthesisSkills.length;
 
-    if (masteryPercent >= requiredMasteryPercent) {
-      return ok({
-        available: true,
-        masteryPercent,
-      });
-    }
-
-    const neededCount = Math.ceil(nonSynthesisSkills.length * requiredMasteryPercent);
-    const remaining = neededCount - masteredCount;
-
-    return ok({
-      available: false,
-      masteryPercent,
-      reason: `Need ${remaining} more skill${remaining === 1 ? '' : 's'} mastered (${Math.round(masteryPercent * 100)}% / ${Math.round(requiredMasteryPercent * 100)}% required)`,
-    });
+    return ok(masteryPercent >= requiredMasteryPercent);
   }
 
   /**
-   * Get all locked skills with reasons why they're locked.
+   * Get all locked skills and their missing prerequisites.
    */
   async getLockedSkillsWithReasons(
-    questId: QuestId,
-    allSkills: readonly Skill[]
-  ): AsyncAppResult<readonly LockedSkillInfo[]> {
-    const questSkills = allSkills.filter(s => s.questId === questId);
-    const lockedSkills = questSkills.filter(s => s.status === 'locked');
+    goalId: GoalId
+  ): AsyncAppResult<ReadonlyMap<SkillId, readonly SkillId[]>> {
+    const lockedResult = await this.skillStore.getLocked(goalId);
+    if (!lockedResult.ok) {
+      return err(lockedResult.error);
+    }
 
-    const results: LockedSkillInfo[] = [];
+    const result = new Map<SkillId, readonly SkillId[]>();
 
-    for (const skill of lockedSkills) {
-      const prereqCheck = await this.checkPrerequisites(skill, allSkills);
-
+    for (const skill of lockedResult.value) {
+      const prereqCheck = await this.checkPrerequisites(skill.id);
       if (prereqCheck.ok) {
-        results.push({
-          skill,
-          missingPrerequisites: prereqCheck.value.unmetPrerequisites,
-          reasons: prereqCheck.value.reasons,
-        });
+        result.set(skill.id, prereqCheck.value.missingPrerequisites);
       } else {
-        results.push({
-          skill,
-          missingPrerequisites: skill.prerequisiteSkillIds,
-          reasons: ['Unable to check prerequisites'],
-        });
+        result.set(skill.id, skill.prerequisiteSkillIds);
       }
     }
 
-    return ok(results);
+    return ok(result);
   }
 }
 
@@ -323,9 +249,8 @@ export class MasteryService implements IMasteryService {
    */
   async recordOutcome(
     skillId: SkillId,
-    passed: boolean,
-    allSkills: readonly Skill[]
-  ): AsyncAppResult<OutcomeResult> {
+    outcome: DrillOutcome
+  ): AsyncAppResult<MasteryUpdateResult> {
     // Get current skill
     const skillResult = await this.skillStore.get(skillId);
     if (!skillResult.ok) {
@@ -338,20 +263,21 @@ export class MasteryService implements IMasteryService {
     }
 
     const previousMastery = skill.mastery;
-    const now = createTimestamp();
+    const previousStatus = skill.status;
 
-    // Update counts
+    // Update counts based on outcome
     let passCount = skill.passCount;
     let failCount = skill.failCount;
     let consecutivePasses = skill.consecutivePasses;
 
-    if (passed) {
+    if (outcome === 'pass') {
       passCount += 1;
       consecutivePasses += 1;
-    } else {
+    } else if (outcome === 'fail') {
       failCount += 1;
-      consecutivePasses = 0; // Reset on failure
+      consecutivePasses = 0;
     }
+    // 'partial' and 'skipped' don't change mastery counts
 
     // Calculate new mastery level
     const newMastery = this.calculateMastery(passCount, consecutivePasses);
@@ -364,38 +290,40 @@ export class MasteryService implements IMasteryService {
       newStatus = 'in_progress';
     }
 
-    // Build updated skill
-    const updatedSkill: Skill = {
-      ...skill,
+    // Update skill mastery in store
+    const updateResult = await this.skillStore.updateMastery(
+      skillId,
+      newMastery,
       passCount,
       failCount,
-      consecutivePasses,
-      mastery: newMastery,
-      status: newStatus,
-      masteredAt: newMastery === 'mastered' && previousMastery !== 'mastered' ? now : skill.masteredAt,
-      updatedAt: now,
-    };
+      consecutivePasses
+    );
 
-    // Persist update
-    const updateResult = await this.skillStore.update(updatedSkill);
     if (!updateResult.ok) {
       return err(updateResult.error);
     }
 
-    const masteryChanged = previousMastery !== newMastery;
+    const updatedSkill = updateResult.value;
+    const justMastered = newMastery === 'mastered' && previousMastery !== 'mastered';
 
-    console.log(`[MASTERY] Skill "${skill.title}": ${previousMastery} → ${newMastery} (${passed ? 'pass' : 'fail'})`);
-
-    // If mastery changed, check for unlocks
+    // If skill was just mastered, check for unlocks
     let unlockedSkills: readonly Skill[] = [];
-    if (masteryChanged && newMastery === 'mastered') {
-      const unlockResult = await this.unlockService.unlockEligibleSkills(
-        skill.questId,
-        [...allSkills.filter(s => s.id !== skillId), updatedSkill]
-      );
+    let milestoneUnlocked = false;
 
+    if (justMastered) {
+      const unlockResult = await this.unlockService.unlockEligibleSkills(skillId);
       if (unlockResult.ok) {
-        unlockedSkills = unlockResult.value.unlockedSkills;
+        milestoneUnlocked = unlockResult.value.milestoneUnlocked;
+        
+        // Fetch the actually unlocked skills
+        const fetchedSkills: Skill[] = [];
+        for (const unlockedId of unlockResult.value.unlockedSkillIds) {
+          const fetchResult = await this.skillStore.get(unlockedId);
+          if (fetchResult.ok && fetchResult.value) {
+            fetchedSkills.push(fetchResult.value);
+          }
+        }
+        unlockedSkills = fetchedSkills;
       }
     }
 
@@ -403,57 +331,72 @@ export class MasteryService implements IMasteryService {
       skill: updatedSkill,
       previousMastery,
       newMastery,
-      masteryChanged,
+      previousStatus,
+      newStatus,
+      justMastered,
       unlockedSkills,
+      milestoneUnlocked,
     });
   }
 
   /**
-   * Get mastery summary for a set of skills.
+   * Get mastery summary for a goal.
    */
-  getMasterySummary(skills: readonly Skill[]): MasterySummary {
+  async getMasterySummary(goalId: GoalId): AsyncAppResult<{
+    readonly notStarted: number;
+    readonly attempting: number;
+    readonly practicing: number;
+    readonly mastered: number;
+    readonly total: number;
+  }> {
+    const skillsResult = await this.skillStore.getByGoal(goalId);
+    if (!skillsResult.ok) {
+      return err(skillsResult.error);
+    }
+
+    const skills = skillsResult.value.items;
     const total = skills.length;
 
     if (total === 0) {
-      return {
+      return ok({
+        notStarted: 0,
+        attempting: 0,
+        practicing: 0,
+        mastered: 0,
         total: 0,
-        byMastery: { not_started: 0, practicing: 0, mastered: 0 },
-        masteredPercent: 0,
-        inProgressPercent: 0,
-      };
+      });
     }
 
-    const byMastery = {
-      not_started: skills.filter(s => s.mastery === 'not_started').length,
-      practicing: skills.filter(s => s.mastery === 'practicing').length,
-      mastered: skills.filter(s => s.mastery === 'mastered').length,
-    };
-
-    return {
+    return ok({
+      notStarted: skills.filter((s: Skill) => s.mastery === 'not_started').length,
+      attempting: skills.filter((s: Skill) => s.mastery === 'attempting').length,
+      practicing: skills.filter((s: Skill) => s.mastery === 'practicing').length,
+      mastered: skills.filter((s: Skill) => s.mastery === 'mastered').length,
       total,
-      byMastery,
-      masteredPercent: byMastery.mastered / total,
-      inProgressPercent: (byMastery.practicing + byMastery.mastered) / total,
-    };
+    });
   }
 
   /**
    * Get mastery percentage for a quest.
    */
-  async getQuestMasteryPercent(
-    questId: QuestId,
-    allSkills: readonly Skill[]
-  ): AsyncAppResult<number> {
-    const questSkills = allSkills.filter(s => s.questId === questId);
+  async getQuestMasteryPercent(questId: QuestId): AsyncAppResult<number> {
+    const skillsResult = await this.skillStore.getByQuest(questId);
+    if (!skillsResult.ok) {
+      return err(skillsResult.error);
+    }
 
-    if (questSkills.length === 0) {
+    const skills = skillsResult.value.items;
+    if (skills.length === 0) {
       return ok(0);
     }
 
-    // Exclude synthesis from percentage (it's the milestone, not a prerequisite)
-    const nonSynthesis = questSkills.filter(s => s.skillType !== 'synthesis');
-    const mastered = nonSynthesis.filter(s => s.mastery === 'mastered').length;
+    // Exclude synthesis from percentage
+    const nonSynthesis = skills.filter((s: Skill) => s.skillType !== 'synthesis');
+    if (nonSynthesis.length === 0) {
+      return ok(1);
+    }
 
+    const mastered = nonSynthesis.filter((s: Skill) => s.mastery === 'mastered').length;
     return ok(mastered / nonSynthesis.length);
   }
 
@@ -461,7 +404,6 @@ export class MasteryService implements IMasteryService {
    * Calculate mastery level from pass count and consecutive passes.
    */
   private calculateMastery(passCount: number, consecutivePasses: number): SkillMastery {
-    // Must have enough total passes AND consecutive passes
     if (
       passCount >= MASTERY_THRESHOLDS.MASTERED &&
       consecutivePasses >= MASTERY_THRESHOLDS.CONSECUTIVE_FOR_MASTERY
@@ -471,6 +413,10 @@ export class MasteryService implements IMasteryService {
 
     if (passCount >= MASTERY_THRESHOLDS.PRACTICING) {
       return 'practicing';
+    }
+
+    if (passCount > 0) {
+      return 'attempting';
     }
 
     return 'not_started';
@@ -487,71 +433,108 @@ export class MasteryService implements IMasteryService {
  */
 export class InMemorySkillStore implements ISkillStore {
   private skills: Map<SkillId, Skill> = new Map();
+  private version = 0;
 
-  async get(id: SkillId): AsyncAppResult<Skill | null> {
+  async get(id: SkillId, _options?: GetOptions): AsyncAppResult<Skill | null> {
     return ok(this.skills.get(id) ?? null);
   }
 
-  async getByQuest(questId: QuestId): AsyncAppResult<readonly Skill[]> {
-    const result = Array.from(this.skills.values()).filter(s => s.questId === questId);
-    return ok(result);
-  }
-
-  async getByGoal(goalId: GoalId): AsyncAppResult<readonly Skill[]> {
-    const result = Array.from(this.skills.values()).filter(s => s.goalId === goalId);
-    return ok(result);
-  }
-
-  async getByStatus(
-    questId: QuestId,
-    status: SkillStatus
-  ): AsyncAppResult<readonly Skill[]> {
-    const result = Array.from(this.skills.values())
-      .filter(s => s.questId === questId && s.status === status);
-    return ok(result);
-  }
-
-  async getByType(
-    questId: QuestId,
-    skillType: Skill['skillType']
-  ): AsyncAppResult<readonly Skill[]> {
-    const result = Array.from(this.skills.values())
-      .filter(s => s.questId === questId && s.skillType === skillType);
-    return ok(result);
-  }
-
-  async getAvailable(questId: QuestId): AsyncAppResult<readonly Skill[]> {
-    return this.getByStatus(questId, 'available');
-  }
-
-  async getLocked(questId: QuestId): AsyncAppResult<readonly Skill[]> {
-    return this.getByStatus(questId, 'locked');
-  }
-
-  async save(skill: Skill): AsyncAppResult<Skill> {
+  async save(skill: Skill, _options?: SaveOptions): AsyncAppResult<SaveResult<Skill>> {
+    const created = !this.skills.has(skill.id);
     this.skills.set(skill.id, skill);
-    return ok(skill);
+    this.version++;
+    return ok({
+      entity: skill,
+      version: this.version,
+      created,
+    });
   }
 
-  async saveBatch(skills: readonly Skill[]): AsyncAppResult<readonly Skill[]> {
-    for (const skill of skills) {
-      this.skills.set(skill.id, skill);
-    }
-    return ok(skills);
+  async delete(id: SkillId): AsyncAppResult<DeleteResult> {
+    const existed = this.skills.has(id);
+    this.skills.delete(id);
+    return ok({
+      deleted: existed,
+      id: id as string,
+    });
   }
 
-  async update(skill: Skill): AsyncAppResult<Skill> {
-    if (!this.skills.has(skill.id)) {
-      return err(appError('NOT_FOUND', `Skill ${skill.id} not found`));
-    }
-    this.skills.set(skill.id, skill);
-    return ok(skill);
+  async getByQuest(questId: QuestId, _options?: ListOptions): AsyncAppResult<ListResult<Skill>> {
+    const items = Array.from(this.skills.values()).filter((s: Skill) => s.questId === questId);
+    return ok({
+      items,
+      total: items.length,
+      hasMore: false,
+    });
   }
 
-  async updateStatus(
+  async getByGoal(goalId: GoalId, _options?: ListOptions): AsyncAppResult<ListResult<Skill>> {
+    const items = Array.from(this.skills.values()).filter((s: Skill) => s.goalId === goalId);
+    return ok({
+      items,
+      total: items.length,
+      hasMore: false,
+    });
+  }
+
+  async getByUser(userId: UserId, _options?: ListOptions): AsyncAppResult<ListResult<Skill>> {
+    const items = Array.from(this.skills.values()).filter((s: Skill) => s.userId === userId);
+    return ok({
+      items,
+      total: items.length,
+      hasMore: false,
+    });
+  }
+
+  async getByStatus(goalId: GoalId, status: SkillStatus): AsyncAppResult<readonly Skill[]> {
+    const result = Array.from(this.skills.values())
+      .filter((s: Skill) => s.goalId === goalId && s.status === status);
+    return ok(result);
+  }
+
+  async getByType(questId: QuestId, skillType: SkillType): AsyncAppResult<readonly Skill[]> {
+    const result = Array.from(this.skills.values())
+      .filter((s: Skill) => s.questId === questId && s.skillType === skillType);
+    return ok(result);
+  }
+
+  async getAvailable(goalId: GoalId): AsyncAppResult<readonly Skill[]> {
+    return this.getByStatus(goalId, 'available');
+  }
+
+  async getLocked(goalId: GoalId): AsyncAppResult<readonly Skill[]> {
+    return this.getByStatus(goalId, 'locked');
+  }
+
+  async updateMastery(
     skillId: SkillId,
-    status: SkillStatus
+    mastery: SkillMastery,
+    passCount: number,
+    failCount: number,
+    consecutivePasses: number
   ): AsyncAppResult<Skill> {
+    const skill = this.skills.get(skillId);
+    if (!skill) {
+      return err(appError('NOT_FOUND', `Skill ${skillId} not found`));
+    }
+
+    const now = createTimestamp();
+    const updated: Skill = {
+      ...skill,
+      mastery,
+      passCount,
+      failCount,
+      consecutivePasses,
+      masteredAt: mastery === 'mastered' && skill.mastery !== 'mastered' ? now : skill.masteredAt,
+      lastPracticedAt: now,
+      updatedAt: now,
+    };
+
+    this.skills.set(skillId, updated);
+    return ok(updated);
+  }
+
+  async updateStatus(skillId: SkillId, status: SkillStatus): AsyncAppResult<Skill> {
     const skill = this.skills.get(skillId);
     if (!skill) {
       return err(appError('NOT_FOUND', `Skill ${skillId} not found`));
@@ -560,6 +543,7 @@ export class InMemorySkillStore implements ISkillStore {
     const updated: Skill = {
       ...skill,
       status,
+      unlockedAt: status === 'available' && skill.status === 'locked' ? createTimestamp() : skill.unlockedAt,
       updatedAt: createTimestamp(),
     };
 
@@ -567,18 +551,21 @@ export class InMemorySkillStore implements ISkillStore {
     return ok(updated);
   }
 
-  async delete(id: SkillId): AsyncAppResult<void> {
-    this.skills.delete(id);
-    return ok(undefined);
-  }
-
-  // Helper for tests
+  // Helper methods for tests
   clear(): void {
     this.skills.clear();
+    this.version = 0;
   }
 
   getAll(): Skill[] {
     return Array.from(this.skills.values());
+  }
+
+  async saveBatch(skills: readonly Skill[]): AsyncAppResult<readonly Skill[]> {
+    for (const skill of skills) {
+      this.skills.set(skill.id, skill);
+    }
+    return ok(skills);
   }
 }
 

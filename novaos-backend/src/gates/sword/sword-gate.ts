@@ -1027,12 +1027,12 @@ export class SwordGate {
       practiceCompleted: practiceResult.completed,
       practiceSkipped: practiceResult.skipped,
       practiceProgress: practiceResult.progress ? {
-        totalSkills: practiceResult.progress.totalSkills,
-        mastered: practiceResult.progress.skillsByMastery?.mastered ?? 0,
-        practicing: practiceResult.progress.skillsByMastery?.practicing ?? 0,
-        attempted: practiceResult.progress.skillsByMastery?.attempted ?? 0,
-        notStarted: practiceResult.progress.skillsByMastery?.not_started ?? 0,
-        streakDays: practiceResult.progress.streakDays,
+        totalSkills: practiceResult.progress.skillsTotal,
+        mastered: practiceResult.progress.skillsMastered,
+        practicing: practiceResult.progress.skillsPracticing,
+        attempted: 0, // No longer tracked separately
+        notStarted: practiceResult.progress.skillsNotStarted,
+        streakDays: practiceResult.progress.currentStreak,
       } : undefined,
       responseMessage: practiceResult.response,
       suppressModelGeneration: true,

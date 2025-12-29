@@ -28,7 +28,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { AsyncAppResult } from '../../types/result.js';
-import { ok, err, appError } from '../../types/result.js';
+import { ok, err, appError, isOk } from '../../types/result.js';
 import type {
   DrillId,
   SkillId,
@@ -45,6 +45,7 @@ import type {
   DrillSectionType,
   DrillStatus,
   SkillType,
+  DayPlan,
 } from './types.js';
 import type {
   IDailyDrillEngine,
@@ -139,40 +140,50 @@ export class DailyDrillEngine implements IDailyDrillEngine {
   async generate(context: DailyDrillGenerationContext): AsyncAppResult<DailyDrillGenerationResult> {
     const {
       skill,
-      reviewSkill,
       dayPlan,
+      weekPlan,
+      previousQuestSkills,
+      componentSkills,
       dailyMinutes,
-      attemptNumber = 1,
-      previousFailureReason,
+      previousDrill,
     } = context;
 
-    console.log(`[DRILL_ENGINE] Generating drill for "${skill.title}" (attempt ${attemptNumber})`);
+    // Determine retry count from previous drill
+    const retryCount = previousDrill?.outcome && ['fail', 'partial'].includes(previousDrill.outcome)
+      ? (previousDrill.retryCount ?? 0) + 1
+      : 0;
 
-    const warnings: string[] = [];
+    console.log(`[DRILL_ENGINE] Generating drill for "${skill.title}" (retry count: ${retryCount})`);
+
     const now = createTimestamp();
 
     // Calculate time budget
-    const timeMultiplier = RETRY_TIME_MULTIPLIERS[attemptNumber] ?? 1.0;
+    const timeMultiplier = RETRY_TIME_MULTIPLIERS[retryCount] ?? 1.0;
     const adjustedDailyMinutes = Math.round(dailyMinutes * timeMultiplier);
 
     // Determine if this is a retry
-    const isRetry = attemptNumber > 1;
+    const isRetry = retryCount > 0;
 
-    // Generate sections
-    const warmup = reviewSkill
-      ? await this.generateWarmup(reviewSkill, context)
-      : null;
+    // Generate sections using interface-compliant signatures
+    const warmupResult = await this.generateWarmup(skill, dayPlan, previousQuestSkills);
+    const warmup = isOk(warmupResult) ? warmupResult.value : null;
 
-    const main = await this.generateMain(skill, context);
+    const mainResult = await this.generateMain(skill, componentSkills, adjustedDailyMinutes);
+    if (!isOk(mainResult)) {
+      return mainResult;
+    }
+    const main = mainResult.value;
 
     // Only include stretch if time permits and not a retry
     const stretchBudget = adjustedDailyMinutes
       - (warmup?.estimatedMinutes ?? 0)
       - main.estimatedMinutes;
 
-    const stretch = (!isRetry && this.config.includeStretch && stretchBudget >= this.config.stretchMinutes)
-      ? await this.generateStretch(skill, context)
-      : null;
+    let stretch: DrillSection | null = null;
+    if (!isRetry && this.config.includeStretch && stretchBudget >= this.config.stretchMinutes) {
+      const stretchResult = await this.generateStretch(skill);
+      stretch = isOk(stretchResult) ? stretchResult.value : null;
+    }
 
     // Calculate total time
     const totalMinutes =
@@ -180,12 +191,10 @@ export class DailyDrillEngine implements IDailyDrillEngine {
       main.estimatedMinutes +
       (stretch?.estimatedMinutes ?? 0);
 
-    // Validate time budget
-    if (totalMinutes > adjustedDailyMinutes) {
-      warnings.push(`Drill exceeds budget: ${totalMinutes} > ${adjustedDailyMinutes} minutes`);
-    }
-
     // Identify cross-quest dependencies
+    const reviewSkill = dayPlan.reviewSkillId
+      ? previousQuestSkills.find(s => s.id === dayPlan.reviewSkillId)
+      : undefined;
     const buildsOnQuestIds = this.identifyBuildsOnQuests(skill, reviewSkill);
 
     // Determine component skills for compound drills
@@ -193,23 +202,23 @@ export class DailyDrillEngine implements IDailyDrillEngine {
 
     const drill: DailyDrill = {
       id: createDrillId(),
+      weekPlanId: weekPlan.id,
       skillId: skill.id,
       questId: skill.questId,
       goalId: skill.goalId,
       userId: skill.userId,
 
-      // Structured sections
-      warmup: warmup ?? undefined,
-      main,
-      stretch: stretch ?? undefined,
-
-      // Legacy fields for backward compatibility
-      action: main.action,
-      passSignal: main.passSignal,
-      constraint: main.constraint,
+      // Scheduling
+      scheduledDate: dayPlan.scheduledDate ?? new Date().toISOString().split('T')[0]!,
+      dayNumber: dayPlan.dayNumber,
+      weekNumber: weekPlan.weekNumber,
+      dayInWeek: dayPlan.dayNumber,
+      dayInQuest: dayPlan.dayInQuest,
+      status: 'scheduled' as DrillStatus,
 
       // Skill context
       skillType: skill.skillType,
+      skillTitle: skill.title,
       isCompoundDrill: skill.isCompound,
       componentSkillIds,
 
@@ -218,49 +227,95 @@ export class DailyDrillEngine implements IDailyDrillEngine {
       reviewSkillId: reviewSkill?.id,
       reviewQuestId: reviewSkill?.questId,
 
-      // Scheduling
-      dayNumber: dayPlan?.dayNumber ?? skill.dayInWeek,
-      weekNumber: skill.weekNumber,
-      scheduledDate: dayPlan?.scheduledDate,
+      // Structured sections
+      warmup: warmup ?? undefined,
+      main,
+      stretch: stretch ?? undefined,
 
-      // Status
-      status: 'pending' as DrillStatus,
-      attemptNumber,
-      totalMinutes,
+      // Legacy fields for backward compatibility
+      action: main.action,
+      passSignal: main.passSignal ?? skill.successSignal,
+      lockedVariables: skill.lockedVariables,
+      constraint: main.constraint ?? skill.lockedVariables[0] ?? 'Focus on the main task',
+
+      // Timing
       estimatedMinutes: totalMinutes,
 
+      // Outcome tracking (not yet completed)
+      repeatTomorrow: false,
+
       // Retry context
-      previousFailureReason: isRetry ? previousFailureReason : undefined,
+      isRetry,
+      retryCount,
 
       // Timestamps
       createdAt: now,
       updatedAt: now,
     };
 
+    // Build context explanation
+    const contextExplanation = this.buildContextExplanation(skill, reviewSkill, isRetry, retryCount);
+
     return ok({
       drill,
-      sections: [warmup, main, stretch].filter((s): s is DrillSection => s !== null),
-      totalMinutes,
-      hasWarmup: warmup !== null,
-      hasStretch: stretch !== null,
-      warnings,
+      warmup,
+      main,
+      stretch,
+      context: contextExplanation,
     });
+  }
+
+  /**
+   * Build context explanation for drill generation.
+   */
+  private buildContextExplanation(
+    skill: Skill,
+    reviewSkill: Skill | undefined,
+    isRetry: boolean,
+    retryCount: number
+  ): string {
+    const parts: string[] = [];
+
+    if (isRetry) {
+      parts.push(`Retry attempt ${retryCount} for "${skill.title}".`);
+    } else {
+      parts.push(`New practice of "${skill.title}".`);
+    }
+
+    if (reviewSkill) {
+      parts.push(`Warmup reviews "${reviewSkill.title}" from a previous quest.`);
+    }
+
+    if (skill.isCompound) {
+      parts.push(`This is a compound skill combining multiple concepts.`);
+    }
+
+    return parts.join(' ');
   }
 
   /**
    * Generate warmup section from review skill.
    */
   async generateWarmup(
-    reviewSkill: Skill,
-    context: DailyDrillGenerationContext
-  ): Promise<DrillSection> {
-    const { skill: todaySkill } = context;
+    skill: Skill,
+    dayPlan: DayPlan,
+    previousQuestSkills: readonly Skill[]
+  ): AsyncAppResult<DrillSection | null> {
+    // Find review skill from dayPlan
+    if (!dayPlan.reviewSkillId) {
+      return ok(null);
+    }
+
+    const reviewSkill = previousQuestSkills.find(s => s.id === dayPlan.reviewSkillId);
+    if (!reviewSkill) {
+      return ok(null);
+    }
 
     // Create a lighter version of the review skill's action
-    const action = this.createWarmupAction(reviewSkill, todaySkill);
+    const action = this.createWarmupAction(reviewSkill, skill);
     const passSignal = this.createWarmupPassSignal(reviewSkill);
 
-    return {
+    return ok({
       type: 'warmup' as DrillSectionType,
       title: `Review: ${reviewSkill.title}`,
       action,
@@ -268,10 +323,10 @@ export class DailyDrillEngine implements IDailyDrillEngine {
       constraint: 'Complete quickly without looking up references',
       estimatedMinutes: this.config.warmupMinutes,
       isOptional: false,
-      isFromPreviousQuest: reviewSkill.questId !== todaySkill.questId,
+      isFromPreviousQuest: reviewSkill.questId !== skill.questId,
       sourceQuestId: reviewSkill.questId,
       sourceSkillId: reviewSkill.id,
-    };
+    });
   }
 
   /**
@@ -279,27 +334,28 @@ export class DailyDrillEngine implements IDailyDrillEngine {
    */
   async generateMain(
     skill: Skill,
-    context: DailyDrillGenerationContext
-  ): Promise<DrillSection> {
-    const { dailyMinutes, attemptNumber = 1 } = context;
-
-    // Calculate main section time
-    const warmupTime = context.reviewSkill ? this.config.warmupMinutes : 0;
+    componentSkills: readonly Skill[] | undefined,
+    dailyMinutes: number
+  ): AsyncAppResult<DrillSection> {
+    // Calculate main section time (reserve time for warmup/stretch)
+    const warmupTime = this.config.warmupMinutes;
     const stretchTime = this.config.includeStretch ? this.config.stretchMinutes : 0;
     const availableTime = dailyMinutes - warmupTime - stretchTime;
     const mainTime = Math.max(MIN_MAIN_MINUTES, Math.min(availableTime, skill.estimatedMinutes));
 
-    // Adapt action for retry if needed
-    const action = attemptNumber > 1
-      ? this.adaptActionForRetry(skill.action, attemptNumber, context.previousFailureReason)
-      : skill.action;
+    // Build action - for compound skills, mention component integration
+    let action = skill.action;
+    if (skill.isCompound && componentSkills && componentSkills.length > 0) {
+      const componentNames = componentSkills.map(s => s.title).join(', ');
+      action = `${skill.action} (integrating: ${componentNames})`;
+    }
 
     // Build constraint from locked variables
     const constraint = skill.lockedVariables?.length > 0
       ? skill.lockedVariables.join('; ')
       : "Complete the task as specified";
 
-    return {
+    return ok({
       type: 'main' as DrillSectionType,
       title: skill.title,
       action,
@@ -309,26 +365,18 @@ export class DailyDrillEngine implements IDailyDrillEngine {
       isOptional: false,
       isFromPreviousQuest: false,
       sourceSkillId: skill.id,
-
-      // Include resilience layer
-      adversarialElement: skill.adversarialElement,
-      failureMode: skill.failureMode,
-      recoverySteps: skill.recoverySteps,
-    };
+    });
   }
 
   /**
    * Generate stretch challenge section.
    */
-  async generateStretch(
-    skill: Skill,
-    context: DailyDrillGenerationContext
-  ): Promise<DrillSection> {
+  async generateStretch(skill: Skill): AsyncAppResult<DrillSection | null> {
     // Create a harder version of the skill
     const action = this.createStretchAction(skill);
     const passSignal = this.createStretchPassSignal(skill);
 
-    return {
+    return ok({
       type: 'stretch' as DrillSectionType,
       title: `Challenge: ${skill.title}`,
       action,
@@ -338,59 +386,46 @@ export class DailyDrillEngine implements IDailyDrillEngine {
       isOptional: true,
       isFromPreviousQuest: false,
       sourceSkillId: skill.id,
-    };
+    });
   }
 
   /**
    * Adapt a drill for retry after failure.
    */
   async adaptForRetry(
+    skill: Skill,
     previousDrill: DailyDrill,
-    failureReason: string,
-    attemptNumber: number
-  ): AsyncAppResult<DailyDrill> {
-    if (attemptNumber > this.config.maxRetryAttempts) {
+    retryCount: number
+  ): AsyncAppResult<{ main: DrillSection; warmup?: DrillSection }> {
+    if (retryCount > this.config.maxRetryAttempts) {
       return err(appError(
         'MAX_RETRIES_EXCEEDED',
         `Maximum retry attempts (${this.config.maxRetryAttempts}) exceeded. Consider skipping this skill.`
       ));
     }
 
-    console.log(`[DRILL_ENGINE] Adapting drill for retry ${attemptNumber}: "${previousDrill.main?.title}"`);
+    console.log(`[DRILL_ENGINE] Adapting drill for retry ${retryCount}: "${skill.title}"`);
 
-    const now = createTimestamp();
-    const timeMultiplier = RETRY_TIME_MULTIPLIERS[attemptNumber] ?? 1.5;
+    const timeMultiplier = RETRY_TIME_MULTIPLIERS[retryCount] ?? 1.5;
+    const previousFailureReason = previousDrill.observation ?? 'Not specified';
 
     // Adapt main section
     const adaptedMain: DrillSection = {
-      ...previousDrill.main!,
-      title: `${previousDrill.main!.title} (Retry ${attemptNumber})`,
-      action: this.adaptActionForRetry(
-        previousDrill.main!.action,
-        attemptNumber,
-        failureReason
-      ),
-      estimatedMinutes: Math.round(previousDrill.main!.estimatedMinutes * timeMultiplier),
+      type: 'main' as DrillSectionType,
+      title: `${skill.title} (Retry ${retryCount})`,
+      action: this.adaptActionForRetry(skill.action, retryCount, previousFailureReason),
+      passSignal: skill.successSignal,
+      constraint: skill.lockedVariables?.[0] ?? 'Focus on the basics',
+      estimatedMinutes: Math.round(skill.estimatedMinutes * timeMultiplier),
+      isOptional: false,
+      isFromPreviousQuest: false,
+      sourceSkillId: skill.id,
     };
 
-    // Add recovery guidance
-    const recoveryGuidance = this.generateRecoveryGuidance(failureReason, attemptNumber);
-
-    const adaptedDrill: DailyDrill = {
-      ...previousDrill,
-      id: createDrillId(),
+    return ok({
       main: adaptedMain,
-      stretch: undefined, // Remove stretch on retry
-      attemptNumber,
-      previousFailureReason: failureReason,
-      status: 'pending',
-      totalMinutes: Math.round(previousDrill.totalMinutes * timeMultiplier),
-      estimatedMinutes: Math.round(previousDrill.estimatedMinutes * timeMultiplier),
-      recoveryGuidance,
-      updatedAt: now,
-    };
-
-    return ok(adaptedDrill);
+      warmup: undefined, // No warmup on retry - focus on main skill
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
