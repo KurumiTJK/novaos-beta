@@ -1119,10 +1119,33 @@ export class SwordGate {
     await this.sparkEngine.onGoalCreated(goal, quests);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // PHASE 18: TRIGGER SKILL DECOMPOSITION FOR DELIBERATE PRACTICE
+    // PHASE 21: PERSIST PRE-GENERATED DRILLS (OR FALL BACK TO DECOMPOSITION)
     // ═══════════════════════════════════════════════════════════════════════════
-    if (this.swordGateHook) {
-      console.log('[SWORD_GATE] Triggering skill decomposition for goal:', goal.id);
+    if (proposal.phase21Plan && this.swordGateHook?.practiceEngine) {
+      // Phase 21 path: Use pre-generated content directly via DPE
+      console.log('[SWORD_GATE] Using Phase 21 pre-generated plan (skipping regeneration)');
+      
+      const persistResult = await this.swordGateHook.practiceEngine.initializeFromPhase21Plan(
+        goal,
+        quests,
+        proposal.phase21Plan
+      );
+      
+      if (persistResult.ok) {
+        console.log(
+          `[SWORD_GATE] Phase 21 persistence: ${persistResult.value.skillCount} skills, ` +
+          `${persistResult.value.drillCount} drills created`
+        );
+        if (persistResult.value.warnings.length > 0) {
+          console.warn('[SWORD_GATE] Phase 21 warnings:', persistResult.value.warnings);
+        }
+      } else {
+        console.error('[SWORD_GATE] Phase 21 persistence failed:', persistResult.error);
+        // Don't fail the goal creation - just log the error
+      }
+    } else if (this.swordGateHook) {
+      // Legacy path: Regenerate via skill decomposition
+      console.log('[SWORD_GATE] No Phase 21 data, triggering legacy skill decomposition');
       const decompositionResult = await triggerSkillDecomposition(
         this.swordGateHook,
         goal,

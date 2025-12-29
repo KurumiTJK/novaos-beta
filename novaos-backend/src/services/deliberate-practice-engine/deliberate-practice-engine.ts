@@ -54,10 +54,19 @@ import type {
   IDeliberatePracticeStores,
   WeekProgressUpdate,
   WeeklySummary,
+  Phase21InitResult,
 } from './interfaces.js';
 import { SkillDecomposer, type SkillDecomposerConfig } from './skill-decomposer.js';
 import { DrillGenerator, type DrillGeneratorConfig } from './drill-generator.js';
 import { WeekTracker } from './week-tracker.js';
+
+// Phase 21: Science-Based Learning Types
+import type {
+  GeneratedLessonPlan,
+  GeneratedWeek,
+  GeneratedDrill,
+} from './phase21/index.js';
+import { createSkillId } from '../../types/branded.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -356,6 +365,511 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
     console.log(`[DPE] Created learning plan for goal: ${goalId} (JIT mode)`);
 
     return ok(learningPlan);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PHASE 21: INITIALIZE FROM PRE-GENERATED PLAN
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Initialize a learning plan from a Phase 21 pre-generated plan.
+   *
+   * Phase 21 generates complete drill content during the suggest mode.
+   * This method persists that content directly, avoiding regeneration.
+   */
+  async initializeFromPhase21Plan(
+    goal: Goal,
+    quests: readonly Quest[],
+    phase21Plan: GeneratedLessonPlan
+  ): AsyncAppResult<Phase21InitResult> {
+    const userId = goal.userId;
+    const goalId = goal.id;
+    const warnings: string[] = [];
+
+    console.log(`[DPE] Initializing from Phase 21 plan: ${phase21Plan.totalWeeks} weeks, domain=${phase21Plan.domain}`);
+    console.log(`[DPE] Quests provided: ${quests.length}, weeks in plan: ${phase21Plan.weeks.length}`);
+
+    // Check if plan already exists
+    const existingPlan = await this.stores.learningPlans.get(goalId);
+    if (existingPlan.ok && existingPlan.value !== null) {
+      console.log(`[DPE] Plan already exists for goal ${goalId}, returning existing`);
+      return ok({
+        weekPlanCount: 0,
+        skillCount: 0,
+        drillCount: 0,
+        learningPlan: existingPlan.value,
+        success: true,
+        warnings: ['Plan already exists, skipping initialization'],
+      });
+    }
+
+    // Validate we have at least one quest
+    if (quests.length === 0) {
+      return err(appError('INVALID_INPUT', 'At least one quest is required for Phase 21 initialization'));
+    }
+
+    let weekPlanCount = 0;
+    let skillCount = 0;
+    let drillCount = 0;
+    const questSkillMappings: QuestSkillMapping[] = [];
+    const questWeekMappings: QuestWeekMapping[] = [];
+    const questDurations: QuestDuration[] = [];
+    const now = createTimestamp();
+
+    // Track skills per quest for mapping
+    const skillsByQuest = new Map<string, SkillId[]>();
+
+    // Process each week
+    for (let weekIndex = 0; weekIndex < phase21Plan.weeks.length; weekIndex++) {
+      const week = phase21Plan.weeks[weekIndex]!;
+      
+      // Map weeks to quests: use matching index if available, otherwise use first quest
+      // This handles the common case where Phase 21 generates multiple weeks but only one quest exists
+      const quest = quests[weekIndex] ?? quests[0]!;
+      
+      console.log(`[DPE] Processing week ${weekIndex + 1}: "${week.title}" -> quest "${quest.title}"`);
+
+      // Calculate dates
+      const weekStartDate = this.calculateWeekStartDate(goal, week.weekNumber);
+      const weekEndDate = this.calculateWeekEndDate(goal, week.weekNumber);
+      const weekPlanId = createWeekPlanId();
+
+      // Create skills from Phase 21 drills
+      const skillIds: SkillId[] = [];
+      const dayPlans: DayPlan[] = [];
+
+      for (let dayIndex = 0; dayIndex < week.drills.length; dayIndex++) {
+        const drill = week.drills[dayIndex]!;
+        const dayNumber = (weekIndex * 5) + dayIndex + 1;
+        const scheduledDate = this.calculateDrillDate(goal, dayNumber);
+        const skillId = createSkillId();
+
+        // Create skill from Phase 21 drill
+        const skill: Skill = {
+          id: skillId,
+          questId: quest.id,
+          goalId,
+          userId,
+          title: drill.title || `Day ${dayNumber}: ${drill.dayType}`,
+          topic: week.topic || week.title,
+          action: drill.do || 'Complete the assigned task',
+          successSignal: drill.done || 'Task completed successfully',
+          // Store requires at least one locked variable - use constraint as default
+          lockedVariables: [this.getDayTypeConstraint(drill.dayType)],
+          estimatedMinutes: goal.learningConfig?.dailyMinutes ?? 30,
+          skillType: this.mapDayTypeToSkillType(drill.dayType),
+          depth: this.mapDayTypeToDepth(drill.dayType),
+          prerequisiteSkillIds: [],
+          prerequisiteQuestIds: [],
+          isCompound: false,
+          weekNumber: week.weekNumber,
+          dayInWeek: dayIndex + 1,
+          dayInQuest: dayIndex + 1,
+          scheduledDate,
+          order: dayIndex + 1,
+          difficulty: this.mapDayTypeToDifficulty(drill.dayType),
+          mastery: 'not_started',
+          status: 'available',
+          passCount: 0,
+          failCount: 0,
+          consecutivePasses: 0,
+          sourceStageTitle: drill.dayType,
+          sourceStageIndex: dayIndex + 1,
+          topics: drill.resourceTopics || [],
+          givenMaterial: drill.givenMaterial,
+          givenMaterialType: drill.givenMaterialType,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        // Save skill
+        const skillSaveResult = await this.stores.skills.save(skill);
+        if (!skillSaveResult.ok) {
+          console.error(`[DPE] Failed to save skill for day ${dayNumber}:`, skillSaveResult.error);
+          warnings.push(`Failed to save skill for day ${dayNumber}: ${skillSaveResult.error.message}`);
+          continue;
+        }
+        skillIds.push(skillId);
+        skillCount++;
+        console.log(`[DPE] Saved skill ${skillCount}: "${skill.title}" (day ${dayNumber})`);
+
+        // Create daily drill
+        const drillId = createDrillId();
+        const drillAction = drill.do || skill.action || 'Complete the assigned task';
+        const drillPassSignal = drill.done || skill.successSignal || 'Task completed successfully';
+        
+        const dailyDrill: DailyDrill = {
+          id: drillId,
+          weekPlanId,
+          skillId,
+          userId,
+          goalId,
+          questId: quest.id,
+          scheduledDate,
+          dayNumber,
+          weekNumber: week.weekNumber,
+          dayInWeek: dayIndex + 1,
+          dayInQuest: dayIndex + 1,
+          status: 'scheduled',
+          skillType: this.mapDayTypeToSkillType(drill.dayType),
+          skillTitle: skill.title,
+          isCompoundDrill: false,
+          buildsOnQuestIds: [],
+          warmup: undefined,
+          main: {
+            type: 'main',
+            title: skill.title,
+            action: drillAction,
+            passSignal: drillPassSignal,
+            constraint: this.getDayTypeConstraint(drill.dayType),
+            skillId,
+            estimatedMinutes: goal.learningConfig?.dailyMinutes ?? 30,
+          },
+          stretch: undefined,
+          action: drillAction,
+          passSignal: drillPassSignal,
+          lockedVariables: skill.lockedVariables,
+          constraint: this.getDayTypeConstraint(drill.dayType),
+          estimatedMinutes: goal.learningConfig?.dailyMinutes ?? 30,
+          repeatTomorrow: false,
+          isRetry: false,
+          retryCount: 0,
+          // Phase 21 fields
+          dayType: drill.dayType,
+          globalDayNumber: dayNumber,
+          prime: drill.prime,
+          primeAnswer: drill.primeAnswer,
+          do: drillAction,
+          givenMaterial: drill.givenMaterial,
+          givenMaterialType: drill.givenMaterialType,
+          done: drillPassSignal,
+          stuck: drill.stuck,
+          unstuck: drill.unstuck,
+          why: drill.why,
+          reflect: drill.reflect,
+          resourceTopics: drill.resourceTopics,
+          resourcePolicy: drill.resourcePolicy,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        // Save drill
+        const drillSaveResult = await this.stores.drills.save(dailyDrill);
+        if (!drillSaveResult.ok) {
+          console.error(`[DPE] Failed to save drill for day ${dayNumber}:`, drillSaveResult.error);
+          warnings.push(`Failed to save drill for day ${dayNumber}: ${drillSaveResult.error.message}`);
+          continue;
+        }
+        drillCount++;
+
+        // Create day plan
+        dayPlans.push({
+          dayInWeek: dayIndex + 1,
+          scheduledDate,
+          skillId,
+          skillType: this.mapDayTypeToSkillType(drill.dayType),
+          skillTitle: skill.title,
+          hasWarmup: false,
+          hasStretch: false,
+          reviewSkillId: undefined,
+          reviewQuestId: undefined,
+        });
+      }
+
+      // Create week plan
+      const weekPlan: WeekPlan = {
+        id: weekPlanId,
+        goalId,
+        userId,
+        questId: quest.id,
+        weekNumber: week.weekNumber,
+        weekInQuest: 1,
+        isFirstWeekOfQuest: true,
+        isLastWeekOfQuest: true,
+        status: weekIndex === 0 ? 'active' : 'pending',
+        startDate: weekStartDate,
+        endDate: weekEndDate,
+        weeklyCompetence: week.competenceProof,
+        theme: week.theme || week.title,
+        days: dayPlans,
+        scheduledSkillIds: skillIds,
+        carryForwardSkillIds: [],
+        foundationCount: dayPlans.filter(d => d.skillType === 'foundation').length,
+        buildingCount: dayPlans.filter(d => d.skillType === 'building').length,
+        compoundCount: dayPlans.filter(d => d.skillType === 'compound').length,
+        hasSynthesis: dayPlans.some(d => d.skillType === 'synthesis'),
+        reviewsFromQuestIds: [],
+        buildsOnSkillIds: [],
+        drillsCompleted: 0,
+        drillsPassed: 0,
+        drillsFailed: 0,
+        drillsSkipped: 0,
+        drillsTotal: week.drills.length,
+        skillsMastered: 0,
+        totalMinutesEstimated: week.drills.length * (goal.learningConfig?.dailyMinutes ?? 30),
+        totalMinutesActual: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Save week plan
+      const weekPlanSaveResult = await this.stores.weekPlans.save(weekPlan);
+      if (!weekPlanSaveResult.ok) {
+        warnings.push(`Failed to save week plan for week ${week.weekNumber}: ${weekPlanSaveResult.error.message}`);
+        continue;
+      }
+      weekPlanCount++;
+
+      // Track skills per quest for aggregation
+      const questIdStr = quest.id as string;
+      if (!skillsByQuest.has(questIdStr)) {
+        skillsByQuest.set(questIdStr, []);
+      }
+      skillsByQuest.get(questIdStr)!.push(...skillIds);
+    }
+
+    // Build quest skill mappings from aggregated data
+    const processedQuests = new Set<string>();
+    for (let weekIndex = 0; weekIndex < phase21Plan.weeks.length; weekIndex++) {
+      const week = phase21Plan.weeks[weekIndex]!;
+      const quest = quests[weekIndex] ?? quests[0]!;
+      const questIdStr = quest.id as string;
+
+      // Only process each quest once
+      if (processedQuests.has(questIdStr)) {
+        continue;
+      }
+      processedQuests.add(questIdStr);
+
+      const allSkillIds = skillsByQuest.get(questIdStr) ?? [];
+      
+      // Count day types across all weeks for this quest
+      let encounterCount = 0;
+      let struggleConnectCount = 0;
+      let proveCount = 0;
+      let totalDrillCount = 0;
+
+      for (let wi = 0; wi < phase21Plan.weeks.length; wi++) {
+        const w = phase21Plan.weeks[wi]!;
+        const q = quests[wi] ?? quests[0]!;
+        if (q.id === quest.id) {
+          for (const drill of w.drills) {
+            totalDrillCount++;
+            if (drill.dayType === 'encounter') encounterCount++;
+            if (['struggle', 'connect'].includes(drill.dayType)) struggleConnectCount++;
+            if (drill.dayType === 'prove') proveCount++;
+          }
+        }
+      }
+
+      questSkillMappings.push({
+        questId: quest.id,
+        questTitle: quest.title,
+        questOrder: processedQuests.size,
+        skillIds: allSkillIds,
+        skillCount: allSkillIds.length,
+        estimatedDays: totalDrillCount,
+        foundationCount: encounterCount,
+        buildingCount: struggleConnectCount,
+        compoundCount: 0,
+        hasSynthesis: proveCount > 0,
+      });
+
+      // Calculate duration (how many weeks this quest spans)
+      const questWeekNumbers: number[] = [];
+      const questWeekPlanIds: WeekPlanId[] = [];
+      for (let wi = 0; wi < phase21Plan.weeks.length; wi++) {
+        const w = phase21Plan.weeks[wi]!;
+        const q = quests[wi] ?? quests[0]!;
+        if (q.id === quest.id) {
+          questWeekNumbers.push(w.weekNumber);
+          // Note: we'd need to track weekPlanIds during week creation for accurate mapping
+        }
+      }
+
+      const weekCount = questWeekNumbers.length;
+      questDurations.push({
+        unit: 'weeks',
+        value: weekCount,
+        practiceDays: totalDrillCount,
+        weekStart: Math.min(...questWeekNumbers),
+        weekEnd: Math.max(...questWeekNumbers),
+        displayLabel: weekCount === 1 
+          ? `Week ${questWeekNumbers[0]}`
+          : `Weeks ${Math.min(...questWeekNumbers)}-${Math.max(...questWeekNumbers)}`,
+      });
+
+      questWeekMappings.push({
+        questId: quest.id,
+        weekNumbers: questWeekNumbers,
+        weekPlanIds: questWeekPlanIds,
+        duration: questDurations[questDurations.length - 1]!,
+      });
+    }
+
+    // Create learning plan
+    const startDate = new Date(goal.learningConfig?.startDate ?? new Date());
+    const completionDate = new Date(startDate);
+    completionDate.setDate(startDate.getDate() + (phase21Plan.totalWeeks * 7));
+
+    // Validate we created at least some content
+    if (skillCount === 0) {
+      console.error(`[DPE] Phase 21: No skills were created. Weeks: ${phase21Plan.weeks.length}, Quests: ${quests.length}`);
+      console.error(`[DPE] Phase 21 warnings:`, warnings);
+      return err(appError('PROCESSING_ERROR', `Failed to create skills from Phase 21 plan. ${warnings.join('; ')}`));
+    }
+
+    console.log(`[DPE] Phase 21: Creating learning plan with ${skillCount} skills, ${drillCount} drills, ${weekPlanCount} weeks`);
+
+    const learningPlan: LearningPlan = {
+      goalId,
+      userId,
+      durationType: 'fixed',
+      totalWeeks: phase21Plan.totalWeeks,
+      totalPracticeDays: phase21Plan.totalWeeks * 5,
+      totalSkills: skillCount,
+      totalDrills: drillCount,
+      estimatedCompletionDate: completionDate.toISOString().split('T')[0]!,
+      questSkillMapping: questSkillMappings,
+      questWeekMapping: questWeekMappings,
+      questDurations,
+      foundationSkillCount: questSkillMappings.reduce((sum, m) => sum + m.foundationCount, 0),
+      buildingSkillCount: questSkillMappings.reduce((sum, m) => sum + m.buildingCount, 0),
+      compoundSkillCount: questSkillMappings.reduce((sum, m) => sum + m.compoundCount, 0),
+      synthesisSkillCount: questSkillMappings.filter(m => m.hasSynthesis).length,
+      generatedAt: now,
+      // Phase 21 specific
+      domain: phase21Plan.domain,
+    };
+
+    // Save learning plan
+    const planSaveResult = await this.stores.learningPlans.save(learningPlan);
+    if (!planSaveResult.ok) {
+      return err(planSaveResult.error);
+    }
+
+    console.log(`[DPE] Phase 21 initialization complete: ${weekPlanCount} weeks, ${skillCount} skills, ${drillCount} drills`);
+
+    return ok({
+      weekPlanCount,
+      skillCount,
+      drillCount,
+      learningPlan,
+      success: true,
+      warnings,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PHASE 21 HELPER METHODS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Map Phase 21 day type to skill type.
+   */
+  private mapDayTypeToSkillType(dayType: string): SkillType {
+    switch (dayType) {
+      case 'encounter':
+        return 'foundation';
+      case 'struggle':
+      case 'connect':
+        return 'building';
+      case 'fail':
+        return 'compound';
+      case 'prove':
+        return 'synthesis';
+      default:
+        return 'building';
+    }
+  }
+
+  /**
+   * Map Phase 21 day type to skill depth.
+   */
+  private mapDayTypeToDepth(dayType: string): number {
+    switch (dayType) {
+      case 'encounter':
+        return 0;
+      case 'struggle':
+        return 1;
+      case 'connect':
+        return 1;
+      case 'fail':
+        return 2;
+      case 'prove':
+        return 3;
+      default:
+        return 1;
+    }
+  }
+
+  /**
+   * Map Phase 21 day type to skill difficulty.
+   */
+  private mapDayTypeToDifficulty(dayType: string): 'foundation' | 'practice' | 'challenge' {
+    switch (dayType) {
+      case 'encounter':
+        return 'foundation';
+      case 'struggle':
+      case 'connect':
+        return 'practice';
+      case 'fail':
+      case 'prove':
+        return 'challenge';
+      default:
+        return 'practice';
+    }
+  }
+
+  /**
+   * Get constraint description for day type.
+   */
+  private getDayTypeConstraint(dayType: string): string {
+    switch (dayType) {
+      case 'encounter':
+        return 'Follow the given steps exactly, focus on correct execution';
+      case 'struggle':
+        return 'Reproduce from memory without reference material';
+      case 'connect':
+        return 'Apply the skill in a new context or variation';
+      case 'fail':
+        return 'Diagnose what went wrong and explain the fix';
+      case 'prove':
+        return 'Demonstrate mastery independently without any aids';
+      default:
+        return 'Complete the task as specified';
+    }
+  }
+
+  /**
+   * Calculate week start date based on goal start and week number.
+   */
+  private calculateWeekStartDate(goal: Goal, weekNumber: number): string {
+    const startDate = new Date(goal.learningConfig?.startDate ?? new Date());
+    startDate.setDate(startDate.getDate() + (weekNumber - 1) * 7);
+    return startDate.toISOString().split('T')[0]!;
+  }
+
+  /**
+   * Calculate week end date based on goal start and week number.
+   */
+  private calculateWeekEndDate(goal: Goal, weekNumber: number): string {
+    const startDate = new Date(goal.learningConfig?.startDate ?? new Date());
+    startDate.setDate(startDate.getDate() + (weekNumber * 7) - 1);
+    return startDate.toISOString().split('T')[0]!;
+  }
+
+  /**
+   * Calculate drill date based on goal start and day number.
+   * Assumes 5 learning days per 7 calendar days (weekdays only).
+   */
+  private calculateDrillDate(goal: Goal, dayNumber: number): string {
+    const startDate = new Date(goal.learningConfig?.startDate ?? new Date());
+    // Skip weekends: 5 learning days per 7 calendar days
+    const weeksOffset = Math.floor((dayNumber - 1) / 5);
+    const daysInWeek = (dayNumber - 1) % 5;
+    startDate.setDate(startDate.getDate() + (weeksOffset * 7) + daysInWeek);
+    return startDate.toISOString().split('T')[0]!;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

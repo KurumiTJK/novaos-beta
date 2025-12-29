@@ -48,6 +48,9 @@ import type {
   SkillDistribution,
 } from './types.js';
 
+// Phase 21: Science-Based Learning Types
+import type { GeneratedLessonPlan } from './phase21/index.js';
+
 // Import store types for local use
 import type {
   SaveOptions,
@@ -818,6 +821,30 @@ export interface TodayPracticeBundle {
 }
 
 /**
+ * Result of Phase 21 plan initialization.
+ * Contains counts of created entities.
+ */
+export interface Phase21InitResult {
+  /** Number of week plans created */
+  readonly weekPlanCount: number;
+
+  /** Number of skills created */
+  readonly skillCount: number;
+
+  /** Number of drills created */
+  readonly drillCount: number;
+
+  /** The created learning plan */
+  readonly learningPlan: LearningPlan;
+
+  /** Whether initialization was successful */
+  readonly success: boolean;
+
+  /** Any warnings during initialization */
+  readonly warnings: readonly string[];
+}
+
+/**
  * Drill completion parameters from user.
  */
 export interface DrillCompletionParams {
@@ -902,6 +929,23 @@ export interface IDeliberatePracticeEngine {
     quests: readonly Quest[],
     stagesByQuest: ReadonlyMap<QuestId, readonly CapabilityStage[]>
   ): AsyncAppResult<LearningPlan>;
+
+  /**
+   * Initialize a learning plan from a Phase 21 pre-generated plan.
+   *
+   * Phase 21 generates complete drill content during the suggest mode.
+   * This method persists that content directly, avoiding regeneration.
+   *
+   * @param goal - The learning goal
+   * @param quests - The goal's quests
+   * @param phase21Plan - The pre-generated Phase 21 plan
+   * @returns Result with counts of created entities
+   */
+  initializeFromPhase21Plan(
+    goal: Goal,
+    quests: readonly Quest[],
+    phase21Plan: GeneratedLessonPlan
+  ): AsyncAppResult<Phase21InitResult>;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Daily Operations

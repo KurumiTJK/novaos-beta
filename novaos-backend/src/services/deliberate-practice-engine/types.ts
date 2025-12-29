@@ -536,6 +536,21 @@ export interface Skill {
   readonly topics?: readonly string[];
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Phase 21: Pre-generated Content
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Given material for the drill (code, text, steps, etc.)
+   * Phase 21 pre-generates this content during plan creation.
+   */
+  readonly givenMaterial?: string | null;
+
+  /**
+   * Type of given material for proper rendering.
+   */
+  readonly givenMaterialType?: GivenMaterialType | null;
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Timestamps
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1437,6 +1452,13 @@ export interface LearningPlan {
   readonly synthesisSkillCount?: number;
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Phase 21: Science-Based Learning
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Learning domain detected for this content */
+  readonly domain?: LearningDomain;
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Metadata
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1777,6 +1799,9 @@ export interface CreateSkillParams {
   readonly sourceStageTitle?: string;
   readonly sourceStageIndex?: number;
   readonly topics?: readonly string[];
+  // Phase 21: Pre-generated content
+  readonly givenMaterial?: string | null;
+  readonly givenMaterialType?: GivenMaterialType | null;
 }
 
 /**
@@ -1813,6 +1838,22 @@ export interface CreateDrillParams {
   readonly continuationContext?: string;
   readonly isRetry: boolean;
   readonly retryCount: number;
+  // Phase 21: Pre-generated content
+  readonly givenMaterial?: string | null;
+  readonly givenMaterialType?: GivenMaterialType | null;
+  // Phase 21: Day type and additional fields
+  readonly dayType?: DrillDayType;
+  readonly globalDayNumber?: number;
+  readonly prime?: string | null;
+  readonly primeAnswer?: string | null;
+  readonly do?: string;
+  readonly done?: string;
+  readonly stuck?: string;
+  readonly unstuck?: string;
+  readonly why?: string;
+  readonly reflect?: string;
+  readonly resourceTopics?: readonly string[];
+  readonly resourcePolicy?: ResourcePolicy;
 }
 
 /**
