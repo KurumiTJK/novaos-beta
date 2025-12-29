@@ -139,6 +139,7 @@ export interface ViewRequest {
 /**
  * Practice intent detected from user message.
  * Phase 18B: Practice mode for chat-based drill interaction.
+ * Phase 19C: Multi-goal support intents.
  */
 export type PracticeIntent =
   | 'view_today'      // "What's my lesson today?"
@@ -153,6 +154,14 @@ export type PracticeIntent =
   | 'delete_all'      // "Delete all goals", "Clear all"
   | 'start_now'       // "Start now", "Begin today"
   | 'switch_goal'     // "Switch to goal 2"
+  // Phase 19C: Multi-goal intents
+  | 'view_bundle'     // "What should I practice?", "Today's practice"
+  | 'select_goal'     // "Practice goal 2", "Focus on Rust"
+  | 'pause_goal'      // "Pause this goal", "Pause for a week"
+  | 'resume_goal'     // "Resume goal", "Unpause"
+  | 'set_priority'    // "Make this priority 1", "Set priority"
+  // Phase 19D: Additional intents
+  | 'cancel'          // "Cancel", "Nevermind", "Exit", "Go back"
   | 'unknown';
 
 /**
@@ -171,6 +180,14 @@ export const PRACTICE_INTENTS: readonly PracticeIntent[] = [
   'delete_all',
   'start_now',
   'switch_goal',
+  // Phase 19C
+  'view_bundle',
+  'select_goal',
+  'pause_goal',
+  'resume_goal',
+  'set_priority',
+  // Phase 19D
+  'cancel',
   'unknown',
 ] as const;
 
@@ -263,8 +280,11 @@ export interface ProposedQuest {
   /** Topics covered in this quest */
   readonly topics: readonly string[];
 
-  /** Estimated number of days */
-  readonly estimatedDays: number;
+  /**
+   * Estimated number of days.
+   * Phase 19A: Optional for ongoing goals.
+   */
+  readonly estimatedDays?: number;
 
   /** Order in the plan (1-based) */
   readonly order: number;
@@ -292,8 +312,11 @@ export interface LessonPlanProposal {
   /** Total estimated duration (e.g., "6 weeks") */
   readonly totalDuration: string;
 
-  /** Total number of learning days */
-  readonly totalDays: number;
+  /**
+   * Total number of learning days.
+   * Phase 19A: Optional for ongoing goals.
+   */
+  readonly totalDays?: number;
 
   /** Topics that will be covered */
   readonly topicsCovered: readonly string[];
@@ -498,6 +521,61 @@ export interface SwordGateOutput {
 
   /** Count of deleted goals */
   readonly practiceDeletedCount?: number;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Multi-Goal Bundle (Phase 19C)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Multi-goal practice bundle.
+   * Contains practices for ALL active goals, sorted by priority.
+   * Phase 19C: Multi-goal support.
+   */
+  readonly practiceBundle?: {
+    /** Today's date */
+    readonly date: string;
+
+    /** Total active goals */
+    readonly totalActiveGoals: number;
+
+    /** Goals with practice available */
+    readonly entries: readonly {
+      readonly goalId: string;
+      readonly goalTitle: string;
+      readonly priority: number;
+      readonly isPrimary: boolean;
+      readonly hasPractice: boolean;
+      readonly priorityReason: string;
+      /** Drill action if available */
+      readonly action?: string;
+      /** Skill being practiced */
+      readonly skillName?: string;
+    }[];
+
+    /** Primary goal ID (if any) */
+    readonly primaryGoalId?: string;
+
+    /** Primary goal title (if any) */
+    readonly primaryGoalTitle?: string;
+
+    /** Goals paused count */
+    readonly pausedCount: number;
+
+    /** Goals completed for today */
+    readonly completedTodayCount: number;
+
+    /** Whether any practice is available */
+    readonly hasPractice: boolean;
+
+    /** Summary message */
+    readonly summary: string;
+  };
+
+  /**
+   * Selected goal for practice (when user chooses from bundle).
+   * Phase 19C: Goal selection support.
+   */
+  readonly selectedGoalId?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -573,11 +651,24 @@ export interface SwordRefinementInputs {
   /** Daily time commitment in minutes */
   readonly dailyTimeCommitment?: number;
 
-  /** Total duration (e.g., "6 weeks", "30 days") */
+  /**
+   * Total duration (e.g., "6 weeks", "30 days", "ongoing").
+   * For ongoing goals, this will be "ongoing".
+   */
   readonly totalDuration?: string;
 
-  /** Parsed total days */
+  /**
+   * Parsed total days.
+   * Undefined for ongoing goals.
+   */
   readonly totalDays?: number;
+
+  /**
+   * Explicit duration type.
+   * Derived from totalDuration parsing.
+   * Phase 19A addition.
+   */
+  readonly durationType?: 'fixed' | 'ongoing';
 
   /** Preferred learning style */
   readonly learningStyle?: LearningStyle;
@@ -681,6 +772,9 @@ export interface SwordGateConfig {
   /** Maximum total duration (days) */
   readonly maxTotalDays: number;
 
+  /** Allow ongoing goals with no fixed end date (Phase 19A) */
+  readonly allowOngoingGoals: boolean;
+
   /** Maximum goal statement length */
   readonly maxGoalStatementLength: number;
 
@@ -730,8 +824,10 @@ export const DEFAULT_SWORD_GATE_CONFIG: SwordGateConfig = {
   refinementTtlSeconds: 60 * 60, // 1 hour
   minDailyMinutes: 5,
   maxDailyMinutes: 480, // 8 hours
-  minTotalDays: 3,
-  maxTotalDays: 365,
+  // Phase 19A: Allow 1-day minimum, no maximum
+  minTotalDays: 1,
+  maxTotalDays: Infinity,
+  allowOngoingGoals: true,
   maxGoalStatementLength: 500,
   useLlmModeDetection: true,
   llmModel: 'gpt-4o-mini',
@@ -766,18 +862,34 @@ export function isRefinementField(value: unknown): value is RefinementField {
 
 /**
  * Check if all required refinement fields are present.
- * 
- * ★ IMPORTANT: Checks BOTH totalDuration AND totalDays
- * The lesson plan generator requires totalDays to be a number.
+ *
+ * Phase 19A: Ongoing goals don't require totalDays.
  */
 export function hasRequiredFields(inputs: SwordRefinementInputs): boolean {
-  return (
+  // Base requirements (always needed)
+  const hasBase = (
     !!inputs.goalStatement &&
     !!inputs.userLevel &&
     typeof inputs.dailyTimeCommitment === 'number' &&
-    !!inputs.totalDuration &&
-    typeof inputs.totalDays === 'number'  // ★ FIX: Also check totalDays
+    inputs.dailyTimeCommitment > 0
   );
+
+  if (!hasBase) {
+    return false;
+  }
+
+  // Must have totalDuration
+  if (!inputs.totalDuration) {
+    return false;
+  }
+
+  // Ongoing goals: totalDuration is sufficient, no totalDays needed
+  if (inputs.totalDuration === 'ongoing' || inputs.durationType === 'ongoing') {
+    return true;
+  }
+
+  // Fixed goals: need totalDays as well
+  return typeof inputs.totalDays === 'number' && inputs.totalDays > 0;
 }
 
 /**
@@ -807,4 +919,67 @@ export function calculateRefinementProgress(inputs: SwordRefinementInputs): numb
   if (inputs.totalDuration) filled++;
 
   return filled / required;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DURATION HELPERS (Phase 19A)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Validate duration configuration.
+ *
+ * @param totalDuration - Duration string
+ * @param totalDays - Parsed days (undefined for ongoing)
+ * @param config - SwordGate config
+ * @returns Error message or undefined if valid
+ */
+export function validateDuration(
+  totalDuration: string | undefined,
+  totalDays: number | undefined,
+  config: SwordGateConfig
+): string | undefined {
+  if (!totalDuration) {
+    return 'Total duration is required';
+  }
+
+  // Ongoing goals
+  if (isOngoingDuration(totalDuration)) {
+    if (!config.allowOngoingGoals) {
+      return 'Ongoing goals are not enabled';
+    }
+    return undefined; // Valid ongoing goal
+  }
+
+  // Fixed goals need valid totalDays
+  if (typeof totalDays !== 'number' || totalDays <= 0) {
+    return 'Could not parse duration into days';
+  }
+
+  if (totalDays < config.minTotalDays) {
+    return `Duration must be at least ${config.minTotalDays} day${config.minTotalDays > 1 ? 's' : ''}`;
+  }
+
+  if (isFinite(config.maxTotalDays) && totalDays > config.maxTotalDays) {
+    return `Duration cannot exceed ${config.maxTotalDays} days`;
+  }
+
+  return undefined; // Valid
+}
+
+/**
+ * Check if duration represents an ongoing goal.
+ *
+ * @param totalDuration - Duration string
+ * @returns true if ongoing
+ */
+export function isOngoingDuration(totalDuration: string | undefined): boolean {
+  if (!totalDuration) {
+    return false;
+  }
+  const lower = totalDuration.toLowerCase().trim();
+  return lower === 'ongoing' ||
+         lower === 'indefinite' ||
+         lower === 'forever' ||
+         lower === 'continuous' ||
+         lower === 'no end';
 }

@@ -451,6 +451,56 @@ export class DrillStore extends SecureStore<DailyDrill, DrillId> implements IDri
     return this.getBySkillType(goalId, 'compound');
   }
 
+  /**
+   * Get all drills for a goal.
+   * Phase 19A: Required for JIT day number calculation.
+   */
+  async getByGoal(
+    goalId: GoalId,
+    options: ListOptions = {}
+  ): AsyncAppResult<ListResult<DailyDrill>> {
+    const { limit = 1000, offset = 0 } = options;
+
+    try {
+      // Get week plans for goal first
+      const weekPlanKey = SwordKeys.goalWeeks(goalId);
+      const weekPlanIds = await this.store.smembers(weekPlanKey);
+      
+      const allDrills: DailyDrill[] = [];
+      for (const weekPlanId of weekPlanIds) {
+        const weekDrillsKey = SwordKeys.weekDrills(weekPlanId as WeekPlanId);
+        const drillIds = await this.store.smembers(weekDrillsKey);
+        
+        for (const drillId of drillIds) {
+          const result = await this.getEntity(drillId as DrillId);
+          if (result.ok && result.value && result.value.goalId === goalId) {
+            allDrills.push(result.value);
+          }
+        }
+      }
+      
+      // Sort by date (newest first)
+      allDrills.sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate));
+      
+      // Apply pagination
+      const items = allDrills.slice(offset, offset + limit);
+      
+      return ok({
+        items,
+        total: allDrills.length,
+        hasMore: offset + limit < allDrills.length,
+      });
+    } catch (error) {
+      return err(
+        storeError(
+          StoreErrorCode.BACKEND_ERROR,
+          `Failed to get drills for goal: ${error instanceof Error ? error.message : String(error)}`,
+          { goalId }
+        )
+      );
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // INDEX MANAGEMENT
   // ─────────────────────────────────────────────────────────────────────────────

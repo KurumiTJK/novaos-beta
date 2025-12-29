@@ -604,8 +604,9 @@ export function sanitizeGoalStatement(
     refinementTtlSeconds: 3600,
     minDailyMinutes: 5,
     maxDailyMinutes: 480,
-    minTotalDays: 3,
-    maxTotalDays: 365,
+    minTotalDays: 1, // Phase 19A: Allow 1 day minimum
+    maxTotalDays: Infinity, // Phase 19A: No maximum
+    allowOngoingGoals: true, // Phase 19A: Allow ongoing duration
     useLlmModeDetection: false,
     llmModel: 'gpt-4o-mini',
     // Phase 14A explore config

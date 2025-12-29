@@ -85,15 +85,15 @@ import { ClarityDetector, createClarityDetector } from './explore/clarity-detect
 // Phase 14B: Import view components
 import { ViewFlow, createViewFlow } from './view-flow.js';
 
-// Phase 18B: Import practice components
-import { PracticeFlow, createPracticeFlow } from './practice-flow.js';
+// Phase 20: Import LessonMode (replaces PracticeFlow)
+import { LessonMode, createLessonMode, type LessonModeOutput } from './lesson/index.js';
 import type { PracticeIntent } from './types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PHASE 18: DELIBERATE PRACTICE IMPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { IDeliberatePracticeEngine } from '../../services/deliberate-practice-engine/interfaces.js';
+import type { IDeliberatePracticeEngine, GoalPracticeEntry } from '../../services/deliberate-practice-engine/interfaces.js';
 import {
   SwordGateHook,
   createSwordGateHook,
@@ -152,8 +152,11 @@ export class SwordGate {
   // Phase 18: Deliberate Practice Hook
   private readonly swordGateHook?: SwordGateHook;
 
-  // Phase 18B: Practice Flow
-  private readonly practiceFlow: PracticeFlow | null = null;
+  // Phase 20: Lesson Mode (replaces PracticeFlow)
+  private readonly lessonMode: LessonMode | null = null;
+
+  // Phase 19C: Practice Engine (for skill decomposition)
+  private readonly practiceEngine?: IDeliberatePracticeEngine;
 
   constructor(
     baseRefinementStore: IRefinementStore,
@@ -205,8 +208,12 @@ export class SwordGate {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Phase 18: Initialize SwordGateHook if practiceEngine available
+    // Phase 20: Initialize LessonMode (replaces PracticeFlow)
     // ═══════════════════════════════════════════════════════════════════════════
     if (options.practiceEngine) {
+      // Phase 19C: Store practiceEngine for skill decomposition
+      this.practiceEngine = options.practiceEngine;
+
       this.swordGateHook = createSwordGateHook({
         practiceEngine: options.practiceEngine,
         config: {
@@ -217,12 +224,18 @@ export class SwordGate {
       });
       console.log('[SWORD_GATE] SwordGateHook initialized for Deliberate Practice');
 
-      // Phase 18B: Initialize PracticeFlow for chat-based practice interaction
-      this.practiceFlow = createPracticeFlow({
-        practiceEngine: options.practiceEngine,
-        sparkEngine: this.sparkEngine,
-      });
-      console.log('[SWORD_GATE] PracticeFlow initialized for chat-based practice');
+      // Phase 20: Initialize LessonMode (replaces PracticeFlow)
+      if (this.sparkEngine) {
+        this.lessonMode = createLessonMode({
+          baseStore: baseRefinementStore,
+          practiceEngine: options.practiceEngine,
+          sparkEngine: this.sparkEngine,
+          config: {
+            openaiApiKey: options.openaiApiKey,
+          },
+        });
+        console.log('[SWORD_GATE] LessonMode initialized (Phase 20)');
+      }
     }
   }
 
@@ -982,19 +995,27 @@ export class SwordGate {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // PRACTICE MODE (Phase 18B - NEW)
+  // PRACTICE MODE (Phase 20 - Simplified LessonMode)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Handle practice mode - chat-based drill interaction.
-   * Phase 18B: Practice mode for viewing/completing daily drills.
+   * Handle practice mode using simplified LessonMode.
+   * Phase 20: Replaces PracticeFlow and all multi-goal handlers.
+   *
+   * Commands:
+   *   - view: Show goals / goal details
+   *   - start: Enter lesson mode
+   *   - complete: Mark done, exit
+   *   - pause: Save and exit
+   *   - delete: Delete goal
+   *   - cancel: Exit without saving
    */
   private async handlePractice(
     input: SwordGateInput,
     practiceIntent?: PracticeIntent
   ): Promise<SwordGateOutput> {
-    // Check if PracticeFlow is available
-    if (!this.practiceFlow) {
+    // Check if LessonMode is available
+    if (!this.lessonMode) {
       return {
         mode: 'practice',
         responseMessage: '⚠️ Practice mode is not available. Please ensure the Deliberate Practice Engine is configured.',
@@ -1002,40 +1023,36 @@ export class SwordGate {
       };
     }
 
-    // Execute practice flow
-    const result = await this.practiceFlow.execute(
-      input.userId,
-      input.message,
-      input.existingGoalId
-    );
+    // Execute LessonMode
+    const result = await this.lessonMode.execute({
+      userId: input.userId,
+      message: input.message,
+      existingGoalId: input.existingGoalId,
+    });
 
     if (!result.ok) {
-      console.error('[SWORD_GATE] Practice error:', result.error);
+      console.error('[SWORD_GATE] LessonMode error:', result.error);
       return {
         mode: 'practice',
-        responseMessage: `❌ Practice error: ${result.error.message}`,
+        responseMessage: `❌ Error: ${result.error.message}`,
         suppressModelGeneration: true,
       };
     }
 
-    const practiceResult = result.value;
+    const output = result.value;
 
+    // Map LessonMode output to SwordGateOutput
     return {
       mode: 'practice',
-      practiceIntent: practiceResult.intent,
-      todayDrill: practiceResult.drill,
-      practiceCompleted: practiceResult.completed,
-      practiceSkipped: practiceResult.skipped,
-      practiceProgress: practiceResult.progress ? {
-        totalSkills: practiceResult.progress.skillsTotal,
-        mastered: practiceResult.progress.skillsMastered,
-        practicing: practiceResult.progress.skillsPracticing,
-        attempted: 0, // No longer tracked separately
-        notStarted: practiceResult.progress.skillsNotStarted,
-        streakDays: practiceResult.progress.currentStreak,
+      practiceIntent: output.intent as PracticeIntent,
+      todayDrill: output.drill ? {
+        action: output.drill.action,
+        passSignal: output.drill.passSignal,
+        constraint: output.drill.constraint,
       } : undefined,
-      responseMessage: practiceResult.response,
-      suppressModelGeneration: true,
+      practiceCompleted: output.completed,
+      responseMessage: output.response,
+      suppressModelGeneration: output.suppressModelGeneration,
     };
   }
 

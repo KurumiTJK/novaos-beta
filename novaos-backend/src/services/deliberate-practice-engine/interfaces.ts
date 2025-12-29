@@ -754,6 +754,69 @@ export interface TodayPracticeResult {
   readonly reviewQuestTitle: string | null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-GOAL PRACTICE TYPES (Phase 19B)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Practice entry for a single goal within a bundle.
+ * Contains all info needed to practice one goal.
+ */
+export interface GoalPracticeEntry {
+  /** Goal identifier */
+  readonly goalId: GoalId;
+
+  /** Goal title (denormalized for display) */
+  readonly goalTitle: string;
+
+  /** Goal priority (lower = higher priority) */
+  readonly priority: number;
+
+  /** Today's practice result for this goal */
+  readonly practice: TodayPracticeResult;
+
+  /** Whether this goal is the primary focus today */
+  readonly isPrimary: boolean;
+
+  /** Reason for priority position */
+  readonly priorityReason: string;
+}
+
+/**
+ * Bundle of practices across multiple active goals.
+ * Returned by getTodayPracticeBundle().
+ *
+ * Phase 19B: Multi-goal support.
+ */
+export interface TodayPracticeBundle {
+  /** Today's date (YYYY-MM-DD) */
+  readonly date: string;
+
+  /** User's timezone */
+  readonly timezone: string;
+
+  /** Total active goals */
+  readonly totalActiveGoals: number;
+
+  /** Goals with practice available, sorted by priority */
+  readonly entries: readonly GoalPracticeEntry[];
+
+  /** Primary goal (first entry with hasContent) */
+  readonly primaryGoal: GoalPracticeEntry | null;
+
+  /** Goals that are paused */
+  readonly pausedGoalCount: number;
+
+  /** Goals completed for today (already practiced) */
+  readonly completedTodayCount: number;
+
+  /** Whether any practice is available */
+  readonly hasPractice: boolean;
+
+  /** Summary message for display */
+  readonly summary: string;
+}
+
 /**
  * Drill completion parameters from user.
  */
@@ -854,6 +917,19 @@ export interface IDeliberatePracticeEngine {
    * @returns Today's practice content
    */
   getTodayPractice(userId: UserId, goalId: GoalId): AsyncAppResult<TodayPracticeResult>;
+
+  /**
+   * Get today's practice bundle across ALL active goals.
+   *
+   * Phase 19B: Multi-goal support.
+   *
+   * Returns practices for all active goals sorted by priority.
+   * Paused goals and goals completed for today are tracked separately.
+   *
+   * @param userId - User identifier
+   * @returns Bundle containing practices for all active goals
+   */
+  getTodayPracticeBundle(userId: UserId): AsyncAppResult<TodayPracticeBundle>;
 
   /**
    * Generate a drill for a specific date.
@@ -1068,6 +1144,12 @@ export interface IDrillStore {
     skillType: SkillType
   ): AsyncAppResult<readonly DailyDrill[]>;
   getCompoundDrills(goalId: GoalId): AsyncAppResult<readonly DailyDrill[]>;
+
+  /**
+   * Get all drills for a goal.
+   * Phase 19A: Required for JIT day number calculation.
+   */
+  getByGoal(goalId: GoalId, options?: ListOptions): AsyncAppResult<ListResult<DailyDrill>>;
   
   updateOutcome(
     drillId: DrillId,
@@ -1115,6 +1197,33 @@ export interface ILearningPlanStore {
 }
 
 /**
+ * Goal store interface for Deliberate Practice Engine.
+ * Phase 19B: Multi-goal support.
+ */
+export interface IGoalStore {
+  /** Get a goal by ID */
+  get(goalId: GoalId): AsyncAppResult<Goal | null>;
+
+  /** Get all active goals for a user */
+  getActiveGoals(userId: UserId): AsyncAppResult<readonly Goal[]>;
+
+  /** Get active goals sorted by priority (Phase 19B) */
+  getActiveGoalsByPriority(userId: UserId): AsyncAppResult<readonly Goal[]>;
+
+  /** Get active non-paused goals sorted by priority (Phase 19B) */
+  getActiveNonPausedGoals(userId: UserId, today: string): AsyncAppResult<readonly Goal[]>;
+
+  /** Set goal priority (Phase 19B) */
+  setGoalPriority(goalId: GoalId, priority: number): AsyncAppResult<Goal>;
+
+  /** Pause goal until date (Phase 19B) */
+  pauseGoal(goalId: GoalId, until?: string): AsyncAppResult<Goal>;
+
+  /** Resume a paused goal (Phase 19B) */
+  resumeGoal(goalId: GoalId): AsyncAppResult<Goal>;
+}
+
+/**
  * Combined interface for all Deliberate Practice Engine stores.
  */
 export interface IDeliberatePracticeStores {
@@ -1122,6 +1231,8 @@ export interface IDeliberatePracticeStores {
   readonly drills: IDrillStore;
   readonly weekPlans: IWeekPlanStore;
   readonly learningPlans: ILearningPlanStore;
+  /** Goal store - required for Phase 19B multi-goal support */
+  readonly goals: IGoalStore;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

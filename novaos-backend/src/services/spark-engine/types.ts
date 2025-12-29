@@ -72,6 +72,19 @@ export const WEEKDAYS: readonly DayOfWeek[] = [
   'friday',
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// DURATION TYPE (Phase 19A)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Type of duration for a learning goal.
+ * Phase 19A: Flexible duration support.
+ *
+ * - 'fixed': Has a specific end date (e.g., "30 days", "6 weeks")
+ * - 'ongoing': Continuous learning with no end date
+ */
+export type DurationType = 'fixed' | 'ongoing';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // GOAL TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -112,8 +125,20 @@ export interface LearningConfig {
   /** Preferred learning style */
   readonly learningStyle?: LearningStyle;
 
-  /** Total duration (e.g., "6 weeks", "30 days") */
+  /** Total duration (e.g., "6 weeks", "30 days", "ongoing") */
   readonly totalDuration?: string;
+
+  /**
+   * Duration type.
+   * Phase 19A: Flexible duration support.
+   */
+  readonly durationType?: DurationType;
+
+  /**
+   * Total days for fixed duration goals.
+   * Phase 19A: Undefined for ongoing goals.
+   */
+  readonly totalDays?: number;
 
   /** Start date (YYYY-MM-DD) */
   readonly startDate?: string;
@@ -190,6 +215,24 @@ export interface Goal {
 
   /** Reminder settings */
   readonly reminderConfig?: ReminderConfig;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Multi-Goal Support (Phase 19B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Goal priority for multi-goal scheduling.
+   * Lower numbers = higher priority (1 is highest).
+   * Phase 19B: Multi-goal support.
+   */
+  readonly priority?: number;
+
+  /**
+   * Date until which goal is paused (YYYY-MM-DD).
+   * If set and in the future, goal is excluded from daily practice.
+   * Phase 19B: Multi-goal support.
+   */
+  readonly pausedUntil?: string;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Lesson Plan

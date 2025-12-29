@@ -332,4 +332,40 @@ export interface ISparkEngine {
    * Get progress through a goal's learning path.
    */
   getPathProgress(goalId: GoalId): AsyncAppResult<PathProgress>;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Multi-Goal Management (Phase 19C)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get user's goals with optional filtering.
+   * Phase 19C: Multi-goal support.
+   */
+  getUserGoals(
+    userId: UserId,
+    options?: { status?: 'active' | 'paused' | 'completed' | 'abandoned' }
+  ): AsyncAppResult<readonly Goal[]>;
+
+  /**
+   * Set goal priority.
+   * Lower numbers = higher priority (1 is highest).
+   * Phase 19C: Multi-goal support.
+   */
+  setGoalPriority(goalId: GoalId, priority: number): AsyncAppResult<Goal>;
+
+  /**
+   * Pause a goal until a specified date.
+   * Paused goals are excluded from daily practice bundles.
+   * Phase 19C: Multi-goal support.
+   *
+   * @param goalId - Goal to pause
+   * @param until - Date to resume (YYYY-MM-DD), or undefined for indefinite
+   */
+  pauseGoal(goalId: GoalId, until?: string): AsyncAppResult<Goal>;
+
+  /**
+   * Resume a paused goal.
+   * Phase 19C: Multi-goal support.
+   */
+  resumeGoal(goalId: GoalId): AsyncAppResult<Goal>;
 }

@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // DELIBERATE PRACTICE STORE — Public Exports
 // NovaOS Deliberate Practice Engine — Phase 18: Storage Layer
+// Phase 19B: GoalStore integration for multi-goal support
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // This module exports the storage layer for the Deliberate Practice Engine.
@@ -38,6 +39,8 @@ import { createSkillStore } from './skill-store.js';
 import { createDrillStore } from './drill-store.js';
 import { createWeekPlanStore } from './week-plan-store.js';
 import { createLearningPlanStore } from './learning-plan-store.js';
+// Phase 19B: Import GoalStore for multi-goal support
+import { createGoalStore } from '../../spark-engine/store/goal-store.js';
 
 /**
  * Create all Deliberate Practice stores.
@@ -57,5 +60,7 @@ export function createDeliberatePracticeStores(
     drills: createDrillStore(store, config, encryption),
     weekPlans: createWeekPlanStore(store, config, encryption),
     learningPlans: createLearningPlanStore(store, config, encryption),
+    // Phase 19B: Add goals store for multi-goal support
+    goals: createGoalStore(store, config, encryption),
   };
 }

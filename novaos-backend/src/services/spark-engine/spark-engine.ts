@@ -12,7 +12,7 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { ok, err, isOk } from '../../types/result.js';
+import { ok, err, isOk, appError } from '../../types/result.js';
 import type { AsyncAppResult } from '../../types/result.js';
 import {
   createGoalId,
@@ -584,6 +584,109 @@ export class SparkEngine implements ISparkEngine {
       averageDifficulty,
       lastActivityAt,
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Multi-Goal Management (Phase 19C)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get user's goals with optional filtering.
+   * Phase 19C: Multi-goal support.
+   */
+  async getUserGoals(
+    userId: UserId,
+    options?: { status?: 'active' | 'paused' | 'completed' | 'abandoned' }
+  ): AsyncAppResult<readonly Goal[]> {
+    const result = await this.store.getGoalsByUser(userId);
+    if (!result.ok) {
+      return result;
+    }
+
+    let goals = result.value;
+
+    // Filter by status if specified
+    if (options?.status) {
+      goals = goals.filter(g => g.status === options.status);
+    }
+
+    return ok(goals);
+  }
+
+  /**
+   * Set goal priority.
+   * Phase 19C: Multi-goal support.
+   */
+  async setGoalPriority(goalId: GoalId, priority: number): AsyncAppResult<Goal> {
+    const result = await this.store.getGoal(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(appError('NOT_FOUND', 'Goal not found'));
+    }
+
+    const updatedGoal: Goal = {
+      ...result.value,
+      priority: Math.max(1, Math.floor(priority)),
+      updatedAt: createTimestamp(),
+    };
+
+    return this.store.saveGoal(updatedGoal);
+  }
+
+  /**
+   * Pause a goal until a specified date.
+   * Phase 19C: Multi-goal support.
+   */
+  async pauseGoal(goalId: GoalId, until?: string): AsyncAppResult<Goal> {
+    const result = await this.store.getGoal(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(appError('NOT_FOUND', 'Goal not found'));
+    }
+
+    // Validate date format if provided
+    if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+      return err(appError('VALIDATION_ERROR', 'pausedUntil must be in YYYY-MM-DD format'));
+    }
+
+    const updatedGoal: Goal = {
+      ...result.value,
+      pausedUntil: until ?? '9999-12-31', // Indefinite if not specified
+      updatedAt: createTimestamp(),
+    };
+
+    return this.store.saveGoal(updatedGoal);
+  }
+
+  /**
+   * Resume a paused goal.
+   * Phase 19C: Multi-goal support.
+   */
+  async resumeGoal(goalId: GoalId): AsyncAppResult<Goal> {
+    const result = await this.store.getGoal(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(appError('NOT_FOUND', 'Goal not found'));
+    }
+
+    // Remove pausedUntil by creating new object without it
+    const { pausedUntil, ...rest } = result.value;
+
+    const updatedGoal: Goal = {
+      ...rest,
+      updatedAt: createTimestamp(),
+    };
+
+    return this.store.saveGoal(updatedGoal);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

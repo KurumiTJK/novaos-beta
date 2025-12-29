@@ -56,9 +56,9 @@ const QUESTION_TEMPLATES: Record<RefinementField, readonly string[]> = {
     "What's a realistic daily time commitment for you?",
   ],
   totalDuration: [
-    "How long would you like this learning plan to span? (e.g., 4 weeks, 30 days)",
-    "What's your target timeline for completing this goal?",
-    "How much total time do you want to dedicate to this goal?",
+    "How long would you like this learning plan to span? (e.g., 4 weeks, 1 day, or ongoing)",
+    "What's your target timeline? (e.g., 30 days, 2 weeks, or ongoing for continuous practice)",
+    "How much time for this goal? You can also say 'ongoing' for continuous learning.",
   ],
   learningStyle: [
     "How do you prefer to learn? (reading, video, hands-on practice, or a mix)",
@@ -263,8 +263,51 @@ function wordToNumber(word: string): number | null {
  * 
  * ✅ FIX: Handle word numbers ("one week", "two months") and be more flexible with patterns.
  */
-function parseTotalDuration(response: string): { duration: string; days: number } | null {
+function parseTotalDuration(response: string): {
+  duration: string;
+  days: number | undefined;
+  durationType: 'fixed' | 'ongoing';
+} | null {
   const lower = response.toLowerCase().trim();
+
+  // ─── ONGOING PATTERNS (Phase 19A) ───
+  // Match: "ongoing", "indefinitely", "forever", "no end", "continuous", "permanently"
+  if (/\b(ongoing|indefinite(ly)?|forever|no\s*end|continuous(ly)?|permanent(ly)?|open[.\s-]?ended)\b/i.test(lower)) {
+    return {
+      duration: 'ongoing',
+      days: undefined,
+      durationType: 'ongoing',
+    };
+  }
+
+  // Match: "as long as it takes", "until I master it", "no time limit"
+  if (/\b(as\s*long\s*as|until\s*(i|I)\s*(master|learn|finish)|no\s*(time\s*)?limit)\b/i.test(lower)) {
+    return {
+      duration: 'ongoing',
+      days: undefined,
+      durationType: 'ongoing',
+    };
+  }
+
+  // ─── SINGLE DAY PATTERNS (Phase 19A) ───
+  // Match: "1 day", "one day", "a day", "single day", "today only"
+  if (/^(1|one|a|single)\s*day$/i.test(lower) || /\btoday\s*only\b/i.test(lower)) {
+    return {
+      duration: '1 day',
+      days: 1,
+      durationType: 'fixed',
+    };
+  }
+
+  // ─── TWO DAY PATTERNS (Phase 19A) ───
+  // Match: "2 days", "two days", "couple days"
+  if (/^(2|two)\s*days?$/i.test(lower) || /\bcouple\s*(of\s*)?days\b/i.test(lower)) {
+    return {
+      duration: '2 days',
+      days: 2,
+      durationType: 'fixed',
+    };
+  }
 
   // ─── WEEK PATTERNS ───
   // Digit + week: "4 weeks", "1 week"
@@ -272,7 +315,11 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   if (weekDigitMatch) {
     const weeks = parseInt(weekDigitMatch[1]!, 10);
     if (weeks >= 1 && weeks <= 52) {
-      return { duration: `${weeks} week${weeks > 1 ? 's' : ''}`, days: weeks * 7 };
+      return {
+        duration: `${weeks} week${weeks > 1 ? 's' : ''}`,
+        days: weeks * 7,
+        durationType: 'fixed',
+      };
     }
   }
   
@@ -281,23 +328,27 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   if (weekWordMatch) {
     const weeks = wordToNumber(weekWordMatch[1]!);
     if (weeks && weeks >= 1 && weeks <= 52) {
-      return { duration: `${weeks} week${weeks > 1 ? 's' : ''}`, days: weeks * 7 };
+      return {
+        duration: `${weeks} week${weeks > 1 ? 's' : ''}`,
+        days: weeks * 7,
+        durationType: 'fixed',
+      };
     }
   }
   
   // "a week", "the week"
   if (/\b(a|one)\s*week\b/i.test(lower)) {
-    return { duration: '1 week', days: 7 };
+    return { duration: '1 week', days: 7, durationType: 'fixed' };
   }
   
   // "couple of weeks", "couple weeks"
   if (/couple\s*(of\s*)?weeks?/i.test(lower)) {
-    return { duration: '2 weeks', days: 14 };
+    return { duration: '2 weeks', days: 14, durationType: 'fixed' };
   }
   
   // "few weeks"
   if (/\bfew\s*weeks?\b/i.test(lower)) {
-    return { duration: '3 weeks', days: 21 };
+    return { duration: '3 weeks', days: 21, durationType: 'fixed' };
   }
 
   // ─── MONTH PATTERNS ───
@@ -305,8 +356,12 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   const monthDigitMatch = lower.match(/(\d+)\s*(month|mo)s?/i);
   if (monthDigitMatch) {
     const months = parseInt(monthDigitMatch[1]!, 10);
-    if (months >= 1 && months <= 12) {
-      return { duration: `${months} month${months > 1 ? 's' : ''}`, days: months * 30 };
+    if (months >= 1 && months <= 24) {
+      return {
+        duration: `${months} month${months > 1 ? 's' : ''}`,
+        days: months * 30,
+        durationType: 'fixed',
+      };
     }
   }
   
@@ -314,39 +369,66 @@ function parseTotalDuration(response: string): { duration: string; days: number 
   const monthWordMatch = lower.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(month|mo)s?\b/i);
   if (monthWordMatch) {
     const months = wordToNumber(monthWordMatch[1]!);
-    if (months && months >= 1 && months <= 12) {
-      return { duration: `${months} month${months > 1 ? 's' : ''}`, days: months * 30 };
+    if (months && months >= 1 && months <= 24) {
+      return {
+        duration: `${months} month${months > 1 ? 's' : ''}`,
+        days: months * 30,
+        durationType: 'fixed',
+      };
     }
   }
   
   // "a month", "one month"
   if (/\b(a|one)\s*month\b/i.test(lower)) {
-    return { duration: '1 month', days: 30 };
+    return { duration: '1 month', days: 30, durationType: 'fixed' };
   }
   
   // "couple of months"
   if (/couple\s*(of\s*)?months?/i.test(lower)) {
-    return { duration: '2 months', days: 60 };
+    return { duration: '2 months', days: 60, durationType: 'fixed' };
   }
   
   // "few months"
   if (/\bfew\s*months?\b/i.test(lower)) {
-    return { duration: '3 months', days: 90 };
+    return { duration: '3 months', days: 90, durationType: 'fixed' };
   }
 
   // ─── DAY PATTERNS ───
-  // Digit + day: "30 days", "14 days"
+  // Digit + day: "30 days", "14 days", "1 day" (Phase 19A: allow >= 1)
   const dayMatch = lower.match(/(\d+)\s*(day|d\b)s?/i);
   if (dayMatch) {
     const days = parseInt(dayMatch[1]!, 10);
-    if (days >= 3 && days <= 365) {
-      return { duration: `${days} days`, days };
+    if (days >= 1 && days <= 730) {  // Allow up to 2 years
+      return {
+        duration: `${days} day${days > 1 ? 's' : ''}`,
+        days,
+        durationType: 'fixed',
+      };
     }
   }
   
   // "few days"
   if (/\bfew\s*days?\b/i.test(lower)) {
-    return { duration: '5 days', days: 5 };
+    return { duration: '5 days', days: 5, durationType: 'fixed' };
+  }
+
+  // ─── YEAR PATTERNS (Phase 19A) ───
+  // "1 year", "a year"
+  if (/\b(1|one|a)\s*year\b/i.test(lower)) {
+    return { duration: '1 year', days: 365, durationType: 'fixed' };
+  }
+
+  // Digit + year: "2 years"
+  const yearMatch = lower.match(/(\d+)\s*years?/i);
+  if (yearMatch) {
+    const years = parseInt(yearMatch[1]!, 10);
+    if (years >= 1 && years <= 5) {
+      return {
+        duration: `${years} year${years > 1 ? 's' : ''}`,
+        days: years * 365,
+        durationType: 'fixed',
+      };
+    }
   }
 
   return null;
@@ -645,13 +727,21 @@ export class RefinementFlow {
       case 'totalDuration': {
         const duration = parseTotalDuration(message);
         if (duration) {
-          // Clamp days to config limits
-          const clampedDays = Math.max(
-            this.config.minTotalDays,
-            Math.min(this.config.maxTotalDays, duration.days)
-          );
           newInputs.totalDuration = duration.duration;
-          newInputs.totalDays = clampedDays;
+          newInputs.durationType = duration.durationType;
+          
+          // Only set/clamp days for fixed duration
+          if (duration.days !== undefined) {
+            const clampedDays = Math.max(
+              this.config.minTotalDays,
+              Math.min(
+                isFinite(this.config.maxTotalDays) ? this.config.maxTotalDays : Infinity,
+                duration.days
+              )
+            );
+            newInputs.totalDays = clampedDays;
+          }
+          // For ongoing, totalDays remains undefined
           parsed = true;
         }
         break;

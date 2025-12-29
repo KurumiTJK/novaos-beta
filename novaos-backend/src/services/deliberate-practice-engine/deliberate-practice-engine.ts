@@ -23,8 +23,8 @@ import type {
   UserId,
   Timestamp,
 } from '../../types/branded.js';
-import { createWeekPlanId, createTimestamp } from '../../types/branded.js';
-import type { Goal, Quest } from '../spark-engine/types.js';
+import { createWeekPlanId, createTimestamp, createDrillId } from '../../types/branded.js';
+import type { Goal, Quest, DurationType } from '../spark-engine/types.js';
 import type { CapabilityStage } from '../../gates/sword/capability-generator.js';
 import type {
   Skill,
@@ -42,10 +42,12 @@ import type {
   MilestoneStatus,
   QuestMilestone,
 } from './types.js';
-import { MASTERY_THRESHOLDS, countsAsAttempt, requiresRetry } from './types.js';
+import { MASTERY_THRESHOLDS, countsAsAttempt, requiresRetry, JIT_WEEK_PLAN_ID } from './types.js';
 import type {
   IDeliberatePracticeEngine,
   TodayPracticeResult,
+  TodayPracticeBundle,
+  GoalPracticeEntry,
   DrillCompletionParams,
   GoalProgress,
   QuestProgress,
@@ -280,26 +282,59 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
       return err(appError('PROCESSING_ERROR', 'No skills could be generated from quests'));
     }
 
-    // Calculate total weeks and estimated completion
-    const totalWeeks = Math.ceil(totalDays / PRACTICE_DAYS_PER_WEEK);
-    const startDate = new Date();
-    const estimatedCompletionDate = new Date(startDate);
-    estimatedCompletionDate.setDate(startDate.getDate() + (totalWeeks * 7));
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Determine duration type (Phase 19A)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    const durationType: DurationType =
+      goal.learningConfig?.durationType ??
+      (goal.learningConfig?.totalDuration === 'ongoing' ? 'ongoing' : 'fixed');
+
+    console.log(`[DPE] Duration type: ${durationType}`);
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Calculate plan metrics (conditional on duration type)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    let totalWeeks: number | undefined;
+    let totalPracticeDays: number | undefined;
+    let estimatedCompletionDate: string | undefined;
+
+    if (durationType === 'fixed') {
+      // Fixed duration: calculate end date based on skill count
+      totalPracticeDays = totalDays;
+      totalWeeks = Math.ceil(totalDays / PRACTICE_DAYS_PER_WEEK);
+
+      const startDate = new Date(goal.learningConfig?.startDate ?? new Date());
+      const completionDate = new Date(startDate);
+      completionDate.setDate(startDate.getDate() + (totalWeeks * 7));
+      estimatedCompletionDate = completionDate.toISOString().split('T')[0]!;
+
+      console.log(`[DPE] Fixed duration: ${totalWeeks} weeks, completion: ${estimatedCompletionDate}`);
+    } else {
+      // Ongoing: no fixed end date
+      console.log(`[DPE] Ongoing duration: no end date`);
+    }
 
     const now = createTimestamp();
 
-    // Create learning plan
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Create learning plan (Phase 19A: JIT mode - no week plans)
+    // ─────────────────────────────────────────────────────────────────────────────
+
     const learningPlan: LearningPlan = {
       goalId,
       userId,
+      durationType,
       totalWeeks,
-      totalPracticeDays: totalDays,
+      totalPracticeDays,
       totalSkills,
-      totalDrills: totalDays, // Approximate: 1 drill per day
-      estimatedCompletionDate: estimatedCompletionDate.toISOString().split('T')[0]!,
+      totalDrills: durationType === 'fixed' ? totalDays : undefined,
+      estimatedCompletionDate,
       questSkillMapping: questSkillMappings,
-      questWeekMapping: questWeekMappings,
-      questDurations,
+      // Phase 19A: questWeekMapping and questDurations optional for JIT
+      questWeekMapping: durationType === 'fixed' ? questWeekMappings : undefined,
+      questDurations: durationType === 'fixed' ? questDurations : undefined,
       foundationSkillCount: totalFoundationSkills,
       buildingSkillCount: totalBuildingSkills,
       compoundSkillCount: totalCompoundSkills,
@@ -313,8 +348,12 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
       return err(savePlanResult.error);
     }
 
-    // Create first week plan
-    await this.createFirstWeekPlan(goal, quests[0]!, questSkillMappings[0]!);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Phase 19A: NO week plan pre-generation (JIT mode)
+    // Drills are generated on-demand in getTodayPractice()
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    console.log(`[DPE] Created learning plan for goal: ${goalId} (JIT mode)`);
 
     return ok(learningPlan);
   }
@@ -417,78 +456,264 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
       });
     }
 
-    // Generate new drill
-    const drillResult = await this.generateDrill(userId, goalId, today);
-    if (!drillResult.ok) {
-      // No drill available - might be completed or error
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Phase 19A: JIT Drill Generation
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // First try JIT generation
+    const selectionResult = await this.selectSkillForToday(goalId, userId, today);
+    if (!selectionResult.ok) {
+      // Try fallback to old generateDrill method
+      const drillResult = await this.generateDrill(userId, goalId, today);
+      if (!drillResult.ok) {
+        // No drill available
+        return ok({
+          hasContent: false,
+          drill: null,
+          spark: null,
+          weekPlan: null,
+          skill: null,
+          date: today,
+          timezone: this.config.timezone,
+          context: selectionResult.error.message,
+          goalId: null,
+          questId: null,
+          skillType: null,
+          componentSkills: null,
+          reviewSkill: null,
+          reviewQuestTitle: null,
+        });
+      }
+
+      const drill = drillResult.value;
+      const skill = await this.stores.skills.get(drill.skillId);
+      const weekPlan = await this.stores.weekPlans.get(drill.weekPlanId);
+
+      const skillValue = skill.ok ? skill.value : null;
+      const weekPlanValue = weekPlan.ok ? weekPlan.value : null;
+
       return ok({
-        hasContent: false,
-        drill: null,
+        hasContent: true,
+        drill,
         spark: null,
-        weekPlan: null,
-        skill: null,
+        weekPlan: weekPlanValue,
+        skill: skillValue,
         date: today,
         timezone: this.config.timezone,
-        context: null,
-        goalId: null,
-        questId: null,
-        skillType: null,
+        context: drill.continuationContext ?? null,
+        goalId,
+        questId: weekPlanValue?.questId ?? null,
+        skillType: skillValue?.skillType ?? null,
         componentSkills: null,
         reviewSkill: null,
         reviewQuestTitle: null,
       });
     }
 
-    const drill = drillResult.value;
-    const skill = await this.stores.skills.get(drill.skillId);
-    const weekPlan = await this.stores.weekPlans.get(drill.weekPlanId);
+    const { skill: selectedSkill, isRetry, retryCount, context } = selectionResult.value;
 
-    const skillValue = skill.ok ? skill.value : null;
-    const weekPlanValue = weekPlan.ok ? weekPlan.value : null;
+    console.log(`[DPE] JIT: Selected skill ${selectedSkill.id} (retry: ${isRetry}, context: ${context})`);
+
+    // Generate JIT drill
+    const jitDrillResult = await this.generateDrillJIT(userId, goalId, selectedSkill, today, {
+      isRetry,
+      retryCount,
+      context,
+    });
+
+    if (!jitDrillResult.ok) {
+      return err(jitDrillResult.error);
+    }
+
+    const drill = jitDrillResult.value;
+
+    console.log(`[DPE] Generated JIT drill: ${drill.id}`);
 
     // Get component skills for compound drills
     let componentSkills: readonly Skill[] | null = null;
-    if (skillValue?.isCompound && skillValue.componentSkillIds?.length) {
+    if (selectedSkill?.isCompound && selectedSkill.componentSkillIds?.length) {
       const components = await Promise.all(
-        skillValue.componentSkillIds.map(id => this.stores.skills.get(id))
+        selectedSkill.componentSkillIds.map(id => this.stores.skills.get(id))
       );
       componentSkills = components
         .filter(r => r.ok && r.value)
         .map(r => r.value!);
     }
 
-    // Get review skill if present
-    let reviewSkill: Skill | null = null;
-    let reviewQuestTitle: string | null = null;
-    if (drill.reviewSkillId) {
-      const reviewResult = await this.stores.skills.get(drill.reviewSkillId);
-      if (reviewResult.ok && reviewResult.value) {
-        reviewSkill = reviewResult.value;
-        // Get quest title from learning plan
-        const planResult = await this.stores.learningPlans.get(goalId);
-        if (planResult.ok && planResult.value) {
-          const mapping = planResult.value.questSkillMapping.find(m => m.questId === reviewSkill!.questId);
-          reviewQuestTitle = mapping?.questTitle ?? null;
-        }
-      }
-    }
-
     return ok({
       hasContent: true,
       drill,
       spark: null,
-      weekPlan: weekPlanValue,
-      skill: skillValue,
+      weekPlan: null, // JIT mode: no week plan
+      skill: selectedSkill,
       date: today,
       timezone: this.config.timezone,
-      context: drill.continuationContext ?? null,
+      context: context ?? null,
       goalId,
-      questId: weekPlanValue?.questId ?? null,
-      skillType: skillValue?.skillType ?? null,
+      questId: selectedSkill.questId,
+      skillType: selectedSkill.skillType,
       componentSkills,
-      reviewSkill,
-      reviewQuestTitle,
+      reviewSkill: null,
+      reviewQuestTitle: null,
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // MULTI-GOAL BUNDLE (Phase 19B)
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get today's practice bundle across ALL active goals.
+   *
+   * Phase 19B: Multi-goal support.
+   *
+   * Returns practices for all active goals sorted by priority.
+   * Paused goals and goals completed for today are tracked separately.
+   *
+   * @param userId - User identifier
+   * @returns Bundle containing practices for all active goals
+   */
+  async getTodayPracticeBundle(userId: UserId): AsyncAppResult<TodayPracticeBundle> {
+    const today = this.getToday();
+
+    // Get all active non-paused goals sorted by priority
+    const goalsResult = await this.stores.goals.getActiveNonPausedGoals(userId, today);
+    if (!goalsResult.ok) {
+      return err(goalsResult.error);
+    }
+
+    const activeGoals = goalsResult.value;
+
+    // Get count of paused goals
+    const allActiveResult = await this.stores.goals.getActiveGoals(userId);
+    const allActiveCount = allActiveResult.ok ? allActiveResult.value.length : 0;
+    const pausedCount = allActiveCount - activeGoals.length;
+
+    // Build entries for each goal
+    const entries: GoalPracticeEntry[] = [];
+    let completedTodayCount = 0;
+    let primaryFound = false;
+
+    for (let i = 0; i < activeGoals.length; i++) {
+      const goal = activeGoals[i]!;
+      
+      // Get practice for this goal
+      const practiceResult = await this.getTodayPractice(userId, goal.id);
+      
+      if (!practiceResult.ok) {
+        // Skip goals with errors, log for debugging
+        console.warn(`[DPE] Failed to get practice for goal ${goal.id}: ${practiceResult.error.message}`);
+        continue;
+      }
+
+      const practice = practiceResult.value;
+
+      // Check if completed for today
+      if (!practice.hasContent && practice.drill === null) {
+        completedTodayCount++;
+      }
+
+      // Determine if this is the primary goal
+      const isPrimary = !primaryFound && practice.hasContent;
+      if (isPrimary) {
+        primaryFound = true;
+      }
+
+      // Determine priority reason
+      const priorityReason = this.getPriorityReason(goal, i, practice);
+
+      entries.push({
+        goalId: goal.id,
+        goalTitle: goal.title,
+        priority: goal.priority ?? 999,
+        practice,
+        isPrimary,
+        priorityReason,
+      });
+    }
+
+    // Find primary goal
+    const primaryGoal = entries.find(e => e.isPrimary) ?? null;
+
+    // Generate summary
+    const summary = this.generateBundleSummary(entries, pausedCount, completedTodayCount);
+
+    return ok({
+      date: today,
+      timezone: this.config.timezone,
+      totalActiveGoals: allActiveCount,
+      entries,
+      primaryGoal,
+      pausedGoalCount: pausedCount,
+      completedTodayCount,
+      hasPractice: entries.some(e => e.practice.hasContent),
+      summary,
+    });
+  }
+
+  /**
+   * Get reason for goal's priority position.
+   */
+  private getPriorityReason(
+    goal: Goal,
+    position: number,
+    practice: TodayPracticeResult
+  ): string {
+    if (position === 0) {
+      return goal.priority === 1 ? 'Highest priority' : 'Top priority goal';
+    }
+
+    if (!practice.hasContent) {
+      return 'Completed for today';
+    }
+
+    if (practice.context?.includes('Retry')) {
+      return 'Has pending retry';
+    }
+
+    if (goal.priority !== undefined && goal.priority <= 3) {
+      return `Priority ${goal.priority}`;
+    }
+
+    return 'Active goal';
+  }
+
+  /**
+   * Generate summary message for the bundle.
+   */
+  private generateBundleSummary(
+    entries: readonly GoalPracticeEntry[],
+    pausedCount: number,
+    completedCount: number
+  ): string {
+    const withPractice = entries.filter(e => e.practice.hasContent).length;
+    
+    if (withPractice === 0 && completedCount > 0) {
+      return `All ${completedCount} goal${completedCount > 1 ? 's' : ''} completed for today! 🎉`;
+    }
+
+    if (withPractice === 0) {
+      return 'No practice available today.';
+    }
+
+    const parts: string[] = [];
+    
+    if (withPractice === 1) {
+      const primary = entries.find(e => e.isPrimary);
+      parts.push(`Focus: ${primary?.goalTitle ?? 'your goal'}`);
+    } else {
+      parts.push(`${withPractice} goal${withPractice > 1 ? 's' : ''} ready`);
+    }
+
+    if (completedCount > 0) {
+      parts.push(`${completedCount} done`);
+    }
+
+    if (pausedCount > 0) {
+      parts.push(`${pausedCount} paused`);
+    }
+
+    return parts.join(' · ');
   }
 
   /**
@@ -1093,10 +1318,13 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
           totalDays = mapping.estimatedDays;
           milestoneTitle = mapping.milestone?.title ?? 'Complete Quest';
         }
-        const weekMapping = planResult.value.questWeekMapping.find(m => m.questId === questId);
-        if (weekMapping) {
-          durationLabel = weekMapping.duration.displayLabel;
-          totalWeeks = weekMapping.weekNumbers.length;
+        // Phase 19A: questWeekMapping is optional (not used in JIT mode)
+        if (planResult.value.questWeekMapping) {
+          const weekMapping = planResult.value.questWeekMapping.find(m => m.questId === questId);
+          if (weekMapping) {
+            durationLabel = weekMapping.duration.displayLabel;
+            totalWeeks = weekMapping.weekNumbers.length;
+          }
         }
       }
     }
@@ -1422,6 +1650,269 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
     }
 
     return ok(weekPlan);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // JIT GENERATION METHODS (Phase 19A)
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Select the best skill to practice today using priority-based logic.
+   *
+   * Priority order:
+   *   1. RETRY: Failed/partial skills from yesterday
+   *   2. IN_PROGRESS: Skills in 'practicing' state (needs reinforcement)
+   *   3. NEXT: First not_started skill with prerequisites met
+   *   4. ONGOING: For ongoing goals, reinforce mastered skills (loop back)
+   *   5. ATTEMPTING: Any skill currently being attempted
+   */
+  private async selectSkillForToday(
+    goalId: GoalId,
+    userId: UserId,
+    date: string
+  ): AsyncAppResult<{
+    skill: Skill;
+    isRetry: boolean;
+    retryCount: number;
+    context?: string;
+  }> {
+    // Get all skills for this goal
+    const skillsResult = await this.stores.skills.getByGoal(goalId);
+    if (!skillsResult.ok) {
+      return err(skillsResult.error);
+    }
+
+    const allSkills = skillsResult.value.items;
+    if (allSkills.length === 0) {
+      return err(appError('NOT_FOUND', 'No skills found for goal'));
+    }
+
+    // Get yesterday's drill for roll-forward logic
+    const yesterday = this.addDays(date, -1);
+    const previousDrillResult = await this.stores.drills.getByDate(userId, goalId, yesterday);
+    const previousDrill = previousDrillResult.ok ? previousDrillResult.value : null;
+
+    // Get learning plan for duration type
+    const planResult = await this.stores.learningPlans.get(goalId);
+    const durationType = planResult.ok && planResult.value
+      ? planResult.value.durationType
+      : 'fixed';
+
+    // Priority 1: Retry failed/partial skills from yesterday
+    if (previousDrill && (previousDrill.outcome === 'fail' || previousDrill.outcome === 'partial')) {
+      const skill = allSkills.find(s => s.id === previousDrill.skillId);
+      if (skill) {
+        console.log(`[DPE] Priority 1: Retry failed/partial skill from yesterday`);
+        return ok({
+          skill,
+          isRetry: true,
+          retryCount: (previousDrill.retryCount ?? 0) + 1,
+          context: previousDrill.observation
+            ? `Yesterday's issue: ${previousDrill.observation}`
+            : 'Retry needed from yesterday',
+        });
+      }
+    }
+
+    // Priority 2: Skills in 'practicing' state (passed once, not mastered)
+    const practicing = allSkills
+      .filter(s => s.mastery === 'practicing')
+      .sort((a, b) => a.consecutivePasses - b.consecutivePasses);
+
+    if (practicing.length > 0) {
+      console.log(`[DPE] Priority 2: Reinforcing practicing skill (${practicing.length} available)`);
+      return ok({
+        skill: practicing[0]!,
+        isRetry: false,
+        retryCount: 0,
+        context: 'Reinforcing recently practiced skill',
+      });
+    }
+
+    // Priority 3: Next skill not yet started (respecting prerequisites)
+    const notStarted = allSkills
+      .filter(s => s.mastery === 'not_started')
+      .sort((a, b) => a.order - b.order);
+
+    for (const skill of notStarted) {
+      if (this.arePrerequisitesMet(skill, allSkills)) {
+        console.log(`[DPE] Priority 3: Next skill in sequence`);
+        return ok({
+          skill,
+          isRetry: false,
+          retryCount: 0,
+          context: 'Next skill in sequence',
+        });
+      }
+    }
+
+    // Priority 4: For ongoing goals, loop back to reinforce mastered skills
+    if (durationType === 'ongoing') {
+      const mastered = allSkills
+        .filter(s => s.mastery === 'mastered')
+        .sort((a, b) => {
+          const aTime = a.lastPracticedAt ? new Date(a.lastPracticedAt).getTime() : 0;
+          const bTime = b.lastPracticedAt ? new Date(b.lastPracticedAt).getTime() : 0;
+          return aTime - bTime;
+        });
+
+      if (mastered.length > 0) {
+        console.log(`[DPE] Priority 4: Reinforcing mastered skill (ongoing goal)`);
+        return ok({
+          skill: mastered[0]!,
+          isRetry: false,
+          retryCount: 0,
+          context: 'Reinforcing mastered skill for retention',
+        });
+      }
+    }
+
+    // Priority 5: Any skill in 'attempting' state
+    const attempting = allSkills.filter(s => s.mastery === 'attempting');
+    if (attempting.length > 0) {
+      console.log(`[DPE] Priority 5: Continuing attempt on skill`);
+      return ok({
+        skill: attempting[0]!,
+        isRetry: false,
+        retryCount: 0,
+        context: 'Continuing previous attempt',
+      });
+    }
+
+    // All skills mastered (fixed goal complete)
+    if (durationType === 'fixed') {
+      console.log(`[DPE] All skills mastered - goal complete`);
+      return err(appError('COMPLETED', 'All skills have been mastered'));
+    }
+
+    // Fallback for ongoing: return first skill
+    console.log(`[DPE] Fallback: returning first skill`);
+    return ok({
+      skill: allSkills[0]!,
+      isRetry: false,
+      retryCount: 0,
+      context: 'Fallback selection',
+    });
+  }
+
+  /**
+   * Check if all prerequisites for a skill are met.
+   */
+  private arePrerequisitesMet(skill: Skill, allSkills: readonly Skill[]): boolean {
+    if (!skill.prerequisiteSkillIds || skill.prerequisiteSkillIds.length === 0) {
+      return true;
+    }
+
+    return skill.prerequisiteSkillIds.every(prereqId => {
+      const prereq = allSkills.find(s => s.id === prereqId);
+      return prereq && (prereq.mastery === 'practicing' || prereq.mastery === 'mastered');
+    });
+  }
+
+  /**
+   * Generate a drill just-in-time (without WeekPlan dependency).
+   */
+  private async generateDrillJIT(
+    userId: UserId,
+    goalId: GoalId,
+    skill: Skill,
+    date: string,
+    context: {
+      isRetry: boolean;
+      retryCount: number;
+      context?: string;
+    }
+  ): AsyncAppResult<DailyDrill> {
+    const now = createTimestamp();
+
+    // Calculate day number
+    const drillsResult = await this.stores.drills.getByGoal(goalId);
+    const completedDrills = drillsResult.ok
+      ? drillsResult.value.items.filter((d: DailyDrill) => d.scheduledDate < date && d.status === 'completed').length
+      : 0;
+    const dayNumber = completedDrills + 1;
+
+    // Adapt action for retry if needed
+    let action = skill.action;
+    let passSignal = skill.successSignal;
+    let constraint = skill.lockedVariables[0] ?? 'Complete in a single session';
+
+    if (context.isRetry && context.retryCount > 0) {
+      const adaptResult = await this.drillGenerator.adaptSkillForRetry(
+        skill,
+        { retryCount: context.retryCount } as DailyDrill,
+        context.retryCount
+      );
+
+      if (adaptResult.ok) {
+        action = adaptResult.value.action;
+        passSignal = adaptResult.value.passSignal;
+        constraint = adaptResult.value.constraint;
+      }
+    }
+
+    const drill: DailyDrill = {
+      id: createDrillId(),
+      weekPlanId: JIT_WEEK_PLAN_ID,
+      skillId: skill.id,
+      userId,
+      goalId,
+      questId: skill.questId,
+      scheduledDate: date,
+      dayNumber,
+      weekNumber: Math.ceil(dayNumber / PRACTICE_DAYS_PER_WEEK),
+      dayInWeek: ((dayNumber - 1) % PRACTICE_DAYS_PER_WEEK) + 1,
+      dayInQuest: skill.order,
+      status: 'scheduled',
+      skillType: skill.skillType,
+      skillTitle: skill.title,
+      isCompoundDrill: skill.isCompound ?? false,
+      componentSkillIds: skill.componentSkillIds,
+      buildsOnQuestIds: skill.prerequisiteQuestIds ?? [],
+      main: {
+        type: 'main',
+        title: skill.title,
+        action,
+        passSignal,
+        constraint,
+        estimatedMinutes: skill.estimatedMinutes,
+        isOptional: false,
+        isFromPreviousQuest: false,
+        sourceSkillId: skill.id,
+      },
+      action,
+      passSignal,
+      lockedVariables: skill.lockedVariables,
+      constraint,
+      estimatedMinutes: skill.estimatedMinutes,
+      repeatTomorrow: false,
+      isRetry: context.isRetry,
+      retryCount: context.retryCount,
+      continuationContext: context.context,
+      isJIT: true,
+      generatedAt: now,
+      generationContext: context.context,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const saveResult = await this.stores.drills.save(drill);
+    if (!saveResult.ok) {
+      return err(saveResult.error);
+    }
+
+    // Update skill status if first attempt
+    if (skill.mastery === 'not_started') {
+      await this.stores.skills.updateMastery(
+        skill.id,
+        'attempting',
+        skill.passCount,
+        skill.failCount,
+        skill.consecutivePasses
+      );
+    }
+
+    return ok(drill);
   }
 
   /**

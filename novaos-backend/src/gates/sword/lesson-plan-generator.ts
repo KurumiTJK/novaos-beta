@@ -573,10 +573,22 @@ export class LessonPlanGenerator {
     resourceCount: number,
     gaps: readonly string[]
   ): LessonPlanProposal {
-    const totalDays = inputs.totalDays!;
     const topic = inputs.extractedTopic ?? inputs.goalStatement ?? '';
 
-    console.log(`[LESSON_PLAN] Building capability proposal for: "${topic.substring(0, 50)}..." with ${stages.length} stages`);
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Phase 19A: Determine duration type
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    const isOngoing = inputs.totalDuration === 'ongoing' ||
+                      inputs.durationType === 'ongoing';
+    const durationType = isOngoing ? 'ongoing' : 'fixed';
+
+    // For ongoing goals, use a planning horizon for initial stage distribution
+    const ONGOING_PLANNING_HORIZON = 28; // 4 weeks for visualization
+    const totalDays = isOngoing ? undefined : inputs.totalDays!;
+    const effectiveDays = totalDays ?? ONGOING_PLANNING_HORIZON;
+
+    console.log(`[LESSON_PLAN] Building capability proposal for: "${topic.substring(0, 50)}..." with ${stages.length} stages (${durationType})`);
 
     // If no stages (shouldn't happen - generator has fallback), use legacy fallback
     if (stages.length === 0) {
@@ -586,8 +598,8 @@ export class LessonPlanGenerator {
     }
 
     // Distribute days across stages
-    const baseDaysPerStage = Math.floor(totalDays / stages.length);
-    const extraDays = totalDays % stages.length;
+    const baseDaysPerStage = Math.floor(effectiveDays / stages.length);
+    const extraDays = effectiveDays % stages.length;
 
     // Track cumulative days to calculate accurate week ranges
     let daysCovered = 0;
@@ -602,7 +614,10 @@ export class LessonPlanGenerator {
       const endDay = daysCovered + daysForStage;
       daysCovered = endDay;
       
-      const timeLabel = this.formatTimeLabel(startDay, endDay, totalDays);
+      // Phase 19A: Use phase labels for ongoing, date labels for fixed
+      const timeLabel = isOngoing
+        ? `Phase ${index + 1}`
+        : this.formatTimeLabel(startDay, endDay, effectiveDays);
       
       // Use the stage title directly - LLM is prompted to generate topic-specific titles
       // Only clean up if it's a raw stage name (REPRODUCE, MODIFY, etc.)
@@ -620,7 +635,7 @@ export class LessonPlanGenerator {
         title,
         description: this.formatCapabilityDescription(stage),
         topics: stage.topics,
-        estimatedDays: daysForStage,
+        estimatedDays: isOngoing ? undefined : daysForStage, // Phase 19A: undefined for ongoing
         order: index + 1,
       };
     });
@@ -631,17 +646,30 @@ export class LessonPlanGenerator {
 
     return {
       title: this.generateTitle(inputs),
-      description: this.generateDescription(inputs),
+      description: isOngoing
+        ? this.generateOngoingDescription(inputs)
+        : this.generateDescription(inputs),
       learningConfig: this.buildLearningConfig(inputs),
       quests,
       totalDuration: inputs.totalDuration!,
-      totalDays,
+      totalDays, // Phase 19A: undefined for ongoing
       topicsCovered: uniqueTopics,
       gaps: gaps.length > 0 ? gaps : undefined,
       resourcesFound: resourceCount,
       confidence: this.calculateConfidence(resourceCount, gaps.length, stages.length * 5),
       generatedAt: createTimestamp(),
     };
+  }
+
+  /**
+   * Generate description for ongoing goals.
+   * Phase 19A addition.
+   */
+  private generateOngoingDescription(inputs: SwordRefinementInputs): string {
+    const topic = inputs.extractedTopic ?? 'this topic';
+    const daily = inputs.dailyTimeCommitment ?? 30;
+    return `A continuous learning path to master ${topic} with ${daily} minutes of daily practice. ` +
+           `Skills are reinforced through spaced repetition for long-term retention.`;
   }
 
   /**
@@ -1071,13 +1099,19 @@ export class LessonPlanGenerator {
 
   /**
    * Build LearningConfig from inputs.
+   * Phase 19A: Include durationType and totalDays.
    */
   private buildLearningConfig(inputs: SwordRefinementInputs): LearningConfig {
+    const durationType = inputs.durationType ??
+      (inputs.totalDuration === 'ongoing' ? 'ongoing' : 'fixed');
+
     return {
       userLevel: inputs.userLevel,
       dailyTimeCommitment: inputs.dailyTimeCommitment,
       learningStyle: inputs.learningStyle ?? 'mixed',
       totalDuration: inputs.totalDuration,
+      durationType, // Phase 19A
+      totalDays: durationType === 'fixed' ? inputs.totalDays : undefined, // Phase 19A
       startDate: inputs.startDate ?? this.getDefaultStartDate(),
       activeDays: inputs.activeDays ?? this.getDefaultActiveDays(),
     };

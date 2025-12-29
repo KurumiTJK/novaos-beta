@@ -364,6 +364,179 @@ export class GoalStore extends SecureStore<Goal, GoalId> implements IGoalStore {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // MULTI-GOAL MANAGEMENT (Phase 19B)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get active goals sorted by priority.
+   * Lower priority number = higher priority (1 is highest).
+   * Goals without priority default to 999.
+   *
+   * Phase 19B addition.
+   */
+  async getActiveGoalsByPriority(userId: UserId): AsyncAppResult<readonly Goal[]> {
+    const result = await this.getActiveGoals(userId);
+    if (!result.ok) {
+      return result;
+    }
+
+    const sorted = [...result.value].sort((a, b) => {
+      const aPriority = (a as Goal & { priority?: number }).priority ?? 999;
+      const bPriority = (b as Goal & { priority?: number }).priority ?? 999;
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+      // Secondary sort by creation date (older first)
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    return ok(sorted);
+  }
+
+  /**
+   * Set a goal's priority.
+   * Lower numbers = higher priority.
+   *
+   * Phase 19B addition.
+   *
+   * @param goalId - Goal to update
+   * @param priority - New priority (1 = highest)
+   * @returns Updated goal
+   */
+  async setGoalPriority(goalId: GoalId, priority: number): AsyncAppResult<Goal> {
+    const result = await this.get(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(storeError(ErrorCodes.NOT_FOUND, 'Goal not found', { goalId }));
+    }
+
+    const updatedGoal = {
+      ...result.value,
+      priority: Math.max(1, Math.floor(priority)), // Ensure positive integer
+      updatedAt: createTimestamp(),
+    } as Goal;
+
+    const saveResult = await this.save(updatedGoal);
+    if (!saveResult.ok) {
+      return err(saveResult.error);
+    }
+
+    return ok(updatedGoal);
+  }
+
+  /**
+   * Pause a goal until a specified date.
+   * Paused goals are excluded from getTodayPracticeBundle().
+   *
+   * Phase 19B addition.
+   *
+   * @param goalId - Goal to pause
+   * @param until - Date to resume (YYYY-MM-DD), or undefined for indefinite
+   * @returns Updated goal
+   */
+  async pauseGoal(goalId: GoalId, until?: string): AsyncAppResult<Goal> {
+    const result = await this.get(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(storeError(ErrorCodes.NOT_FOUND, 'Goal not found', { goalId }));
+    }
+
+    // Validate date format if provided
+    if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+      return err(storeError(
+        ErrorCodes.BACKEND_ERROR, // Use BACKEND_ERROR instead of VALIDATION_ERROR
+        'pausedUntil must be in YYYY-MM-DD format',
+        { until }
+      ));
+    }
+
+    // If no date specified, pause indefinitely (far future date)
+    const pausedUntil = until ?? '9999-12-31';
+
+    const updatedGoal = {
+      ...result.value,
+      pausedUntil,
+      updatedAt: createTimestamp(),
+    } as Goal;
+
+    const saveResult = await this.save(updatedGoal);
+    if (!saveResult.ok) {
+      return err(saveResult.error);
+    }
+
+    return ok(updatedGoal);
+  }
+
+  /**
+   * Resume a paused goal.
+   * Clears the pausedUntil field.
+   *
+   * Phase 19B addition.
+   *
+   * @param goalId - Goal to resume
+   * @returns Updated goal
+   */
+  async resumeGoal(goalId: GoalId): AsyncAppResult<Goal> {
+    const result = await this.get(goalId);
+    if (!result.ok) {
+      return err(result.error);
+    }
+
+    if (!result.value) {
+      return err(storeError(ErrorCodes.NOT_FOUND, 'Goal not found', { goalId }));
+    }
+
+    // Create new object without pausedUntil
+    const { pausedUntil, ...rest } = result.value as Goal & { pausedUntil?: string };
+
+    const updatedGoal = {
+      ...rest,
+      updatedAt: createTimestamp(),
+    } as Goal;
+
+    const saveResult = await this.save(updatedGoal);
+    if (!saveResult.ok) {
+      return err(saveResult.error);
+    }
+
+    return ok(updatedGoal);
+  }
+
+  /**
+   * Get goals that are not paused (or pause has expired).
+   *
+   * Phase 19B addition.
+   *
+   * @param userId - User ID
+   * @param today - Today's date (YYYY-MM-DD)
+   * @returns Non-paused active goals sorted by priority
+   */
+  async getActiveNonPausedGoals(userId: UserId, today: string): AsyncAppResult<readonly Goal[]> {
+    const result = await this.getActiveGoalsByPriority(userId);
+    if (!result.ok) {
+      return result;
+    }
+
+    // Filter out paused goals
+    const nonPaused = result.value.filter(goal => {
+      const pausedUntil = (goal as Goal & { pausedUntil?: string }).pausedUntil;
+      if (!pausedUntil) {
+        return true;
+      }
+      // Include if pause has expired
+      return pausedUntil <= today;
+    });
+
+    return ok(nonPaused);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // INDEX MANAGEMENT
   // ─────────────────────────────────────────────────────────────────────────────
 

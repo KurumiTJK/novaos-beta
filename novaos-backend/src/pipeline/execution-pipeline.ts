@@ -716,60 +716,88 @@ export class ExecutionPipeline {
     const isLearningIntentByPattern = learningPatterns.some(p => p.test(state.userMessage));
     
     // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 18B: PRACTICE MODE PATTERNS
-    // Route practice queries to SwordGate for chat-based drill interaction
+    // Phase 20: SIMPLIFIED PRACTICE MODE PATTERNS
+    // Route practice queries to SwordGate → LessonMode
     // ═══════════════════════════════════════════════════════════════════════════
     const practicePatterns = [
-      // View today's lesson
-      /what('?s| is)?\s+(my\s+)?(lesson|practice|drill|task)\s*(today|for today)?/i,
-      /today('?s)?\s+(lesson|practice|drill|task)/i,
-      /what\s+(should|do)\s+i\s+(practice|learn|do)\s*(today)?/i,
-      /^(lesson|practice|drill)\s*(today)?$/i,
-      /what('?s| is)?\s+on\s+(the\s+)?agenda/i,
-      // Complete practice
-      /^(done|finished|completed|did it|i did it|got it)\.?$/i,
-      /i('?m| am)?\s*(done|finished|completed)/i,
-      /i\s+(did|finished|completed)\s+(it|the\s+(lesson|practice|drill))/i,
-      /mark\s+(it\s+)?(as\s+)?(done|complete|finished|passed)/i,
-      // Fail practice
-      /i\s+(couldn'?t|could not|failed|didn'?t)\s+(do\s+it|finish|complete|pass)/i,
-      /i\s+failed/i,
-      // Skip practice
-      /skip\s+(today|this|it)/i,
-      /i('?ll| will)?\s+(skip|pass on)\s+(today|this|it)/i,
-      /not\s+today/i,
-      // View progress
-      /how('?s| is)?\s+(my\s+)?progress/i,
-      /(show|what'?s)\s+(my\s+)?progress/i,
-      /how\s+am\s+i\s+doing/i,
-      /my\s+(progress|stats)/i,
-      // View week
-      /this\s+week('?s)?\s+(plan|schedule|lessons)/i,
-      /weekly\s+(plan|schedule|overview)/i,
-      // View goals
+      // Number selection (for "which goal?" prompts)
+      /^[1-9]$/,                    // Single digit: 1, 2, 3...
+      /^[1-9]\d?$/,                 // One or two digits: 1-99
+      /^#?[1-9]\d?\.?$/,            // With optional # or dot: #1, 1., #2.
+      /^(option|number|choice)\s*#?[1-9]\d?$/i,  // "option 1", "number 2"
+      /^(the\s+)?(first|second|third|fourth|fifth)(\s+one)?$/i,  // ordinals
+
+      // View commands
+      /^view$/i,
+      /^show$/i,
       /(show|list|view|what('?s| is| are)?)\s+(my\s+)?goals/i,
       /my\s+goals/i,
-      /all\s+(my\s+)?goals/i,
-      /what\s+am\s+i\s+learning/i,
-      // Delete goals
-      /delete\s+(goal\s*)?(#?\d+|this|current|all)/i,
-      /remove\s+(goal\s*)?(#?\d+|this|current|all)/i,
-      /clear\s+all(\s+goals)?/i,
-      /reset\s+(all\s+)?goals/i,
-      /start\s+fresh/i,
-      // Start now (practice early)
-      /start\s+(now|today|early|my\s+lesson)/i,
-      /begin\s+(now|today|early)/i,
-      /practice\s+now/i,
-      /let('?s| me)?\s+start/i,
-      /i\s+want\s+to\s+(start|begin|practice)\s*(now)?$/i,
+      /what('?s| is)?\s+(my\s+)?(lesson|practice|drill)/i,
+      /today('?s)?\s+(lesson|practice|drill)/i,
+      /what\s+(should|do)\s+i\s+(practice|learn|do)/i,
+
+      // Start commands
+      /^start$/i,
+      /^begin$/i,
+      /^go$/i,
+      /let'?s\s+(start|go|begin|practice)/i,
+      /start\s+(now|today|lesson|practice)/i,
+      /begin\s+(now|today|lesson|practice)/i,
+      /practice\s+(now|today)/i,
+      /i\s+want\s+to\s+(start|begin|practice)/i,
       /give\s+me\s+(my\s+)?(first\s+)?(lesson|drill)/i,
-      /can\s+i\s+start/i,
-      // Switch goal
-      /switch\s+(to\s+)?goal\s*(#?\d+)/i,
-      /use\s+goal\s*(#?\d+)/i,
-      /change\s+(to\s+)?goal\s*(#?\d+)/i,
-      /select\s+goal\s*(#?\d+)/i,
+
+      // Complete commands
+      /^(done|finished|completed|did it)\.?!?$/i,
+      /i('?m| am)?\s*(done|finished|completed)/i,
+      /mark\s+(as\s+)?(done|complete)/i,
+
+      // Fail commands
+      /i\s+(couldn'?t|could not|failed|didn'?t)/i,
+      /i\s+failed/i,
+
+      // Pause commands (lesson-specific)
+      /pause\s+(lesson|practice|goal|\w+)/i,
+      /take\s+a\s+break/i,
+      /save\s+(and\s+)?(exit|quit)/i,
+
+      // Resume commands
+      /^resume$/i,
+      /resume\s+(lesson|practice|goal|\w+)/i,
+      /unpause/i,
+
+      // Delete commands
+      /^delete$/i,
+      /delete\s+(goal|all)/i,
+      /remove\s+(goal|all)/i,
+      /clear\s+all/i,
+
+      // Cancel lesson (lesson-specific, not standalone)
+      /cancel\s+(lesson|practice|goal)/i,
+
+      // Skip commands
+      /skip\s+(today|this|it)/i,
+      /not\s+today/i,
+
+      // Switch/select goal
+      /switch\s+(to\s+)?(goal|\w+)/i,
+      /select\s+goal/i,
+      /focus\s+on/i,
+      /work\s+on/i,
+
+      // Priority
+      /priority/i,
+      /prioritize/i,
+
+      // Progress/week
+      /progress/i,
+      /this\s+week/i,
+      /weekly/i,
+
+      // General lesson/practice keywords (broad catch)
+      /lesson/i,
+      /practice/i,
+      /drill/i,
     ];
     const isPracticeQuery = practicePatterns.some(p => p.test(state.userMessage));
     

@@ -222,6 +222,24 @@ export const MASTERY_THRESHOLDS = {
   CONSECUTIVE_FOR_MASTERY: 2,
 } as const;
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// JIT GENERATION CONSTANTS (Phase 19A)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Placeholder WeekPlan ID for JIT-generated drills.
+ * JIT drills don't belong to a pre-generated week plan.
+ * Phase 19A: JIT drill generation.
+ */
+export const JIT_WEEK_PLAN_ID = 'wp_jit_00000000' as WeekPlanId;
+
+/**
+ * Planning horizon for ongoing goals in days.
+ * Used for skill distribution visualization.
+ * Phase 19A: Ongoing goal support.
+ */
+export const ONGOING_PLANNING_HORIZON_DAYS = 28;
+
 /**
  * Check if a value is a valid SkillMastery.
  */
@@ -879,6 +897,29 @@ export interface DailyDrill {
 
   /** When completed */
   readonly completedAt?: Timestamp;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // JIT Generation Metadata (Phase 19A)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Whether this drill was generated just-in-time.
+   * JIT drills use JIT_WEEK_PLAN_ID as weekPlanId.
+   * Phase 19A: JIT drill generation.
+   */
+  readonly isJIT?: boolean;
+
+  /**
+   * Context explaining why this skill was selected for JIT generation.
+   * Phase 19A: JIT drill generation.
+   */
+  readonly generationContext?: string;
+
+  /**
+   * When the drill was generated (for JIT drills).
+   * Phase 19A: JIT drill generation.
+   */
+  readonly generatedAt?: Timestamp;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1244,45 +1285,70 @@ export interface LearningPlan {
   readonly userId: UserId;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Plan Overview (ENHANCED)
+  // Duration Type (Phase 19A)
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /** Total weeks in the plan */
-  readonly totalWeeks: number;
+  /**
+   * Duration type for this learning plan.
+   * Phase 19A: Flexible duration support.
+   */
+  readonly durationType: 'fixed' | 'ongoing';
 
-  /** Total practice days (sum of all quest practice days) */
-  readonly totalPracticeDays: number;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Plan Overview (ENHANCED - Phase 19A)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Total weeks in the plan.
+   * Phase 19A: Undefined for ongoing goals.
+   */
+  readonly totalWeeks?: number;
+
+  /**
+   * Total practice days (sum of all quest practice days).
+   * Phase 19A: Undefined for ongoing goals.
+   */
+  readonly totalPracticeDays?: number;
 
   /** Total skills to master */
   readonly totalSkills: number;
 
-  /** Total drills planned (approximate) */
-  readonly totalDrills: number;
+  /**
+   * Total drills planned (approximate).
+   * Phase 19A: Undefined for ongoing goals.
+   */
+  readonly totalDrills?: number;
 
-  /** Estimated completion date (YYYY-MM-DD) */
-  readonly estimatedCompletionDate: string;
+  /**
+   * Estimated completion date (YYYY-MM-DD).
+   * Phase 19A: Undefined for ongoing goals.
+   */
+  readonly estimatedCompletionDate?: string;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Quest Mapping (ENHANCED)
+  // Quest Mapping (ENHANCED - Phase 19A)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Quest to skills mapping.
    * Each quest's decomposed skills.
+   * Always required (skills decomposed upfront even for JIT).
    */
   readonly questSkillMapping: readonly QuestSkillMapping[];
 
   /**
    * Quest to weeks mapping.
    * Which weeks cover which quests.
+   * Phase 19A: Optional, not used in JIT mode.
    */
-  readonly questWeekMapping: readonly QuestWeekMapping[];
+  readonly questWeekMapping?: readonly QuestWeekMapping[];
 
   /**
    * Quest durations (NEW).
    * Duration for each quest, indexed by quest order.
+   * Phase 19A: Optional, not used in JIT mode.
    */
-  readonly questDurations: readonly QuestDuration[];
+  readonly questDurations?: readonly QuestDuration[];
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Skill Type Summary (NEW)

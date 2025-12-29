@@ -58,30 +58,77 @@ export class LearningPlanStore extends SecureStore<LearningPlan, GoalId> impleme
   }
 
   protected validate(plan: LearningPlan): string | undefined {
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Required fields (always)
+    // ─────────────────────────────────────────────────────────────────────────────
+    
     if (!plan.goalId) {
       return 'Goal ID is required';
     }
     if (!plan.userId) {
       return 'User ID is required';
     }
-    if (plan.totalWeeks < 1) {
-      return 'Total weeks must be 1 or greater';
+
+    // Phase 19A: durationType is now required
+    if (!plan.durationType) {
+      return 'Duration type is required';
     }
+    if (plan.durationType !== 'fixed' && plan.durationType !== 'ongoing') {
+      return 'Duration type must be "fixed" or "ongoing"';
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Fixed duration validation
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    if (plan.durationType === 'fixed') {
+      // Total weeks required for fixed duration
+      if (plan.totalWeeks === undefined || plan.totalWeeks < 1) {
+        return 'Total weeks must be 1 or greater for fixed duration goals';
+      }
+
+      // Estimated completion date required for fixed duration
+      if (!plan.estimatedCompletionDate) {
+        return 'Estimated completion date is required for fixed duration goals';
+      }
+
+      // Validate date format (YYYY-MM-DD)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(plan.estimatedCompletionDate)) {
+        return 'Estimated completion date must be in YYYY-MM-DD format';
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Skills validation (always required)
+    // ─────────────────────────────────────────────────────────────────────────────
+
     if (plan.totalSkills < 1) {
       return 'Total skills must be 1 or greater';
     }
-    if (plan.totalDrills < 1) {
-      return 'Total drills must be 1 or greater';
-    }
-    if (!plan.estimatedCompletionDate || !/^\d{4}-\d{2}-\d{2}$/.test(plan.estimatedCompletionDate)) {
-      return 'Estimated completion date must be in YYYY-MM-DD format';
-    }
+
+    // Quest skill mapping is always required (skills decomposed upfront for JIT)
     if (!plan.questSkillMapping || plan.questSkillMapping.length === 0) {
       return 'Quest skill mapping is required';
     }
-    if (!plan.questWeekMapping || plan.questWeekMapping.length === 0) {
-      return 'Quest week mapping is required';
+
+    // Phase 19A: questWeekMapping is now OPTIONAL (not used in JIT mode)
+    // Only validate if present
+    if (plan.questWeekMapping && plan.questWeekMapping.length > 0) {
+      for (const mapping of plan.questWeekMapping) {
+        if (!mapping.questId) {
+          return 'Quest week mapping must have questId';
+        }
+      }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Timestamps validation
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    if (!plan.generatedAt) {
+      return 'Generated timestamp is required';
+    }
+
     return undefined;
   }
 
