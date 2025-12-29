@@ -145,7 +145,8 @@ describe('DailyDrillEngine', () => {
     });
 
     it('should skip stretch when time is tight', async () => {
-      const context = createMockContext({ dailyMinutes: 20 });
+      // With dailyMinutes: 14, main gets MIN_MAIN_MINUTES (10), leaving stretchBudget = 4 < 5
+      const context = createMockContext({ dailyMinutes: 14 });
       const result = await engine.generate(context);
 
       expect(result.ok).toBe(true);

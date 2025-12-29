@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { Goal, Quest } from '../../services/spark-engine/types.js';
+import type { SkillId } from '../../types/branded.js';
 import type {
   DailyDrill,
   Skill,
@@ -239,7 +240,7 @@ function getBuildsOnQuests(
   skill: Skill | null,
   previousQuests?: readonly Quest[]
 ): string[] {
-  if (!skill || !previousQuests || !skill.prerequisiteIds) {
+  if (!skill || !previousQuests || !skill.prerequisiteSkillIds) {
     return [];
   }
 
@@ -279,8 +280,8 @@ export function buildWeekSummaryDisplay(context: WeekDisplayContext): WeekSummar
   const drillsCompleted = drills.filter(d => d.status === 'completed').length;
   const drillsPassed = drills.filter(d => d.outcome === 'pass').length;
   const drillsFailed = drills.filter(d => d.outcome === 'fail').length;
-  const drillsSkipped = drills.filter(d => d.outcome === 'skipped' || d.status === 'skipped').length;
-  const drillsTotal = weekPlan.totalDays ?? days.length;
+  const drillsSkipped = drills.filter(d => d.outcome === 'skipped').length;
+  const drillsTotal = weekPlan.drillsTotal ?? days.length;
   const passRate = drillsCompleted > 0 ? drillsPassed / drillsCompleted : 0;
   const progressPercent = Math.round((drillsCompleted / Math.max(drillsTotal, 1)) * 100);
 
@@ -306,7 +307,7 @@ export function buildWeekSummaryDisplay(context: WeekDisplayContext): WeekSummar
       title: milestone.title,
       status: milestone.status,
       requiredMasteryPercent: milestone.requiredMasteryPercent ?? 80,
-      currentMasteryPercent: milestone.currentMasteryPercent ?? 0,
+      currentMasteryPercent: 0, // Calculated elsewhere
       isUnlocked: milestone.status !== 'locked',
     };
   }
@@ -381,9 +382,9 @@ function buildDayPlans(
   const todayDate = today ?? new Date().toISOString().split('T')[0];
   const days: DayPlanDisplay[] = [];
 
-  // Use dayPlans if available, otherwise generate from drills
-  if (weekPlan.dayPlans && weekPlan.dayPlans.length > 0) {
-    for (const dayPlan of weekPlan.dayPlans) {
+  // Use days if available, otherwise generate from drills
+  if (weekPlan.days && weekPlan.days.length > 0) {
+    for (const dayPlan of weekPlan.days) {
       const skill = skills.find(s => s.id === dayPlan.skillId);
       const drill = drills.find(d => d.scheduledDate === dayPlan.scheduledDate);
       const isToday = dayPlan.scheduledDate === todayDate;
@@ -391,7 +392,7 @@ function buildDayPlans(
       let status: DayPlanDisplay['status'] = 'pending';
       if (drill?.status === 'completed') {
         status = 'completed';
-      } else if (drill?.status === 'skipped') {
+      } else if (drill?.outcome === 'skipped') {
         status = 'skipped';
       } else if (isToday) {
         status = 'today';
@@ -420,7 +421,7 @@ function buildDayPlans(
       let status: DayPlanDisplay['status'] = 'pending';
       if (drill.status === 'completed') {
         status = 'completed';
-      } else if (drill.status === 'skipped') {
+      } else if (drill.outcome === 'skipped') {
         status = 'skipped';
       } else if (isToday) {
         status = 'today';
@@ -467,7 +468,7 @@ function findReviewsFromQuests(
 
   const questIds = new Set<string>();
   for (const skill of skills) {
-    if (skill.prerequisiteIds) {
+    if (skill.prerequisiteSkillIds) {
       // In production, we'd look up the quest for each prerequisite
       // For now, return empty
     }
@@ -520,7 +521,7 @@ export function buildGoalProgressDisplay(context: ProgressDisplayContext): GoalP
   const { goal, progress, quests, questProgress, skills, includeSkillTree } = context;
 
   // Build quest summaries
-  const questSummaries = buildQuestSummaries(quests, questProgress, progress.currentQuestId);
+  const questSummaries = buildQuestSummaries(quests, questProgress, progress.currentQuest?.questId);
 
   // Find current quest
   const currentQuest = questSummaries.find(q => q.isCurrent);
@@ -561,8 +562,8 @@ export function buildGoalProgressDisplay(context: ProgressDisplayContext): GoalP
     percentComplete: progress.percentComplete ?? 0,
     daysCompleted: progress.daysCompleted,
     daysTotal: progress.totalDays,
-    currentWeek: progress.currentWeek ?? 1,
-    totalWeeks: progress.totalWeeks ?? Math.ceil(progress.totalDays / 5),
+    currentWeek: progress.currentQuest?.currentWeek ?? 1,
+    totalWeeks: Math.ceil(progress.totalDays / 5),
     onTrack,
     daysBehind,
     estimatedCompletionDate,
@@ -571,7 +572,7 @@ export function buildGoalProgressDisplay(context: ProgressDisplayContext): GoalP
     skillsTotal: progress.skillsTotal,
     skillsMastered: progress.skillsMastered,
     skillsPracticing: progress.skillsPracticing ?? 0,
-    skillsAttempting: progress.skillsAttempting ?? 0,
+    skillsAttempting: 0, // Not tracked in GoalProgress
     skillsNotStarted: progress.skillsNotStarted ?? 0,
     skillsLocked: progress.skillsLocked ?? 0,
 
@@ -582,7 +583,7 @@ export function buildGoalProgressDisplay(context: ProgressDisplayContext): GoalP
     currentStreak: progress.currentStreak ?? 0,
     longestStreak: progress.longestStreak ?? 0,
     overallPassRate: progress.overallPassRate ?? 0,
-    lastPracticeDate: progress.lastPracticeDate,
+    lastPracticeDate: progress.lastPracticeDate ?? undefined,
 
     // Quest Progress
     quests: questSummaries,
@@ -704,13 +705,13 @@ export function buildSkillTreeDisplay(skills: readonly Skill[]): SkillTreeNodeDi
  */
 function buildSkillNode(skill: Skill, allSkills: readonly Skill[]): SkillTreeNodeDisplay {
   // Find prerequisite titles
-  const prerequisiteTitles = skill.prerequisiteIds
-    ?.map(id => allSkills.find(s => s.id === id)?.action)
-    .filter((t): t is string => t !== undefined) ?? [];
+  const prerequisiteTitles = skill.prerequisiteSkillIds
+    ?.map((id: SkillId) => allSkills.find(s => s.id === id)?.action)
+    .filter((t: string | undefined): t is string => t !== undefined) ?? [];
 
   // Count skills this unlocks
   const unlocksCount = allSkills.filter(s =>
-    s.prerequisiteIds?.includes(skill.id)
+    s.prerequisiteSkillIds?.includes(skill.id)
   ).length;
 
   // Find component titles for compound skills
@@ -749,7 +750,7 @@ function buildSkillNode(skill: Skill, allSkills: readonly Skill[]): SkillTreeNod
     passCount: skill.passCount ?? 0,
     failCount: skill.failCount ?? 0,
     consecutivePasses: skill.consecutivePasses ?? 0,
-    prerequisiteCount: skill.prerequisiteIds?.length ?? 0,
+    prerequisiteCount: skill.prerequisiteSkillIds?.length ?? 0,
     prerequisiteTitles: prerequisiteTitles.length > 0 ? prerequisiteTitles : undefined,
     unlocksCount,
     isCompound: skill.skillType === 'compound' || skill.skillType === 'synthesis',

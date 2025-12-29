@@ -28,11 +28,11 @@
 
 import type { AsyncAppResult } from '../../types/result.js';
 import { ok, err, appError, isOk } from '../../types/result.js';
-import type { UserId, GoalId } from '../../types/branded.js';
-import type { IDeliberatePracticeEngine, TodayPracticeResult, GoalProgress } from '../../services/deliberate-practice-engine/interfaces.js';
+import type { UserId, GoalId, SkillId } from '../../types/branded.js';
+import type { IDeliberatePracticeEngine, TodayPracticeResult } from '../../services/deliberate-practice-engine/interfaces.js';
 import type { Goal, Quest } from '../../services/spark-engine/types.js';
 import type { ISparkEngine } from '../../services/spark-engine/interfaces.js';
-import type { WeekPlan, DailyDrill, Skill, QuestMilestone } from '../../services/deliberate-practice-engine/types.js';
+import type { WeekPlan, DailyDrill, Skill, QuestMilestone, GoalProgress } from '../../services/deliberate-practice-engine/types.js';
 
 // Phase 19F: Import display types and builders
 import type {
@@ -265,6 +265,19 @@ export class PracticeFlow {
   }
 
   /**
+   * Helper: Get a Quest by ID using getQuestsForGoal.
+   * Since getQuest() doesn't exist on ISparkEngine, we fetch all quests and filter.
+   */
+  private async getQuestById(goalId: GoalId, questId: string): Promise<Quest | null> {
+    if (!this.sparkEngine) return null;
+    
+    const questsResult = await this.sparkEngine.getQuestsForGoal(goalId);
+    if (!isOk(questsResult)) return null;
+    
+    return questsResult.value.find(q => q.id === questId) ?? null;
+  }
+
+  /**
    * Detect practice intent from user message.
    */
   detectIntent(message: string): PracticeIntent {
@@ -472,11 +485,8 @@ export class PracticeFlow {
 
     // Get quest for context
     let quest: Quest | null = null;
-    if (drill.questId && this.sparkEngine) {
-      const questResult = await this.sparkEngine.getQuest(drill.questId);
-      if (isOk(questResult)) {
-        quest = questResult.value;
-      }
+    if (drill.questId) {
+      quest = await this.getQuestById(goalId, drill.questId);
     }
 
     // Phase 19F: Build enhanced drill display
@@ -675,14 +685,14 @@ export class PracticeFlow {
 
     // Get skills for this week
     let skills: readonly Skill[] = [];
-    if (weekPlan.skillIds && weekPlan.skillIds.length > 0) {
+    if (weekPlan.scheduledSkillIds && weekPlan.scheduledSkillIds.length > 0) {
       const skillResults = await Promise.all(
-        weekPlan.skillIds.map(id => this.practiceEngine.getSkill(id))
+        weekPlan.scheduledSkillIds.map((id: SkillId) => this.practiceEngine.getSkill(id))
       );
       skills = skillResults
         .filter(isOk)
-        .map(r => r.value)
-        .filter((s): s is Skill => s !== null);
+        .map((r: { value: Skill | null }) => r.value)
+        .filter((s: Skill | null): s is Skill => s !== null);
     }
 
     // Get drills for this week
@@ -691,11 +701,8 @@ export class PracticeFlow {
 
     // Get quest for context
     let quest: Quest | null = null;
-    if (weekPlan.questId && this.sparkEngine) {
-      const questResult = await this.sparkEngine.getQuest(weekPlan.questId);
-      if (isOk(questResult)) {
-        quest = questResult.value;
-      }
+    if (weekPlan.questId) {
+      quest = await this.getQuestById(goalId, weekPlan.questId);
     }
 
     // Phase 19F: Build enhanced week display
@@ -761,12 +768,7 @@ export class PracticeFlow {
 
     // Get quest for context
     let quest: Quest | null = null;
-    if (this.sparkEngine) {
-      const questResult = await this.sparkEngine.getQuest(questId);
-      if (isOk(questResult)) {
-        quest = questResult.value;
-      }
-    }
+    quest = await this.getQuestById(goalId, questId);
 
     if (!quest) {
       return ok({
@@ -987,11 +989,8 @@ export class PracticeFlow {
 
           // Get quest for context
           let quest: Quest | null = null;
-          if (drill.questId && this.sparkEngine) {
-            const questResult = await this.sparkEngine.getQuest(drill.questId);
-            if (isOk(questResult)) {
-              quest = questResult.value;
-            }
+          if (drill.questId) {
+            quest = await this.getQuestById(goalId, drill.questId);
           }
 
           // Build enhanced display
@@ -1037,11 +1036,8 @@ export class PracticeFlow {
 
       // Get quest for context
       let quest: Quest | null = null;
-      if (drill.questId && this.sparkEngine) {
-        const questResult = await this.sparkEngine.getQuest(drill.questId);
-        if (isOk(questResult)) {
-          quest = questResult.value;
-        }
+      if (drill.questId) {
+        quest = await this.getQuestById(goalId, drill.questId);
       }
 
       // Build enhanced display

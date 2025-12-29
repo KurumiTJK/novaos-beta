@@ -147,6 +147,7 @@ export type PracticeIntent =
   | 'skip'            // "Skip today", "I'll do it tomorrow"
   | 'view_progress'   // "Show my progress", "How am I doing?"
   | 'view_week'       // "What's this week's plan?"
+  | 'view_milestone'  // "Show milestone", "What's the milestone?" [Phase 19F]
   | 'view_goals'      // "Show my goals", "List goals"
   | 'delete_goal'     // "Delete goal 1", "Remove this goal"
   | 'delete_all'      // "Delete all goals", "Clear all"
@@ -164,6 +165,7 @@ export const PRACTICE_INTENTS: readonly PracticeIntent[] = [
   'skip',
   'view_progress',
   'view_week',
+  'view_milestone',
   'view_goals',
   'delete_goal',
   'delete_all',

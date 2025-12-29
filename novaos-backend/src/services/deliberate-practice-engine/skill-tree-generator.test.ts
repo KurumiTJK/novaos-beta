@@ -500,6 +500,7 @@ describe('SkillTreeGenerator', () => {
       const skill = createMockPreviousSkill({
         action: 'Write code',
         successSignal: 'Code works correctly',
+        lockedVariables: ['Some constraint'],
         estimatedMinutes: 60,
       });
 
@@ -522,6 +523,7 @@ describe('SkillTreeGenerator', () => {
       const skill = createMockPreviousSkill({
         action: 'Combine skills',
         successSignal: 'Skills combined correctly',
+        lockedVariables: ['Some constraint'],
         isCompound: true,
         componentSkillIds: ['skill_1' as SkillId],
       });

@@ -135,11 +135,17 @@ describe('generateDrillReminderMessage', () => {
     });
 
     it('should simplify the action text', () => {
-      const context = createMockContext(2);
+      // Use action with a period to test simplification
+      const context = createMockContext(2, {
+        drill: createMockDrill({
+          action: 'Write a for loop. Then add error handling. Finally test it.',
+        }),
+      });
       const result = generateDrillReminderMessage(context);
 
-      // Should only have first sentence/clause
-      expect(result.text).not.toContain('prints each item');
+      // Should only have first sentence
+      expect(result.text).toContain('Write a for loop');
+      expect(result.text).not.toContain('Finally test it');
     });
   });
 

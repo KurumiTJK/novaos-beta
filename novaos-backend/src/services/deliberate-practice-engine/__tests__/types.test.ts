@@ -31,26 +31,28 @@ import {
 describe('Deliberate Practice Types - Constants', () => {
   describe('SKILL_DIFFICULTIES', () => {
     it('should contain all skill difficulty levels', () => {
-      expect(SKILL_DIFFICULTIES).toContain('foundation');
+      expect(SKILL_DIFFICULTIES).toContain('intro');
       expect(SKILL_DIFFICULTIES).toContain('practice');
       expect(SKILL_DIFFICULTIES).toContain('challenge');
+      expect(SKILL_DIFFICULTIES).toContain('synthesis');
     });
 
-    it('should have exactly 3 difficulty levels', () => {
-      expect(SKILL_DIFFICULTIES).toHaveLength(3);
+    it('should have exactly 4 difficulty levels', () => {
+      expect(SKILL_DIFFICULTIES).toHaveLength(4);
     });
 
     it('should be ordered from easiest to hardest', () => {
-      expect(SKILL_DIFFICULTIES[0]).toBe('foundation');
+      expect(SKILL_DIFFICULTIES[0]).toBe('intro');
       expect(SKILL_DIFFICULTIES[1]).toBe('practice');
       expect(SKILL_DIFFICULTIES[2]).toBe('challenge');
+      expect(SKILL_DIFFICULTIES[3]).toBe('synthesis');
     });
   });
 
   describe('SKILL_MASTERY_LEVELS', () => {
     it('should contain all mastery levels', () => {
       expect(SKILL_MASTERY_LEVELS).toContain('not_started');
-      expect(SKILL_MASTERY_LEVELS).toContain('attempted');
+      expect(SKILL_MASTERY_LEVELS).toContain('attempting');
       expect(SKILL_MASTERY_LEVELS).toContain('practicing');
       expect(SKILL_MASTERY_LEVELS).toContain('mastered');
     });
@@ -144,14 +146,16 @@ describe('Deliberate Practice Types - Constants', () => {
 describe('Deliberate Practice Types - Type Guards', () => {
   describe('isSkillDifficulty', () => {
     it('should return true for valid difficulties', () => {
-      expect(isSkillDifficulty('foundation')).toBe(true);
+      expect(isSkillDifficulty('intro')).toBe(true);
       expect(isSkillDifficulty('practice')).toBe(true);
       expect(isSkillDifficulty('challenge')).toBe(true);
+      expect(isSkillDifficulty('synthesis')).toBe(true);
     });
 
     it('should return false for invalid values', () => {
       expect(isSkillDifficulty('easy')).toBe(false);
       expect(isSkillDifficulty('hard')).toBe(false);
+      expect(isSkillDifficulty('foundation')).toBe(false); // Old value, no longer valid
       expect(isSkillDifficulty('')).toBe(false);
       expect(isSkillDifficulty(null)).toBe(false);
       expect(isSkillDifficulty(undefined)).toBe(false);
@@ -162,7 +166,7 @@ describe('Deliberate Practice Types - Type Guards', () => {
   describe('isSkillMastery', () => {
     it('should return true for valid mastery levels', () => {
       expect(isSkillMastery('not_started')).toBe(true);
-      expect(isSkillMastery('attempted')).toBe(true);
+      expect(isSkillMastery('attempting')).toBe(true);
       expect(isSkillMastery('practicing')).toBe(true);
       expect(isSkillMastery('mastered')).toBe(true);
     });
@@ -170,6 +174,7 @@ describe('Deliberate Practice Types - Type Guards', () => {
     it('should return false for invalid values', () => {
       expect(isSkillMastery('beginner')).toBe(false);
       expect(isSkillMastery('expert')).toBe(false);
+      expect(isSkillMastery('attempted')).toBe(false); // Old value, no longer valid
       expect(isSkillMastery('')).toBe(false);
       expect(isSkillMastery(null)).toBe(false);
     });
