@@ -223,11 +223,21 @@ Day 3 - CONNECT: Link to prior knowledge + variation
   - Require self-explanation
   - Full reference access
 
-Day 4 - FAIL: Intentional failure → diagnosis → repair
-  - Provide BROKEN material with subtle errors
-  - Learner must FIND and FIX the problem
-  - For later weeks: multiple bugs, edge cases
-  - MUST include givenMaterial (broken code/content)
+Day 4 - FAIL: Diagnosis and repair (DOMAIN-SPECIFIC)
+  FOR TECHNICAL DOMAINS (code, config, data):
+    - Provide BROKEN INPUT (code with bugs, wrong config)
+    - Learner finds and fixes the errors
+    - givenMaterial = broken code/script to debug
+  
+  FOR PHYSICAL/CRAFT DOMAINS (cooking, music, sports, art):
+    - Provide BROKEN OUTPUT or COMMON MISTAKE SCENARIO
+    - Learner diagnoses what went wrong and explains the fix
+    - givenMaterial = description of failed result OR recipe with wrong measurements
+    - NEVER tell learner to do something dangerous (wrong knife grip, bad form)
+    - Example: "This dish came out too salty and the vegetables are mushy. Identify 2 mistakes."
+    - Example: "Watch this recording of off-pitch singing. What needs correction?"
+  
+  SAFETY RULE: NEVER give instructions that could cause physical harm.
 
 Day 5 - PROVE: Demonstrate competence with ZERO aids
   - Test conditions: no reference, no hints
@@ -366,9 +376,10 @@ CHECKLIST (all must be true):
 ☐ "skill" field has 5+ words (not "Write" or "Build" alone)
 ☐ Week title is unique and describes what's actually being learned
 ☐ Day 1 (encounter) has givenMaterial with ACTUAL content to copy
-☐ Day 4 (fail) has givenMaterial with BROKEN content to fix
+☐ Day 4 (fail) has givenMaterial — for physical skills: describe a FAILED RESULT to diagnose, NOT dangerous instructions
 ☐ Day 2, 3, 5 have givenMaterial: null
 ☐ resourceTopics include "${context.topic}" keywords
+☐ SAFETY: No instructions that could cause physical harm (wrong knife grip, bad posture, etc.)
 
 Return ONLY valid JSON. No markdown. No explanation.`;
 }
@@ -464,6 +475,41 @@ EXAMPLE (Professional - Week 1):
   "skill": "Identify the 3 key elements of effective [skill]",
   "competenceProof": "Watch a recording of yourself and identify all 3 elements, noting timestamps",
   "drills": [...]
+}`,
+    craft: `
+EXAMPLE (Craft/Cooking - Week 1):
+{
+  "weekNumber": 1,
+  "title": "Week 1: Mastering Basic Knife Skills",
+  "theme": "Safe and efficient vegetable prep",
+  "skill": "Chop vegetables into uniform pieces using proper knife technique",
+  "competenceProof": "Chop an onion, carrot, and celery into uniform dice without injury",
+  "drills": [
+    {
+      "dayType": "encounter",
+      "do": "Follow these steps to dice an onion safely: 1. Cut onion in half through root. 2. Place flat side down. 3. Use claw grip with guide hand. 4. Make horizontal cuts, then vertical cuts, keeping root intact.",
+      "givenMaterial": "Step-by-step onion dicing guide with claw grip technique",
+      "givenMaterialType": "steps",
+      "done": "Onion is diced into roughly uniform pieces with no cuts to hands",
+      "stuck": "Onion pieces are uneven sizes",
+      "unstuck": "Keep knife tip on board and use rocking motion for consistent cuts",
+      "why": "Uniform cuts cook evenly and look professional",
+      "reflect": "Why does the claw grip protect your fingers?",
+      "resourceTopics": ["knife skills", "onion dicing", "claw grip"]
+    },
+    {
+      "dayType": "fail",
+      "do": "Look at this result: 'Diced onion with pieces ranging from 1cm to 3cm, some still connected at root, cook reports uneven browning.' Identify the 2 mistakes and explain how to fix them.",
+      "givenMaterial": "Failed result: Uneven onion dice (1cm to 3cm pieces), some chunks still connected, caused uneven cooking",
+      "givenMaterialType": "text",
+      "done": "Correctly identified: 1) inconsistent cut sizes, 2) root not trimmed properly",
+      "stuck": "Cannot identify what caused the uneven cooking",
+      "unstuck": "Focus on the size variation — larger pieces take longer to cook",
+      "why": "Diagnosing mistakes builds problem-solving skills without risk",
+      "reflect": "How would you adjust technique to get more uniform pieces?",
+      "resourceTopics": ["knife skills troubleshooting", "even cuts"]
+    }
+  ]
 }`,
   };
   
