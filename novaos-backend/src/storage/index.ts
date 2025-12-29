@@ -73,6 +73,11 @@ export class RedisStore implements KeyValueStore {
   constructor(url?: string) {
     const redisUrl = url ?? process.env.REDIS_URL ?? 'redis://localhost:6379';
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FIX: Add TLS support for rediss:// URLs (required for Upstash, Railway, etc.)
+    // ═══════════════════════════════════════════════════════════════════════════
+    const useTls = redisUrl.startsWith('rediss://');
+    
     this.client = new Redis(redisUrl, {
       maxRetriesPerRequest: 3,
       retryStrategy: (times: number) => {
@@ -83,10 +88,17 @@ export class RedisStore implements KeyValueStore {
         return Math.min(times * 200, 2000);
       },
       lazyConnect: true,
+      // TLS configuration for secure Redis (Upstash, Railway, etc.)
+      tls: useTls ? {} : undefined,
     });
 
     this.client.on('connect', () => {
       console.log('[REDIS] Connected');
+      this.connected = true;
+    });
+
+    this.client.on('ready', () => {
+      console.log('[REDIS] Ready');
       this.connected = true;
     });
 
@@ -104,6 +116,25 @@ export class RedisStore implements KeyValueStore {
   async connect(): Promise<void> {
     try {
       await this.client.connect();
+      // Wait for ready state
+      if (this.client.status !== 'ready') {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Redis connection timeout'));
+          }, 10000);
+          
+          this.client.once('ready', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+          
+          this.client.once('error', (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+        });
+      }
+      this.connected = true;
     } catch (error) {
       console.error('[REDIS] Failed to connect:', error);
       throw error;
@@ -492,16 +523,16 @@ export class MemoryStore implements KeyValueStore {
     const minScore = this.parseScoreBound(min, -Infinity);
     const maxScore = this.parseScoreBound(max, Infinity);
     
-    let result = Array.from(sortedSet.entries())
+    let results = Array.from(sortedSet.entries())
       .filter(([_, score]) => score >= minScore && score <= maxScore)
       .sort((a, b) => a[1] - b[1])
       .map(([member]) => member);
     
     if (options?.limit) {
-      result = result.slice(options.limit.offset, options.limit.offset + options.limit.count);
+      results = results.slice(options.limit.offset, options.limit.offset + options.limit.count);
     }
     
-    return result;
+    return results;
   }
 
   async zrevrangebyscore(
@@ -516,16 +547,16 @@ export class MemoryStore implements KeyValueStore {
     const minScore = this.parseScoreBound(min, -Infinity);
     const maxScore = this.parseScoreBound(max, Infinity);
     
-    let result = Array.from(sortedSet.entries())
+    let results = Array.from(sortedSet.entries())
       .filter(([_, score]) => score >= minScore && score <= maxScore)
       .sort((a, b) => b[1] - a[1])
       .map(([member]) => member);
     
     if (options?.limit) {
-      result = result.slice(options.limit.offset, options.limit.offset + options.limit.count);
+      results = results.slice(options.limit.offset, options.limit.offset + options.limit.count);
     }
     
-    return result;
+    return results;
   }
 
   async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
@@ -620,21 +651,26 @@ export class StoreManager {
     // Try to initialize Redis if REDIS_URL is set
     if (process.env.REDIS_URL) {
       try {
+        console.log('[STORAGE] REDIS_URL detected, creating RedisStore...');
         this.redis = new RedisStore(process.env.REDIS_URL);
         this.useRedis = true;
       } catch (error) {
-        console.warn('[STORAGE] Redis initialization failed, using memory store');
+        console.warn('[STORAGE] Redis initialization failed, using memory store:', error);
         this.useRedis = false;
       }
+    } else {
+      console.log('[STORAGE] No REDIS_URL set, using memory store');
     }
   }
 
   async initialize(): Promise<void> {
     if (this.redis && this.useRedis) {
       try {
+        console.log('[STORAGE] Connecting to Redis...');
         await this.redis.connect();
+        console.log('[STORAGE] Redis connected successfully!');
       } catch (error) {
-        console.warn('[STORAGE] Redis connection failed, falling back to memory store');
+        console.warn('[STORAGE] Redis connection failed, falling back to memory store:', error);
         this.useRedis = false;
       }
     }

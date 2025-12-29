@@ -333,6 +333,39 @@ export class DeliberatePracticeEngine implements IDeliberatePracticeEngine {
     const existingDrill = await this.stores.drills.getByDate(userId, goalId, today);
     if (existingDrill.ok && existingDrill.value !== null) {
       const drill = existingDrill.value;
+      
+      // ═══════════════════════════════════════════════════════════════════════════
+      // FIX: Check if drill is already completed
+      // A drill is completed when:
+      //   - outcome is set (pass, fail, partial, skipped), OR
+      //   - status is 'completed' or 'missed'
+      // ═══════════════════════════════════════════════════════════════════════════
+      const isCompleted = drill.outcome !== undefined || 
+                          drill.status === 'completed' || 
+                          drill.status === 'missed';
+      
+      if (isCompleted) {
+        console.log(`[PRACTICE_ENGINE] Drill ${drill.id} already completed (outcome=${drill.outcome}, status=${drill.status}) - practice done for today`);
+        
+        return ok({
+          hasContent: false,
+          drill: null,
+          spark: null,
+          weekPlan: null,
+          skill: null,
+          date: today,
+          timezone: this.config.timezone,
+          context: null,
+          goalId,
+          questId: null,
+          skillType: null,
+          componentSkills: null,
+          reviewSkill: null,
+          reviewQuestTitle: null,
+        });
+      }
+      // ═══════════════════════════════════════════════════════════════════════════
+      
       const skill = await this.stores.skills.get(drill.skillId);
       const weekPlan = await this.stores.weekPlans.get(drill.weekPlanId);
 
