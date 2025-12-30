@@ -56,6 +56,21 @@ export {
   type StanceResult,
 } from './stance/index.js';
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// MODEL GATE — The Stitcher (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  executeModelGate,
+  executeModelGateAsync,
+  stitchPrompt,
+  DEFAULT_PERSONALITY,
+  type ModelGateOutput,
+  type ModelGateConfig,
+  type Personality,
+  type StitchedPrompt,
+} from './model-gate.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // INTENT GATE (LEGACY - SYNC)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -400,11 +415,14 @@ export async function executeShieldGate(
     if (classification.riskLevel === 'critical' && classification.category === 'death_risk') {
       return {
         gateId: 'shield',
-        status: 'hard_fail',
+        status: 'blocked',
         output: {
+          safe: false,
           riskLevel: 'critical',
-          controlMode: 'crisis_detected',
           message: getCrisisMessage(),
+          controlMode: true,
+          vetoType: 'hard',
+          triggers: ['death_risk'],
         },
         action: 'stop',
         executionTimeMs: Date.now() - start,
@@ -415,12 +433,13 @@ export async function executeShieldGate(
     if (classification.riskLevel === 'high' && classification.category === 'harm_risk') {
       return {
         gateId: 'shield',
-        status: 'hard_fail',
+        status: 'blocked',
         output: {
-          riskLevel: 'critical',
+          safe: false,
+          riskLevel: 'high',
+          message: "I can't help with requests that could harm you or others. If you're struggling with difficult feelings, I'm here to talk about that instead.",
           vetoType: 'hard',
           triggers: ['harm_risk'],
-          message: classification.reasoning,
         },
         action: 'stop',
         executionTimeMs: Date.now() - start,
@@ -429,39 +448,45 @@ export async function executeShieldGate(
 
     // MEDIUM + reckless_decision → SOFT VETO
     if (classification.riskLevel === 'medium' && classification.category === 'reckless_decision') {
-      const ackToken = generateSimpleAckToken();
       return {
         gateId: 'shield',
-        status: 'soft_fail',
+        status: 'warning',
         output: {
-          riskLevel: 'elevated',
+          safe: false,
+          riskLevel: 'medium',
+          message: `This sounds like a significant decision. Before proceeding, have you considered: What's driving this urgency? What would you advise a friend in this situation?`,
           vetoType: 'soft',
+          ackToken: generateSimpleAckToken(),
           triggers: ['reckless_decision'],
-          ackToken,
-          message: `This appears to be a high-stakes decision: ${classification.reasoning}. Please acknowledge to proceed.`,
         },
         action: 'await_ack',
         executionTimeMs: Date.now() - start,
       };
     }
 
-    // PASS
+    // SAFE → Continue
     return {
       gateId: 'shield',
       status: 'pass',
-      output: { riskLevel: 'safe' },
+      output: {
+        safe: true,
+        riskLevel: classification.riskLevel === 'low' ? 'low' : 'safe',
+      },
       action: 'continue',
       executionTimeMs: Date.now() - start,
     };
 
   } catch (error) {
-    console.error('[SHIELD] Error:', error);
-    
-    // FAIL OPEN
+    console.error('[SHIELD] Error in shield gate:', error);
+    // Fail open - allow request through if classification fails
     return {
       gateId: 'shield',
       status: 'pass',
-      output: { riskLevel: 'safe' },
+      output: {
+        safe: true,
+        riskLevel: 'safe',
+        message: 'Classification unavailable - proceeding with caution',
+      },
       action: 'continue',
       executionTimeMs: Date.now() - start,
     };
@@ -470,33 +495,33 @@ export async function executeShieldGate(
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAPABILITY GATE
+// CAPABILITY GATE (LEGACY)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const VALID_ACTION_SOURCES = ['ui_button', 'command_parser', 'api_field'];
+const VALID_ACTION_SOURCES = ['explicit', 'ui_button', 'command_parser', 'api_field'] as const;
 
 export function executeCapabilityGate(
   state: PipelineState,
   context: PipelineContext
 ): GateResult<CapabilityResult> {
   const start = Date.now();
-
   const stance = state.stance ?? 'lens';
-  
-  const capabilities: Record<Stance, string[]> = {
-    control: ['provide_resources', 'end_conversation'],
-    shield: ['block_action', 'verify_information'],
-    lens: ['give_advice', 'verify_information', 'ask_followup'],
-    sword: ['give_advice', 'generate_spark', 'set_reminder', 'access_memory'],
+
+  // Define capabilities by stance
+  const capabilities: Record<Stance, readonly string[]> = {
+    control: ['provide_support', 'suggest_resources'],
+    shield: ['provide_info', 'suggest_alternatives'],
+    lens: ['provide_info', 'explain', 'analyze'],
+    sword: ['provide_info', 'recommend', 'plan', 'execute_action'],
   };
 
-  // Process action sources from context
+  // Check action sources from context
   const actionSources = context.actionSources ?? [];
+  let explicitActions: readonly ActionSource[] | undefined;
   const deniedCapabilities: string[] = [];
-  let explicitActions: ActionSource[] | undefined = undefined;
 
   if (actionSources.length > 0) {
-    // Filter valid sources
+    // Filter to only valid action sources
     const validActions = actionSources.filter(a => VALID_ACTION_SOURCES.includes(a.type));
     
     // Check for nl_inference attempts
@@ -525,19 +550,8 @@ export function executeCapabilityGate(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MODEL GATE
+// MODEL CONSTRAINTS BUILDER
 // ═══════════════════════════════════════════════════════════════════════════════
-
-const MOCK_RESPONSES: Record<string, string> = {
-  question: 'Based on my knowledge, here is the information you requested.',
-  action: 'I can help you with that. Here are the steps to accomplish your goal.',
-  planning: 'Let me help you create a plan for this.',
-  rewrite: 'Here is the improved version of your text.',
-  summarize: 'Here is a concise summary of the key points.',
-  translate: 'Here is the translation.',
-  conversation: 'I understand. How can I assist you further?',
-  default: 'I understand your request. Here is my response.',
-};
 
 export function buildModelConstraints(state: PipelineState): GenerationConstraints {
   const constraints: GenerationConstraints = {
@@ -562,77 +576,6 @@ export function buildModelConstraints(state: PipelineState): GenerationConstrain
   }
 
   return constraints;
-}
-
-export function executeModelGate(
-  state: PipelineState,
-  _context: PipelineContext
-): GateResult<Generation> {
-  const start = Date.now();
-  const constraints = buildModelConstraints(state);
-
-  // Generate mock response
-  const intentType = state.intent?.type ?? 'default';
-  let text: string = MOCK_RESPONSES[intentType as keyof typeof MOCK_RESPONSES] 
-    ?? MOCK_RESPONSES.default 
-    ?? 'I understand your request.';
-
-  // NOTE: mustPrepend is for the PROMPT to the LLM, not the OUTPUT to the user
-  // In mock mode, we just generate a generic response
-  // The real async gate will use mustPrepend in the actual LLM call
-
-  // Apply mustInclude (these ARE user-facing notices)
-  if (constraints.mustInclude) {
-    text += '\n\n' + constraints.mustInclude.join(' ');
-  }
-
-  return {
-    gateId: 'model',
-    status: 'pass',
-    output: {
-      text,
-      model: 'mock-v1',
-      tokensUsed: text.split(/\s+/).length,
-      constraints,
-    },
-    action: 'continue',
-    executionTimeMs: Date.now() - start,
-  };
-}
-
-// Async version that uses real providers
-export async function executeModelGateAsync(
-  state: PipelineState,
-  _context: PipelineContext,
-  generate: (prompt: string, systemPrompt: string, constraints?: GenerationConstraints) => Promise<Generation>,
-  systemPrompt: string
-): Promise<GateResult<Generation>> {
-  const start = Date.now();
-  const constraints = buildModelConstraints(state);
-
-  try {
-    const generation = await generate(state.userMessage, systemPrompt, constraints);
-
-    return {
-      gateId: 'model',
-      status: 'pass',
-      output: generation,
-      action: 'continue',
-      executionTimeMs: Date.now() - start,
-    };
-  } catch (error) {
-    console.error('[MODEL] Generation failed:', error);
-    
-    // Fall back to mock on error
-    const mockResult = executeModelGate(state, _context);
-    return {
-      ...mockResult,
-      output: {
-        ...mockResult.output,
-        fallbackUsed: true,
-      },
-    };
-  }
 }
 
 

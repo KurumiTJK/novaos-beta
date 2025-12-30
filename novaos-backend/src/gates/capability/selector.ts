@@ -35,6 +35,9 @@ const DEFAULT_CONFIG: Required<SelectorConfig> = {
 // Global config that can be set at startup
 let globalConfig: SelectorConfig = {};
 
+// Track if we've logged the config yet
+let hasLoggedConfig = false;
+
 /**
  * Set global selector configuration.
  * Call this at application startup to change defaults.
@@ -44,7 +47,9 @@ let globalConfig: SelectorConfig = {};
  */
 export function setSelectorConfig(config: SelectorConfig): void {
   globalConfig = { ...globalConfig, ...config };
-  console.log('[CAPABILITY_SELECTOR] Config updated:', globalConfig);
+  const effective = { ...DEFAULT_CONFIG, ...globalConfig };
+  console.log(`[CAPABILITY] Selector model: ${effective.model}`);
+  hasLoggedConfig = true;
 }
 
 /**
@@ -52,6 +57,18 @@ export function setSelectorConfig(config: SelectorConfig): void {
  */
 export function getSelectorConfig(): Required<SelectorConfig> {
   return { ...DEFAULT_CONFIG, ...globalConfig };
+}
+
+/**
+ * Log the current config if not already logged.
+ * Called on first selection.
+ */
+function ensureConfigLogged(): void {
+  if (!hasLoggedConfig) {
+    const cfg = getSelectorConfig();
+    console.log(`[CAPABILITY] Selector model: ${cfg.model}`);
+    hasLoggedConfig = true;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -125,6 +142,9 @@ export async function selectCapabilities(
   config?: SelectorConfig,
   openaiClient?: OpenAI
 ): Promise<SelectorResult> {
+  // Log config on first call
+  ensureConfigLogged();
+  
   const cfg = { ...DEFAULT_CONFIG, ...globalConfig, ...config };
   const client = openaiClient ?? getOpenAIClient();
 
@@ -302,4 +322,13 @@ function getOpenAIClient(): OpenAI {
  */
 export function setOpenAIClient(client: OpenAI): void {
   openaiClientInstance = client;
+}
+
+/**
+ * Reset selector state (for testing).
+ */
+export function resetSelector(): void {
+  openaiClientInstance = null;
+  globalConfig = {};
+  hasLoggedConfig = false;
 }

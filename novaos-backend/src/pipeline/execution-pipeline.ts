@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXECUTION PIPELINE — Gate Orchestration
-// PATCHED: Integrated new Capability Gate with LLM selector
+// PATCHED: Integrated Capability Gate + Model Gate (The Stitcher)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -20,7 +20,6 @@ import {
   executeLensGate,
   executeLensGateAsync,
   executeStanceGateAsync,
-  // REMOVED: executeCapabilityGate (old sync version)
   executeModelGate,
   executeModelGateAsync,
   executePersonalityGate,
@@ -29,7 +28,7 @@ import {
 } from '../gates/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NEW: CAPABILITY GATE IMPORTS
+// CAPABILITY GATE IMPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -41,7 +40,6 @@ import {
 
 import { 
   ProviderManager, 
-  NOVA_SYSTEM_PROMPT,
   type ProviderManagerConfig 
 } from '../providers/index.js';
 
@@ -168,7 +166,6 @@ class InMemoryRefinementStore implements IRefinementStore {
 
 export interface PipelineConfig extends ProviderManagerConfig {
   useMockProvider?: boolean;
-  systemPrompt?: string;
   enableSwordGate?: boolean;  // ← Option to enable/disable SwordGate
   
   // Full mode options (Phase 17)
@@ -179,8 +176,11 @@ export interface PipelineConfig extends ProviderManagerConfig {
   // Phase 18: Deliberate Practice Engine
   enableDeliberatePractice?: boolean;  // ← Enable Deliberate Practice Engine
   
-  // NEW: Capability Gate config
+  // Capability Gate config
   capabilitySelectorModel?: string;    // ← Model for capability selector (default: gpt-4o-mini)
+  
+  // Model Gate config
+  responseModel?: string;              // ← Model for final response generation (default: gpt-4o-mini)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -190,7 +190,6 @@ export interface PipelineConfig extends ProviderManagerConfig {
 export class ExecutionPipeline {
   private providerManager: ProviderManager | null = null;
   private useMock: boolean;
-  private systemPrompt: string;
   private enableSwordGate: boolean;
   
   // SwordGate components (lazy initialized)
@@ -212,7 +211,6 @@ export class ExecutionPipeline {
   private practiceEngine: IDeliberatePracticeEngine | null = null;
 
   constructor(config: PipelineConfig = {}) {
-    this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
     this.enableSwordGate = config.enableSwordGate ?? true;  // ← Enabled by default
     
     // Full mode config (Phase 17)
@@ -241,11 +239,12 @@ export class ExecutionPipeline {
         geminiApiKey: config.geminiApiKey,
         preferredProvider: config.preferredProvider,
         enableFallback: config.enableFallback ?? true,
+        responseModel: config.responseModel,  // ← Pass response model
       });
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // NEW: Initialize Capability Gate
+    // Initialize Capability Gate
     // ─────────────────────────────────────────────────────────────────────────────
     initializeCapabilityGate();
     
@@ -697,7 +696,7 @@ export class ExecutionPipeline {
     state.stance = state.gateResults.stance.output.stance;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STAGE 5: CAPABILITY (ASYNC - LLM Selector + Data Fetching) — NEW!
+    // STAGE 5: CAPABILITY (ASYNC - LLM Selector + Data Fetching)
     // ═══════════════════════════════════════════════════════════════════════════
     const shouldUseAsyncCapability = !this.useMock && !!process.env.OPENAI_API_KEY;
     
@@ -826,35 +825,18 @@ export class ExecutionPipeline {
       }
     }
 
-    // ─── STAGE 6-7: GENERATION LOOP ───
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STAGE 6-7: GENERATION LOOP
+    // Model Gate (The Stitcher) now handles:
+    //   - Personality (role, tone, personality)
+    //   - Context (intent, shield)
+    //   - Evidence (from Capability Gate)
+    // All via stitchPrompt() internally
+    // ═══════════════════════════════════════════════════════════════════════════
     let regenerationCount = 0;
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // NEW: Build augmented message with evidence from Capability Gate
-    // ═══════════════════════════════════════════════════════════════════════════
-    let augmentedMessage = state.userMessage;
-    
-    const capOutput = state.capabilities as CapabilityGateOutput | undefined;
-    if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
-      const evidenceBlock = capOutput.evidenceItems
-        .map(e => `[${e.type.toUpperCase()}]\n${e.formatted}`)
-        .join('\n\n');
-      
-      augmentedMessage = `${state.userMessage}
-
-───────────────────────────────────────
-LIVE DATA (fetched just now):
-───────────────────────────────────────
-${evidenceBlock}
-───────────────────────────────────────
-
-Use this data to answer the user's question. Cite specific values from the data above.`;
-      
-      console.log('[PIPELINE] Augmented message with evidence');
-    }
-
     while (regenerationCount <= MAX_REGENERATIONS) {
-      // ─── STAGE 6: MODEL ───
+      // ─── STAGE 6: MODEL (The Stitcher) ───
       if (this.useMock || !this.providerManager) {
         state.gateResults.model = executeModelGate(state, context);
       } else {
@@ -862,10 +844,9 @@ Use this data to answer the user's question. Cite specific values from the data 
           state,
           context,
           (prompt, systemPrompt, constraints) => 
-            this.providerManager!.generate(augmentedMessage, systemPrompt, constraints, {
+            this.providerManager!.generate(prompt, systemPrompt, constraints, {
               conversationHistory: context.conversationHistory ? [...context.conversationHistory] : undefined,
-            }),
-          this.systemPrompt
+            })
         );
       }
       state.generation = state.gateResults.model.output;

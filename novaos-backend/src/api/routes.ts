@@ -96,11 +96,13 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // Get Redis client for SparkEngine (if available)
   const redisClient = storeManager.getRedisClient();
   
-  // Create pipeline with Redis support
+  // Create pipeline with Redis support and configurable models
   const pipeline = new ExecutionPipeline({
     ...config,
     redis: redisClient ?? undefined,
     enableFullStepGenerator,
+    responseModel: process.env.RESPONSE_MODEL || 'gpt-4o-mini',
+    capabilitySelectorModel: process.env.CAPABILITY_SELECTOR_MODEL || 'gpt-4o-mini',
   });
 
   // Initialize full StepGenerator mode if enabled and Redis is available

@@ -77,11 +77,20 @@ export class OpenAIProvider implements ModelProvider {
     // Add current user message
     messages.push({ role: 'user', content: prompt });
 
+    // Determine token parameter based on model
+    // Newer models (o1, gpt-5.x) use max_completion_tokens
+    // Older models (gpt-4o, gpt-4-turbo, gpt-3.5) use max_tokens
+    const useNewTokenParam = this.model.startsWith('o1') || 
+                              this.model.startsWith('gpt-5') ||
+                              this.model.includes('o1-');
+
     const response = await this.client.chat.completions.create({
       model: this.model,
       messages,
-      max_tokens: 2048,
-      temperature: 0.7,
+      ...(useNewTokenParam 
+        ? { max_completion_tokens: 2048 }
+        : { max_tokens: 2048 }),
+      temperature: useNewTokenParam ? 1 : 0.7,  // o1/gpt-5 models require temperature=1
     });
 
     const text = response.choices[0]?.message?.content ?? '';
@@ -149,7 +158,7 @@ export class GeminiProvider implements ModelProvider {
   private client: GoogleGenerativeAI | null = null;
   private model: string;
 
-  constructor(apiKey?: string, model: string = 'gemini-1.5-flash') {
+  constructor(apiKey?: string, model: string = 'gemini-2.0-flash') {
     const key = apiKey ?? process.env.GEMINI_API_KEY;
     if (key) {
       this.client = new GoogleGenerativeAI(key);
@@ -316,6 +325,7 @@ export interface ProviderManagerConfig {
   geminiApiKey?: string;
   preferredProvider?: 'openai' | 'gemini' | 'mock';
   enableFallback?: boolean;
+  responseModel?: string;  // ← NEW: Model for response generation (default: gpt-4o-mini)
 }
 
 export class ProviderManager {
@@ -325,8 +335,11 @@ export class ProviderManager {
   constructor(config: ProviderManagerConfig = {}) {
     this.enableFallback = config.enableFallback ?? true;
 
+    // Use responseModel if specified, otherwise default
+    const openaiModel = config.responseModel ?? 'gpt-4o-mini';
+    
     // Initialize providers based on config and available keys
-    const openai = new OpenAIProvider(config.openaiApiKey);
+    const openai = new OpenAIProvider(config.openaiApiKey, openaiModel);
     const gemini = new GeminiProvider(config.geminiApiKey);
     const mock = new MockProvider();
 
@@ -344,7 +357,7 @@ export class ProviderManager {
     // Always add mock as final fallback
     this.providers.push(mock);
 
-    console.log(`[PROVIDERS] Initialized: ${this.providers.map(p => p.name).join(' → ')}`);
+    console.log(`[PROVIDERS] Initialized: ${this.providers.map(p => p.name).join(' → ')} (model: ${openaiModel})`);
   }
 
   async generate(
@@ -382,7 +395,7 @@ export class ProviderManager {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NOVA SYSTEM PROMPT
+// NOVA SYSTEM PROMPT (LEGACY - kept for backward compatibility)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export const NOVA_SYSTEM_PROMPT = `You are Nova, an AI assistant designed to be a Shield, Lens, and Sword for the user.
