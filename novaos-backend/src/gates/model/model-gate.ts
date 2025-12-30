@@ -259,7 +259,7 @@ export function executeModelGate(
 
   // Generate mock response based on intent
   const intentType = state.intent?.type ?? 'default';
-  const text = MOCK_RESPONSES[intentType] ?? MOCK_RESPONSES.default;
+  const text: string = MOCK_RESPONSES[intentType] ?? MOCK_RESPONSES.default ?? 'I understand. How can I help you?';
 
   console.log(`[MODEL] Response: ${text.length} chars, model: mock-v1`);
 
