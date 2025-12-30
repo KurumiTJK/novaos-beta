@@ -278,7 +278,6 @@ export class MockProvider implements ModelProvider {
     constraints?: GenerationConstraints,
     _options?: GenerateOptions
   ): Promise<Generation> {
-    // Generate contextual mock response
     let text = this.generateMockResponse(prompt);
 
     if (constraints?.mustPrepend) {
@@ -325,7 +324,7 @@ export interface ProviderManagerConfig {
   geminiApiKey?: string;
   preferredProvider?: 'openai' | 'gemini' | 'mock';
   enableFallback?: boolean;
-  responseModel?: string;  // ← NEW: Model for response generation (default: gpt-4o-mini)
+  responseModel?: string;  // Model for response generation (default: gpt-4o-mini)
 }
 
 export class ProviderManager {

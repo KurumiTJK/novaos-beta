@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXECUTION PIPELINE — Gate Orchestration
-// PATCHED: Integrated Capability Gate + Model Gate (The Stitcher)
+// PATCHED: Integrated new Capability Gate with LLM selector
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -20,6 +20,7 @@ import {
   executeLensGate,
   executeLensGateAsync,
   executeStanceGateAsync,
+  // REMOVED: executeCapabilityGate (old sync version)
   executeModelGate,
   executeModelGateAsync,
   executePersonalityGate,
@@ -28,7 +29,7 @@ import {
 } from '../gates/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY GATE IMPORTS
+// NEW: CAPABILITY GATE IMPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -176,11 +177,9 @@ export interface PipelineConfig extends ProviderManagerConfig {
   // Phase 18: Deliberate Practice Engine
   enableDeliberatePractice?: boolean;  // ← Enable Deliberate Practice Engine
   
-  // Capability Gate config
+  // Model configuration
+  responseModel?: string;              // ← Model for response generation (default: gpt-4o-mini)
   capabilitySelectorModel?: string;    // ← Model for capability selector (default: gpt-4o-mini)
-  
-  // Model Gate config
-  responseModel?: string;              // ← Model for final response generation (default: gpt-4o-mini)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -239,7 +238,7 @@ export class ExecutionPipeline {
         geminiApiKey: config.geminiApiKey,
         preferredProvider: config.preferredProvider,
         enableFallback: config.enableFallback ?? true,
-        responseModel: config.responseModel,  // ← Pass response model
+        responseModel: config.responseModel,  // ← Pass responseModel to provider
       });
     }
 
@@ -696,7 +695,7 @@ export class ExecutionPipeline {
     state.stance = state.gateResults.stance.output.stance;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STAGE 5: CAPABILITY (ASYNC - LLM Selector + Data Fetching)
+    // STAGE 5: CAPABILITY (ASYNC - LLM Selector + Data Fetching) — NEW!
     // ═══════════════════════════════════════════════════════════════════════════
     const shouldUseAsyncCapability = !this.useMock && !!process.env.OPENAI_API_KEY;
     

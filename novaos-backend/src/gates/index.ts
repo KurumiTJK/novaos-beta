@@ -25,7 +25,7 @@ import type {
 } from '../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LLM-POWERED INTENT GATE (NEW)
+// LLM-POWERED INTENT GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
@@ -35,7 +35,7 @@ export {
 } from './intent-gate.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LLM-POWERED LENS GATE (NEW) — Simple Data Router
+// LLM-POWERED LENS GATE — Simple Data Router
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
@@ -47,7 +47,7 @@ export {
 } from './lens/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LLM-POWERED STANCE GATE (NEW)
+// LLM-POWERED STANCE GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
@@ -57,7 +57,7 @@ export {
 } from './stance/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// MODEL GATE — The Stitcher (NEW)
+// MODEL GATE — The Stitcher
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
@@ -69,7 +69,7 @@ export {
   type ModelGateConfig,
   type Personality,
   type StitchedPrompt,
-} from './model-gate.js';
+} from './model/index.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // INTENT GATE (LEGACY - SYNC)
@@ -156,8 +156,6 @@ interface ShieldClassification {
 let openaiClient: OpenAI | null = null;
 
 function getOpenAIClient(): OpenAI | null {
-  // Always try to create client if API key exists and client is null
-  // This ensures the mock is used in tests even after module initialization
   if (!openaiClient && process.env.OPENAI_API_KEY) {
     openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
@@ -166,7 +164,6 @@ function getOpenAIClient(): OpenAI | null {
 
 /**
  * Reset the OpenAI client singleton (for testing).
- * Call this in test setup/teardown to ensure fresh client creation.
  */
 export function resetOpenAIClient(): void {
   openaiClient = null;
@@ -342,7 +339,6 @@ function parseClassification(content: string): ShieldClassification {
       reasoning: String(parsed.reasoning || 'No reasoning provided'),
     };
     
-    // Enforce consistency
     return validateClassification(classification);
   } catch {
     console.warn('[SHIELD] Failed to parse classification:', content);
@@ -386,9 +382,9 @@ function validateClassification(c: ShieldClassification): ShieldClassification {
 function getCrisisMessage(): string {
   return `I'm concerned about what you've shared. Please know that help is available:
 
-• **988 Suicide & Crisis Lifeline**: Call or text 988 (US)
-• **Crisis Text Line**: Text HOME to 741741
-• **SAMHSA National Helpline**: 1-800-662-4357
+• 988 Suicide & Crisis Lifeline: Call or text 988 (US)
+• Crisis Text Line: Text HOME to 741741
+• SAMHSA National Helpline: 1-800-662-4357
 
 You don't have to face this alone. Would you like to talk about what's going on?`;
 }
@@ -406,7 +402,6 @@ export async function executeShieldGate(
   const text = state.normalizedInput;
 
   try {
-    // LLM classification
     const classification = await classifyWithLLM(text);
     
     console.log(`[SHIELD] Classification: ${classification.category} / ${classification.riskLevel} (${classification.confidence.toFixed(2)}) - ${classification.reasoning}`);
@@ -478,7 +473,6 @@ export async function executeShieldGate(
 
   } catch (error) {
     console.error('[SHIELD] Error in shield gate:', error);
-    // Fail open - allow request through if classification fails
     return {
       gateId: 'shield',
       status: 'pass',
@@ -507,7 +501,6 @@ export function executeCapabilityGate(
   const start = Date.now();
   const stance = state.stance ?? 'lens';
 
-  // Define capabilities by stance
   const capabilities: Record<Stance, readonly string[]> = {
     control: ['provide_support', 'suggest_resources'],
     shield: ['provide_info', 'suggest_alternatives'],
@@ -515,22 +508,18 @@ export function executeCapabilityGate(
     sword: ['provide_info', 'recommend', 'plan', 'execute_action'],
   };
 
-  // Check action sources from context
   const actionSources = context.actionSources ?? [];
   let explicitActions: readonly ActionSource[] | undefined;
   const deniedCapabilities: string[] = [];
 
   if (actionSources.length > 0) {
-    // Filter to only valid action sources
     const validActions = actionSources.filter(a => VALID_ACTION_SOURCES.includes(a.type));
     
-    // Check for nl_inference attempts
     const hasNlInference = actionSources.some(a => a.type === 'nl_inference');
     if (hasNlInference) {
       deniedCapabilities.push('nl_inference_blocked');
     }
 
-    // Only set explicitActions if there are valid ones
     if (validActions.length > 0) {
       explicitActions = validActions;
     }
@@ -560,17 +549,14 @@ export function buildModelConstraints(state: PipelineState): GenerationConstrain
     tone: state.stance === 'control' ? 'compassionate' : 'professional',
   };
 
-  // If lens says we need external data but we don't have it, restrict numeric claims
   const lensResult = state.lensResult as any;
   if (lensResult?.needsExternalData && lensResult?.dataType === 'realtime') {
-    // Capability gate should have fetched data - if not, restrict
     if (!state.capabilities?.explicitActions?.length) {
       constraints.numericPrecisionAllowed = false;
       constraints.mustInclude = ['Note: I cannot verify current real-time data'];
     }
   }
 
-  // Add crisis resources if control mode
   if (state.shieldResult?.controlMode) {
     constraints.mustPrepend = getCrisisMessage();
   }
@@ -606,7 +592,6 @@ export function executePersonalityGate(
   const violations: Array<{ type: string; phrase: string; severity: 'low' | 'medium' | 'high'; canSurgicalEdit: boolean }> = [];
   let processedText = text;
 
-  // Check banned phrases
   for (const pattern of BANNED_PHRASES) {
     if (pattern.test(processedText)) {
       violations.push({
@@ -618,7 +603,6 @@ export function executePersonalityGate(
     }
   }
 
-  // Check sycophantic patterns (can be surgically edited)
   for (const pattern of SYCOPHANTIC_PATTERNS) {
     const match = processedText.match(pattern);
     if (match) {
@@ -628,12 +612,10 @@ export function executePersonalityGate(
         severity: 'medium',
         canSurgicalEdit: true,
       });
-      // Surgical edit
       processedText = processedText.replace(pattern, '').trim();
     }
   }
 
-  // Check "we" count
   const weCount = (processedText.match(/\bwe\b/gi) ?? []).length;
   if (weCount > 2) {
     violations.push({
@@ -644,7 +626,6 @@ export function executePersonalityGate(
     });
   }
 
-  // Determine if regeneration needed
   const highSeverity = violations.filter((v) => v.severity === 'high');
   if (highSeverity.length > 0) {
     return {
@@ -707,7 +688,6 @@ export function executeSparkGate(
 ): GateResult<SparkResult> {
   const start = Date.now();
 
-  // Spark only in SWORD stance
   if (state.stance !== 'sword') {
     return {
       gateId: 'spark',
@@ -721,7 +701,6 @@ export function executeSparkGate(
     };
   }
 
-  // No spark if shield intervened
   if (state.shieldResult?.vetoType) {
     return {
       gateId: 'spark',
@@ -735,7 +714,6 @@ export function executeSparkGate(
     };
   }
 
-  // Generate spark based on content
   const text = state.normalizedInput.toLowerCase();
   let template: { action: string; rationale: string } = SPARK_TEMPLATES.default;
 

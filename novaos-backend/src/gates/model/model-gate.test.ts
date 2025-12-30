@@ -4,13 +4,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  stitchPrompt,
   executeModelGate,
   executeModelGateAsync,
+  stitchPrompt,
   DEFAULT_PERSONALITY,
 } from './model-gate.js';
-
-import type { PipelineState, PipelineContext } from '../types/index.js';
+import type { PipelineState, PipelineContext } from '../../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TEST HELPERS
@@ -18,63 +17,71 @@ import type { PipelineState, PipelineContext } from '../types/index.js';
 
 function createMockState(overrides: Partial<PipelineState> = {}): PipelineState {
   return {
-    userMessage: 'What is AAPL trading at?',
-    normalizedInput: 'What is AAPL trading at?',
-    gateResults: {},
-    flags: {},
-    timestamps: { pipelineStart: Date.now() },
+    userMessage: 'What is the price of NVDA?',
+    normalizedInput: 'what is the price of nvda',
     intent: {
       type: 'question',
-      domain: 'finance',
-      confidence: 0.95,
+      complexity: 'low',
+      isHypothetical: false,
+      domains: ['finance'],
+      confidence: 0.9,
     },
     shieldResult: {
+      safe: true,
       riskLevel: 'safe',
     },
     stance: 'lens',
     ...overrides,
-  };
+  } as PipelineState;
 }
 
 function createMockContext(): PipelineContext {
   return {
-    requestId: 'test-123',
-    userId: 'user-456',
-  };
+    conversationId: 'test-conv',
+    userId: 'test-user',
+  } as PipelineContext;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STITCH PROMPT TESTS
+// STITCHPROMPT TESTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('stitchPrompt', () => {
-  it('should build system prompt with personality', () => {
+  it('should include personality in system prompt', () => {
     const state = createMockState();
     const { system } = stitchPrompt(state);
 
-    expect(system).toContain('Given the following personality:');
-    expect(system).toContain('ROLE: Nova, personal assistant');
-    expect(system).toContain('TONE: Allow light conversational softeners');
-    expect(system).toContain('PERSONALITY: Be concise and direct');
+    expect(system).toContain('ROLE:');
+    expect(system).toContain('TONE:');
+    expect(system).toContain('PERSONALITY:');
+    expect(system).toContain(DEFAULT_PERSONALITY.role);
   });
 
-  it('should build user prompt with message', () => {
-    const state = createMockState();
+  it('should include user message in user prompt', () => {
+    const state = createMockState({ userMessage: 'Hello there!' });
     const { user } = stitchPrompt(state);
 
-    expect(user).toContain('What is AAPL trading at?');
+    expect(user).toContain('Hello there!');
   });
 
-  it('should include context block with intent and shield', () => {
-    const state = createMockState();
+  it('should include context hints when intent is present', () => {
+    const state = createMockState({
+      intent: {
+        type: 'question',
+        complexity: 'low',
+        isHypothetical: false,
+        domains: ['finance'],
+        confidence: 0.9,
+      },
+    });
+
     const { user } = stitchPrompt(state);
 
     expect(user).toContain('CONTEXT:');
     expect(user).toContain('Intent: question / finance');
-    expect(user).toContain('Shield: safe');
   });
 
-  it('should include evidence block when capabilities have evidence', () => {
+  it('should include evidence when capabilities returned data', () => {
     const state = createMockState({
       capabilities: {
         route: 'lens',
@@ -82,8 +89,8 @@ describe('stitchPrompt', () => {
         evidenceItems: [
           {
             type: 'stock',
-            formatted: 'AAPL (NASDAQ)\nPrice: $150.25 USD\nChange: +$2.15 (+1.45%)',
-            source: 'stock_fetcher',
+            formatted: 'NVDA (NASDAQ)\nPrice: $450.00\nChange: +2.5%',
+            source: 'finnhub',
             fetchedAt: Date.now(),
           },
         ],
@@ -94,9 +101,8 @@ describe('stitchPrompt', () => {
 
     expect(user).toContain('EVIDENCE:');
     expect(user).toContain('[STOCK]');
-    expect(user).toContain('AAPL (NASDAQ)');
-    expect(user).toContain('$150.25');
-    expect(user).toContain('Use this data in your response.');
+    expect(user).toContain('NVDA');
+    expect(user).toContain('Use this data in your response');
   });
 
   it('should omit evidence block when no evidence', () => {
@@ -130,91 +136,139 @@ describe('stitchPrompt', () => {
     expect(user).toContain('offer alternatives');
   });
 
-  it('should allow custom personality override', () => {
-    const state = createMockState();
-    const { system } = stitchPrompt(state, {
-      personality: {
-        role: 'Custom Assistant',
-        tone: 'Be very formal.',
-        personality: 'Always use proper grammar.',
+  it('should add control mode instructions when shield is in control mode', () => {
+    const state = createMockState({
+      shieldResult: {
+        safe: false,
+        riskLevel: 'critical',
+        controlMode: true,
       },
     });
 
-    expect(system).toContain('ROLE: Custom Assistant');
-    expect(system).toContain('TONE: Be very formal.');
-    expect(system).toContain('PERSONALITY: Always use proper grammar.');
+    const { system } = stitchPrompt(state);
+
+    expect(system).toContain('CRITICAL');
+    expect(system).toContain('crisis');
+  });
+
+  it('should include risk hint when shield detected risk', () => {
+    const state = createMockState({
+      shieldResult: {
+        safe: false,
+        riskLevel: 'medium',
+      },
+    });
+
+    const { user } = stitchPrompt(state);
+
+    expect(user).toContain('Risk: medium');
+  });
+
+  it('should allow custom personality override', () => {
+    const state = createMockState();
+    const customPersonality = {
+      role: 'Custom Bot',
+      tone: 'Very formal',
+      personality: 'Always serious',
+    };
+
+    const { system } = stitchPrompt(state, { personality: customPersonality });
+
+    expect(system).toContain('Custom Bot');
+    expect(system).toContain('Very formal');
+    expect(system).toContain('Always serious');
+    expect(system).not.toContain(DEFAULT_PERSONALITY.role);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// EXECUTE MODEL GATE (SYNC) TESTS
+// SYNC GATE TESTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('executeModelGate (sync/mock)', () => {
-  it('should return mock response based on stance', () => {
-    const state = createMockState({ stance: 'lens' });
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  it('should return a mock response', () => {
+    const state = createMockState();
     const context = createMockContext();
 
     const result = executeModelGate(state, context);
 
+    expect(result.gateId).toBe('model');
     expect(result.status).toBe('pass');
-    expect(result.output.text).toContain("Here's what I understand");
-    expect(result.output.model).toBe('mock');
+    expect(result.output.text).toBeTruthy();
+    expect(result.output.model).toBe('mock-v1');
   });
 
-  it('should return control response for control stance', () => {
-    const state = createMockState({ stance: 'control' });
+  it('should return question response for question intent', () => {
+    const state = createMockState({
+      intent: { type: 'question', complexity: 'low', isHypothetical: false, domains: [], confidence: 0.9 },
+    });
     const context = createMockContext();
 
     const result = executeModelGate(state, context);
 
-    expect(result.output.text).toContain('difficult time');
+    expect(result.output.text).toContain('information');
   });
 
-  it('should return sword response for sword stance', () => {
-    const state = createMockState({ stance: 'sword' });
+  it('should return greeting response for greeting intent', () => {
+    const state = createMockState({
+      intent: { type: 'greeting', complexity: 'low', isHypothetical: false, domains: [], confidence: 0.9 },
+    });
     const context = createMockContext();
 
     const result = executeModelGate(state, context);
 
-    expect(result.output.text).toContain('next step');
+    expect(result.output.text).toContain('Hello');
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// EXECUTE MODEL GATE (ASYNC) TESTS
+// ASYNC GATE TESTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('executeModelGateAsync', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
   it('should call generateFn with stitched prompt', async () => {
     const state = createMockState();
     const context = createMockContext();
-
-    const mockGenerateFn = vi.fn().mockResolvedValue({
-      text: 'AAPL is currently at $150.25, up 1.45% today.',
-      model: 'gpt-4o',
-      tokensUsed: 50,
+    const mockGenerate = vi.fn().mockResolvedValue({
+      text: 'NVDA is trading at $450',
+      model: 'gpt-4o-mini',
+      tokensUsed: 10,
     });
 
-    const result = await executeModelGateAsync(state, context, mockGenerateFn);
+    const result = await executeModelGateAsync(state, context, mockGenerate);
 
-    expect(mockGenerateFn).toHaveBeenCalledTimes(1);
-    
-    // Check user prompt (first arg)
-    const userPrompt = mockGenerateFn.mock.calls[0][0];
-    expect(userPrompt).toContain('What is AAPL trading at?');
-    expect(userPrompt).toContain('CONTEXT:');
-
-    // Check system prompt (second arg)
-    const systemPrompt = mockGenerateFn.mock.calls[0][1];
-    expect(systemPrompt).toContain('ROLE: Nova, personal assistant');
-
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.stringContaining('What is the price of NVDA'),
+      expect.stringContaining('ROLE:'),
+    );
     expect(result.status).toBe('pass');
-    expect(result.output.text).toBe('AAPL is currently at $150.25, up 1.45% today.');
-    expect(result.output.model).toBe('gpt-4o');
+    expect(result.output.text).toBe('NVDA is trading at $450');
+    expect(result.output.model).toBe('gpt-4o-mini');
   });
 
-  it('should include evidence in user prompt', async () => {
+  it('should fall back to mock on error', async () => {
+    const state = createMockState();
+    const context = createMockContext();
+    const mockGenerate = vi.fn().mockRejectedValue(new Error('API error'));
+
+    const result = await executeModelGateAsync(state, context, mockGenerate);
+
+    expect(result.status).toBe('pass');
+    expect(result.output.model).toBe('mock-v1');
+    expect(result.output.fallbackUsed).toBe(true);
+  });
+
+  it('should include evidence in prompt when available', async () => {
     const state = createMockState({
       capabilities: {
         route: 'lens',
@@ -222,52 +276,52 @@ describe('executeModelGateAsync', () => {
         evidenceItems: [
           {
             type: 'stock',
-            formatted: 'AAPL: $150.25',
-            source: 'stock_fetcher',
+            formatted: 'NVDA: $450.00',
+            source: 'finnhub',
             fetchedAt: Date.now(),
           },
         ],
       } as any,
     });
     const context = createMockContext();
-
-    const mockGenerateFn = vi.fn().mockResolvedValue({
-      text: 'Response with evidence',
-      model: 'gpt-4o',
-      tokensUsed: 30,
+    const mockGenerate = vi.fn().mockResolvedValue({
+      text: 'Response',
+      model: 'gpt-4o-mini',
+      tokensUsed: 5,
     });
 
-    await executeModelGateAsync(state, context, mockGenerateFn);
+    await executeModelGateAsync(state, context, mockGenerate);
 
-    const userPrompt = mockGenerateFn.mock.calls[0][0];
-    expect(userPrompt).toContain('EVIDENCE:');
-    expect(userPrompt).toContain('AAPL: $150.25');
-  });
-
-  it('should handle errors gracefully', async () => {
-    const state = createMockState();
-    const context = createMockContext();
-
-    const mockGenerateFn = vi.fn().mockRejectedValue(new Error('API Error'));
-
-    const result = await executeModelGateAsync(state, context, mockGenerateFn);
-
-    expect(result.status).toBe('soft_fail');
-    expect(result.output.fallbackUsed).toBe(true);
-    expect(result.output.text).toContain('technical difficulties');
-    expect(result.failureReason).toBe('API Error');
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.stringContaining('EVIDENCE:'),
+      expect.any(String),
+    );
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.stringContaining('NVDA: $450.00'),
+      expect.any(String),
+    );
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DEFAULT PERSONALITY TESTS
+// PERSONALITY TESTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 describe('DEFAULT_PERSONALITY', () => {
-  it('should have required fields', () => {
-    expect(DEFAULT_PERSONALITY.role).toBe('Nova, personal assistant');
-    expect(DEFAULT_PERSONALITY.tone).toContain('conversational softeners');
+  it('should have role, tone, and personality', () => {
+    expect(DEFAULT_PERSONALITY.role).toBeTruthy();
+    expect(DEFAULT_PERSONALITY.tone).toBeTruthy();
+    expect(DEFAULT_PERSONALITY.personality).toBeTruthy();
+  });
+
+  it('should include no-markdown instruction in tone', () => {
+    expect(DEFAULT_PERSONALITY.tone).toContain('Never use markdown');
+    expect(DEFAULT_PERSONALITY.tone).toContain('plain text');
+  });
+
+  it('should include key personality traits', () => {
     expect(DEFAULT_PERSONALITY.personality).toContain('concise');
-    expect(DEFAULT_PERSONALITY.personality).toContain('Never fabricate');
+    expect(DEFAULT_PERSONALITY.personality).toContain('fabricate');
+    expect(DEFAULT_PERSONALITY.personality).toContain('autonomy');
   });
 });
