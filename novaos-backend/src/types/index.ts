@@ -8,7 +8,7 @@ export * from './data-need.js';
 export * from './constraints.js';
 export * from './entities.js';
 export * from './provider-results.js';
-export * from './lens.js';
+// NOTE: LensResult now defined in this file (was './lens.js')
 export * from './search.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -142,28 +142,16 @@ export interface ShieldResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LENS RESULT (legacy format)
+// LENS RESULT (NEW — Simple LLM Data Router)
 // ─────────────────────────────────────────────────────────────────────────────────
 
+export type DataType = 'realtime' | 'web_search' | 'none';
+
 export interface LensResult {
-  readonly verified?: boolean;
-  readonly needsVerification?: boolean;
-  readonly domain?: Domain | string;
-  readonly freshness?: 'current' | 'recent' | 'stale' | 'unknown' | 'fresh';
-  readonly freshnessWindow?: string;
-  readonly confidence?: number;
-  readonly sources?: readonly string[];
-  readonly message?: string;
-  readonly status?: 'verified' | 'degraded' | 'blocked';
-  readonly stakes?: 'low' | 'medium' | 'high';
-  readonly evidencePack?: {
-    readonly items: readonly {
-      readonly title?: string;
-      readonly url?: string;
-      readonly excerpt?: string;
-      readonly snippet?: string;
-    }[];
-  };
+  readonly needsExternalData: boolean;
+  readonly dataType: DataType;
+  readonly reason: string;
+  readonly confidence: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

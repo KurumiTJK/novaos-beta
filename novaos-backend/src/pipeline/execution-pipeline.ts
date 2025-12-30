@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXECUTION PIPELINE — Gate Orchestration
+// PATCHED: Integrated new Capability Gate with LLM selector
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -19,13 +20,24 @@ import {
   executeLensGate,
   executeLensGateAsync,
   executeStanceGateAsync,
-  executeCapabilityGate,
+  // REMOVED: executeCapabilityGate (old sync version)
   executeModelGate,
   executeModelGateAsync,
   executePersonalityGate,
   executeSparkGate,
   buildModelConstraints,
 } from '../gates/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// NEW: CAPABILITY GATE IMPORTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import {
+  executeCapabilityGateAsync,
+  initializeCapabilityGate,
+  setSelectorConfig,
+  type CapabilityGateOutput,
+} from '../gates/capability/index.js';
 
 import { 
   ProviderManager, 
@@ -157,8 +169,7 @@ class InMemoryRefinementStore implements IRefinementStore {
 export interface PipelineConfig extends ProviderManagerConfig {
   useMockProvider?: boolean;
   systemPrompt?: string;
-  enableLensSearch?: boolean;
-  enableSwordGate?: boolean;  // ← NEW: Option to enable/disable SwordGate
+  enableSwordGate?: boolean;  // ← Option to enable/disable SwordGate
   
   // Full mode options (Phase 17)
   enableFullStepGenerator?: boolean;  // ← Enable LLM-based curriculum generation
@@ -167,6 +178,9 @@ export interface PipelineConfig extends ProviderManagerConfig {
   
   // Phase 18: Deliberate Practice Engine
   enableDeliberatePractice?: boolean;  // ← Enable Deliberate Practice Engine
+  
+  // NEW: Capability Gate config
+  capabilitySelectorModel?: string;    // ← Model for capability selector (default: gpt-4o-mini)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -177,7 +191,6 @@ export class ExecutionPipeline {
   private providerManager: ProviderManager | null = null;
   private useMock: boolean;
   private systemPrompt: string;
-  private enableLensSearch: boolean;
   private enableSwordGate: boolean;
   
   // SwordGate components (lazy initialized)
@@ -200,7 +213,6 @@ export class ExecutionPipeline {
 
   constructor(config: PipelineConfig = {}) {
     this.systemPrompt = config.systemPrompt ?? NOVA_SYSTEM_PROMPT;
-    this.enableLensSearch = config.enableLensSearch ?? true;
     this.enableSwordGate = config.enableSwordGate ?? true;  // ← Enabled by default
     
     // Full mode config (Phase 17)
@@ -230,6 +242,16 @@ export class ExecutionPipeline {
         preferredProvider: config.preferredProvider,
         enableFallback: config.enableFallback ?? true,
       });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // NEW: Initialize Capability Gate
+    // ─────────────────────────────────────────────────────────────────────────────
+    initializeCapabilityGate();
+    
+    // Configure selector model if specified
+    if (config.capabilitySelectorModel) {
+      setSelectorConfig({ model: config.capabilitySelectorModel });
     }
   }
   
@@ -646,18 +668,14 @@ export class ExecutionPipeline {
       }
     }
 
-    // ─── STAGE 3: LENS (ASYNC - LLM POWERED WITH TIERED VERIFICATION) ───
+    // ─── STAGE 3: LENS (ASYNC - LLM DATA ROUTER) ───
     const shouldUseAsyncLens = !this.useMock && 
                                this.providerManager !== null &&
-                               !!process.env.OPENAI_API_KEY && 
-                               this.enableLensSearch !== false;
+                               !!process.env.OPENAI_API_KEY;
     
     if (shouldUseAsyncLens) {
       try {
-        state.gateResults.lens = await executeLensGateAsync(state, context, {
-          enableSearch: this.enableLensSearch,
-          userTimezone: context.timezone,
-        });
+        state.gateResults.lens = await executeLensGateAsync(state, context);
         state.lensResult = state.gateResults.lens.output;
       } catch (lensError) {
         console.error('[PIPELINE] Lens gate error, falling back to sync:', lensError);
@@ -678,9 +696,52 @@ export class ExecutionPipeline {
     state.gateResults.stance = await executeStanceGateAsync(state, context, hasActiveSwordSession);
     state.stance = state.gateResults.stance.output.stance;
 
-    // ─── STAGE 5: CAPABILITY ───
-    state.gateResults.capability = executeCapabilityGate(state, context);
-    state.capabilities = state.gateResults.capability.output;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STAGE 5: CAPABILITY (ASYNC - LLM Selector + Data Fetching) — NEW!
+    // ═══════════════════════════════════════════════════════════════════════════
+    const shouldUseAsyncCapability = !this.useMock && !!process.env.OPENAI_API_KEY;
+    
+    if (shouldUseAsyncCapability) {
+      try {
+        state.gateResults.capability = await executeCapabilityGateAsync(state, context);
+        state.capabilities = state.gateResults.capability.output;
+        
+        const capOutput = state.capabilities as CapabilityGateOutput;
+        console.log(`[CAPABILITY] Route: ${capOutput.route}, Used: ${capOutput.capabilitiesUsed.join(', ') || 'none'}`);
+        
+        if (capOutput.evidenceItems.length > 0) {
+          console.log(`[CAPABILITY] Evidence items: ${capOutput.evidenceItems.length}`);
+        }
+      } catch (capError) {
+        console.error('[PIPELINE] Capability gate error:', capError);
+        // Fallback: empty capability result
+        state.gateResults.capability = {
+          gateId: 'capability',
+          status: 'soft_fail',
+          action: 'continue',
+          output: {
+            route: 'lens',
+            capabilitiesUsed: [],
+            evidenceItems: [],
+          },
+          failureReason: 'Capability gate error',
+        };
+        state.capabilities = state.gateResults.capability.output;
+      }
+    } else {
+      // Mock mode: skip capability selection
+      state.gateResults.capability = {
+        gateId: 'capability',
+        status: 'pass',
+        action: 'continue',
+        output: {
+          route: state.stance === 'sword' ? 'sword' : 'lens',
+          capabilitiesUsed: [],
+          evidenceItems: [],
+        },
+      };
+      state.capabilities = state.gateResults.capability.output;
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STAGE 5.5: SWORDGATE — Route based on stance decision
@@ -768,171 +829,28 @@ export class ExecutionPipeline {
     // ─── STAGE 6-7: GENERATION LOOP ───
     let regenerationCount = 0;
 
-    // ─── INJECT LENS EVIDENCE INTO PROMPT ───
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NEW: Build augmented message with evidence from Capability Gate
+    // ═══════════════════════════════════════════════════════════════════════════
     let augmentedMessage = state.userMessage;
-    const lensResult = state.lensResult as any;
     
-    let evidenceContext = '';
-    let errorContext = '';
-    
-    // Structure 1: Direct fetchResults from orchestrator
-    if (lensResult?.fetchResults?.length > 0) {
-      const successfulFetches = lensResult.fetchResults.filter((f: any) => f.result?.ok);
-      const failedFetches = lensResult.fetchResults.filter((f: any) => f.result && !f.result.ok);
+    const capOutput = state.capabilities as CapabilityGateOutput | undefined;
+    if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
+      const evidenceBlock = capOutput.evidenceItems
+        .map(e => `[${e.type.toUpperCase()}]\n${e.formatted}`)
+        .join('\n\n');
       
-      if (successfulFetches.length > 0) {
-        const evidenceLines = successfulFetches.map((fetch: any) => {
-          const data = fetch.result.data;
-          if (!data) return null;
-          
-          if (data.type === 'stock') {
-            const price = data.price ?? 0;
-            const change = data.change ?? 0;
-            const changePercent = data.changePercent ?? 0;
-            const dayLow = data.dayLow ?? 0;
-            const dayHigh = data.dayHigh ?? 0;
-            const prevClose = data.previousClose ?? 0;
-            return `LIVE STOCK DATA for ${data.symbol}:\n` +
-                   `• Current Price: $${price.toFixed(2)} ${data.currency || 'USD'}\n` +
-                   `• Change: ${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)\n` +
-                   `• Day Range: $${dayLow.toFixed(2)} - $${dayHigh.toFixed(2)}\n` +
-                   `• Previous Close: $${prevClose.toFixed(2)}\n` +
-                   `• Exchange: ${data.exchange || 'Unknown'}\n` +
-                   `• Data Source: ${fetch.result.provider} (fetched just now)`;
-          } else if (data.type === 'weather') {
-            const tempF = data.temperatureFahrenheit ?? data.temperature ?? 0;
-            const tempC = data.temperatureCelsius ?? 0;
-            const feelsLikeF = data.feelsLikeFahrenheit ?? 0;
-            const condition = data.condition ?? data.conditions ?? 'Unknown';
-            const humidity = data.humidity ?? 0;
-            const windMph = data.windSpeedMph ?? 0;
-            const windDir = data.windDirection ?? '';
-            return `LIVE WEATHER DATA for ${data.location}:\n` +
-                   `• Temperature: ${tempF}°F (${tempC}°C)\n` +
-                   `• Feels Like: ${feelsLikeF}°F\n` +
-                   `• Conditions: ${condition}\n` +
-                   `• Humidity: ${humidity}%\n` +
-                   `• Wind: ${windMph} mph ${windDir}\n` +
-                   `• Data Source: ${fetch.result.provider}`;
-          } else if (data.type === 'crypto') {
-            const price = data.priceUsd ?? data.price ?? 0;
-            const change = data.change24h ?? data.changePercent24h ?? 0;
-            const marketCap = data.marketCapUsd ?? data.marketCap ?? 0;
-            return `LIVE CRYPTO DATA for ${data.symbol} (${data.name || data.symbol}):\n` +
-                   `• Current Price: $${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n` +
-                   `• 24h Change: ${change >= 0 ? '+' : ''}${change.toFixed(2)}%\n` +
-                   `• Market Cap: $${(marketCap / 1e9).toFixed(2)}B\n` +
-                   `• Data Source: ${fetch.result.provider}`;
-          } else if (data.type === 'fx') {
-            const fromCurrency = data.baseCurrency ?? data.from ?? '???';
-            const toCurrency = data.quoteCurrency ?? data.to ?? '???';
-            const rate = data.rate ?? 0;
-            return `LIVE EXCHANGE RATE:\n` +
-                   `• ${fromCurrency}/${toCurrency}: ${rate.toFixed(4)}\n` +
-                   `• 1 ${fromCurrency} = ${rate.toFixed(4)} ${toCurrency}\n` +
-                   `• Data Source: ${fetch.result.provider}`;
-          } else if (data.type === 'time') {
-            const timezone = data.timezone ?? data.location ?? 'Unknown';
-            const localTime = data.localTime ?? data.time ?? data.formatted ?? 'Unknown';
-            const abbr = data.abbreviation ?? '';
-            
-            let formattedTime = localTime;
-            let datePart = '';
-            try {
-              const parts = localTime.split(' ');
-              datePart = parts[0] || '';
-              const timePart = parts[1] || localTime;
-              const [hours, minutes] = timePart.split(':').map(Number);
-              const period = hours >= 12 ? 'PM' : 'AM';
-              const hour12 = hours % 12 || 12;
-              formattedTime = `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
-            } catch {
-              // Keep original if parsing fails
-            }
-            
-            const isLocalTime = timezone === 'America/Los_Angeles' || abbr === 'PST' || abbr === 'PDT';
-            const locationName = timezone.split('/')[1]?.replace('_', ' ') || timezone;
-            
-            if (isLocalTime) {
-              return `===== ANSWER THIS QUESTION ONLY =====\n` +
-                     `The user asked for the CURRENT TIME (their local time).\n` +
-                     `ANSWER: The current time is ${formattedTime}.\n` +
-                     `DO NOT mention any other timezone from earlier in the conversation.\n` +
-                     `DO NOT calculate or convert times. Just state the current local time.\n` +
-                     `===================================`;
-            } else {
-              return `===== ANSWER THIS QUESTION ONLY =====\n` +
-                     `The user asked for the time in ${locationName}.\n` +
-                     `ANSWER: The current time in ${locationName} is ${formattedTime}.\n` +
-                     `DO NOT reference any other timezones or previous questions.\n` +
-                     `===================================`;
-            }
-          }
-          
-          return `LIVE DATA:\n${JSON.stringify(data, null, 2)}`;
-        }).filter(Boolean);
-        
-        if (evidenceLines.length > 0) {
-          evidenceContext = evidenceLines.join('\n\n');
-        }
-      }
+      augmentedMessage = `${state.userMessage}
+
+───────────────────────────────────────
+LIVE DATA (fetched just now):
+───────────────────────────────────────
+${evidenceBlock}
+───────────────────────────────────────
+
+Use this data to answer the user's question. Cite specific values from the data above.`;
       
-      if (failedFetches.length > 0) {
-        const errorMessages = failedFetches
-          .filter((f: any) => f.result?.error?.message)
-          .map((f: any) => f.result.error.message);
-        
-        if (errorMessages.length > 0) {
-          errorContext = errorMessages.join('\n');
-        }
-      }
-    }
-    
-    // Structure 2: evidencePack.items (legacy format)
-    else if (lensResult?.evidencePack?.items?.length > 0) {
-      const evidenceItems = lensResult.evidencePack.items;
-      const evidenceLines = evidenceItems
-        .slice(0, 5)
-        .map((item: any, i: number) => {
-          const content = item.excerpt || item.snippet || '';
-          if (!content || content.length < 10) return null;
-          return `[Source ${i + 1}: ${item.title || item.url}]\n${content}`;
-        })
-        .filter(Boolean);
-      
-      if (evidenceLines.length > 0) {
-        evidenceContext = evidenceLines.join('\n\n');
-      }
-    }
-    
-    // Structure 3: evidence.formattedContext (alternative format)
-    else if (lensResult?.evidence?.formattedContext) {
-      evidenceContext = lensResult.evidence.formattedContext;
-    }
-    
-    // Inject evidence into the prompt if we have any
-    if (evidenceContext) {
-      augmentedMessage = `IMPORTANT INSTRUCTION: You have access to LIVE, REAL-TIME data that was just retrieved. You MUST use this data to answer the user's question. Do NOT say you cannot provide real-time information - the verified data is provided below.
-
-===== VERIFIED LIVE DATA =====
-${evidenceContext}
-===== END LIVE DATA =====
-
-USER QUESTION: ${state.userMessage}
-
-Remember: Use the live data above to give a specific, accurate answer. Include the actual numbers from the data.`;
-    }
-    // If no evidence but we have error context (like typo suggestions), inject that
-    else if (errorContext) {
-      augmentedMessage = `IMPORTANT: The data lookup encountered an issue. Please relay this message to the user:
-
-===== DATA LOOKUP ERROR =====
-${errorContext}
-===== END ERROR =====
-
-USER QUESTION: ${state.userMessage}
-
-Relay the error message above to help the user. If there's a suggestion (like "Did you mean..."), include that in your response.`;
+      console.log('[PIPELINE] Augmented message with evidence');
     }
 
     while (regenerationCount <= MAX_REGENERATIONS) {
@@ -979,24 +897,6 @@ Relay the error message above to help the user. If there's a suggestion (like "D
 
     // ─── BUILD FINAL RESPONSE ───
     const finalText = state.validatedOutput?.text ?? state.generation?.text ?? '';
-
-    // Check degradation
-    if (state.lensResult?.status === 'degraded') {
-      return {
-        status: 'degraded',
-        response: finalText,
-        stance: state.stance,
-        gateResults: state.gateResults,
-        spark: state.spark,
-        metadata: {
-          requestId: context.requestId,
-          totalTimeMs: Date.now() - pipelineStart,
-          regenerations: regenerationCount,
-          degradationReason: state.lensResult.message 
-            ?? `Unverified ${state.lensResult.domain ?? 'information'}`,
-        },
-      };
-    }
 
     return {
       status: 'success',

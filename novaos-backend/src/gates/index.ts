@@ -12,7 +12,6 @@ import type {
   IntentType,
   Domain,
   ShieldResult,
-  LensResult,
   CapabilityResult,
   Generation,
   ValidatedOutput,
@@ -36,23 +35,15 @@ export {
 } from './intent-gate.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LLM-POWERED LENS GATE (NEW) — Tiered Verification System
+// LLM-POWERED LENS GATE (NEW) — Simple Data Router
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
   executeLensGateAsync,
-  type LensGateConfig,
-  type TieredLensResult,
-  type LensClassification,
-  type SearchTier,
-  type VerificationStatus,
-  type LensConfidenceLevel,
-  type EvidencePack,
-  type EvidenceItem,
-  type VerifiedClaim,
-  type RiskFactor,
-  type DegradationReason,
-  type ReliabilityTier,
+  executeLensGate,
+  resetOpenAIClient as resetLensOpenAIClient,
+  type LensResult,
+  type DataType,
 } from './lens/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -477,65 +468,6 @@ export async function executeShieldGate(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// LENS GATE (LEGACY - SYNC) — Kept for backwards compatibility
-// For new code, use executeLensGateAsync from ./lens/index.js
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const FRESHNESS_DOMAINS = [
-  { pattern: /\b(stock|share) price|market cap|trading at\b/i, domain: 'stock_prices', window: 'minutes' },
-  { pattern: /\b(bitcoin|crypto|ethereum) (price|worth|value)\b/i, domain: 'crypto', window: 'minutes' },
-  { pattern: /\b(weather|forecast|temperature)\b/i, domain: 'weather', window: 'hours' },
-  { pattern: /\b(current law|regulation|policy)\b/i, domain: 'legal', window: 'weeks' },
-  { pattern: /\b(latest|recent|today|now|current)\b/i, domain: 'temporal', window: 'varies' },
-];
-
-export function executeLensGate(
-  state: PipelineState,
-  _context: PipelineContext
-): GateResult<LensResult> {
-  const start = Date.now();
-  const text = state.normalizedInput;
-
-  // Check for freshness-sensitive content
-  for (const { pattern, domain, window } of FRESHNESS_DOMAINS) {
-    if (pattern.test(text)) {
-      // For high-stakes domains without verification, stop
-      const isHighStakes = ['stock_prices', 'crypto', 'legal'].includes(domain);
-      
-      return {
-        gateId: 'lens',
-        status: isHighStakes ? 'soft_fail' : 'pass',
-        output: {
-          needsVerification: true,
-          verified: false,
-          domain,
-          stakes: isHighStakes ? 'high' : 'medium',
-          status: 'degraded',
-          freshnessWindow: window,
-          message: isHighStakes 
-            ? `This requires current ${domain} data which I cannot verify in real-time.`
-            : undefined,
-        },
-        action: isHighStakes ? 'degrade' : 'continue',
-        executionTimeMs: Date.now() - start,
-      };
-    }
-  }
-
-  return {
-    gateId: 'lens',
-    status: 'pass',
-    output: {
-      needsVerification: false,
-      verified: true,
-      stakes: 'low',
-    },
-    action: 'continue',
-    executionTimeMs: Date.now() - start,
-  };
-}
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CAPABILITY GATE
@@ -614,15 +546,14 @@ export function buildModelConstraints(state: PipelineState): GenerationConstrain
     tone: state.stance === 'control' ? 'compassionate' : 'professional',
   };
 
-  // NOTE: Evidence injection is now handled in the execution pipeline
-  // by augmenting the user message directly before calling the model gate.
-  // This ensures evidence goes to the LLM prompt, not the user response.
-
-  // Add freshness restrictions if lens detected time-sensitive content but couldn't verify
+  // If lens says we need external data but we don't have it, restrict numeric claims
   const lensResult = state.lensResult as any;
-  if (lensResult?.needsVerification && !lensResult?.verified && !lensResult?.evidencePack?.items?.length) {
-    constraints.numericPrecisionAllowed = false;
-    constraints.mustInclude = ['Note: I cannot verify current'];
+  if (lensResult?.needsExternalData && lensResult?.dataType === 'realtime') {
+    // Capability gate should have fetched data - if not, restrict
+    if (!state.capabilities?.explicitActions?.length) {
+      constraints.numericPrecisionAllowed = false;
+      constraints.mustInclude = ['Note: I cannot verify current real-time data'];
+    }
   }
 
   // Add crisis resources if control mode
