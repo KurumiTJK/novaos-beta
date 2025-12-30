@@ -71,6 +71,20 @@ export {
   type StitchedPrompt,
 } from './model/index.js';
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// PERSONALITY GATE — Constitutional Compliance Check
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  executePersonalityGate,
+  executePersonalityGateAsync,
+  buildRegenerationMessage,
+  NOVA_CONSTITUTION,
+  type PersonalityGateOutput,
+  type PersonalityGateConfig,
+  type ConstitutionalCheckResult,
+} from './personality/index.js';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // INTENT GATE (LEGACY - SYNC)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -564,99 +578,6 @@ export function buildModelConstraints(state: PipelineState): GenerationConstrain
   return constraints;
 }
 
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PERSONALITY GATE
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const BANNED_PHRASES = [
-  /I'm always here for you/gi,
-  /You can always count on me/gi,
-  /I'm so proud of you/gi,
-  /You're amazing/gi,
-  /I truly understand how you feel/gi,
-];
-
-const SYCOPHANTIC_PATTERNS = [
-  /^(Great|Excellent|Wonderful) question!/i,
-  /^(Certainly|Absolutely|Of course)!/i,
-];
-
-export function executePersonalityGate(
-  state: PipelineState,
-  _context: PipelineContext
-): GateResult<ValidatedOutput> {
-  const start = Date.now();
-  const text = state.generation?.text ?? '';
-
-  const violations: Array<{ type: string; phrase: string; severity: 'low' | 'medium' | 'high'; canSurgicalEdit: boolean }> = [];
-  let processedText = text;
-
-  for (const pattern of BANNED_PHRASES) {
-    if (pattern.test(processedText)) {
-      violations.push({
-        type: 'banned_phrase',
-        phrase: processedText.match(pattern)?.[0] ?? '',
-        severity: 'high',
-        canSurgicalEdit: false,
-      });
-    }
-  }
-
-  for (const pattern of SYCOPHANTIC_PATTERNS) {
-    const match = processedText.match(pattern);
-    if (match) {
-      violations.push({
-        type: 'sycophantic_opener',
-        phrase: match[0],
-        severity: 'medium',
-        canSurgicalEdit: true,
-      });
-      processedText = processedText.replace(pattern, '').trim();
-    }
-  }
-
-  const weCount = (processedText.match(/\bwe\b/gi) ?? []).length;
-  if (weCount > 2) {
-    violations.push({
-      type: 'excessive_we',
-      phrase: `"we" used ${weCount} times`,
-      severity: 'medium',
-      canSurgicalEdit: false,
-    });
-  }
-
-  const highSeverity = violations.filter((v) => v.severity === 'high');
-  if (highSeverity.length > 0) {
-    return {
-      gateId: 'personality',
-      status: 'hard_fail',
-      output: {
-        text: processedText,
-        violations,
-        edited: false,
-        regenerationConstraints: {
-          bannedPhrases: highSeverity.map((v) => v.phrase),
-        },
-      },
-      action: 'regenerate',
-      failureReason: 'High-severity linguistic violations',
-      executionTimeMs: Date.now() - start,
-    };
-  }
-
-  return {
-    gateId: 'personality',
-    status: violations.length > 0 ? 'soft_fail' : 'pass',
-    output: {
-      text: processedText,
-      violations,
-      edited: processedText !== text,
-    },
-    action: 'continue',
-    executionTimeMs: Date.now() - start,
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SPARK GATE

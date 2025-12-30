@@ -24,8 +24,11 @@ import {
   executeModelGate,
   executeModelGateAsync,
   executePersonalityGate,
+  executePersonalityGateAsync,
+  buildRegenerationMessage,
   executeSparkGate,
   buildModelConstraints,
+  type PersonalityGateOutput,
 } from '../gates/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -825,22 +828,22 @@ export class ExecutionPipeline {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STAGE 6-7: GENERATION LOOP
-    // Model Gate (The Stitcher) now handles:
-    //   - Personality (role, tone, personality)
-    //   - Context (intent, shield)
-    //   - Evidence (from Capability Gate)
-    // All via stitchPrompt() internally
+    // STAGE 6-7: GENERATION LOOP WITH CONSTITUTIONAL CHECK
+    // Model Gate (The Stitcher) handles personality, context, evidence.
+    // Personality Gate (Constitutional Check) verifies compliance.
+    // If violation detected, regenerates with fix guidance.
     // ═══════════════════════════════════════════════════════════════════════════
     let regenerationCount = 0;
+    let currentUserMessage = state.userMessage;  // May include fix guidance on regeneration
 
     while (regenerationCount <= MAX_REGENERATIONS) {
       // ─── STAGE 6: MODEL (The Stitcher) ───
       if (this.useMock || !this.providerManager) {
         state.gateResults.model = executeModelGate(state, context);
       } else {
+        // Use currentUserMessage which may include fix guidance
         state.gateResults.model = await executeModelGateAsync(
-          state,
+          { ...state, userMessage: currentUserMessage },
           context,
           (prompt, systemPrompt, constraints) => 
             this.providerManager!.generate(prompt, systemPrompt, constraints, {
@@ -850,8 +853,17 @@ export class ExecutionPipeline {
       }
       state.generation = state.gateResults.model.output;
 
-      // ─── STAGE 7: PERSONALITY ───
-      state.gateResults.personality = executePersonalityGate(state, context);
+      // ─── STAGE 7: PERSONALITY (Constitutional Check) ───
+      if (this.useMock || !this.providerManager) {
+        state.gateResults.personality = executePersonalityGate(state, context);
+      } else {
+        state.gateResults.personality = await executePersonalityGateAsync(
+          state,
+          context,
+          (prompt, systemPrompt) => 
+            this.providerManager!.generate(prompt, systemPrompt, {})
+        );
+      }
       state.validatedOutput = state.gateResults.personality.output;
 
       // Check if regeneration needed
@@ -861,6 +873,19 @@ export class ExecutionPipeline {
       ) {
         regenerationCount++;
         state.flags.regenerationAttempt = regenerationCount;
+        
+        // Get fix guidance from personality gate output
+        const personalityOutput = state.gateResults.personality.output as PersonalityGateOutput;
+        const fixGuidance = personalityOutput.fixGuidance;
+        
+        if (fixGuidance) {
+          // Build new message with fix guidance for next iteration
+          currentUserMessage = buildRegenerationMessage(state.userMessage, fixGuidance);
+          console.log(`[PIPELINE] Regenerating (${regenerationCount}/${MAX_REGENERATIONS}) with fix: ${fixGuidance}`);
+        } else {
+          console.log(`[PIPELINE] Regenerating (${regenerationCount}/${MAX_REGENERATIONS}) - no specific fix guidance`);
+        }
+        
         continue;
       }
 
