@@ -18,7 +18,7 @@ import {
   executeShieldGate,
   executeLensGate,
   executeLensGateAsync,
-  executeStanceGate,
+  executeStanceGateAsync,
   executeCapabilityGate,
   executeModelGate,
   executeModelGateAsync,
@@ -669,8 +669,13 @@ export class ExecutionPipeline {
       state.lensResult = state.gateResults.lens.output;
     }
 
-    // ─── STAGE 4: STANCE ───
-    state.gateResults.stance = executeStanceGate(state, context);
+    // ─── STAGE 4: STANCE (LLM-POWERED) ───
+    // Check for active sword session BEFORE stance classification
+    const hasActiveSwordSession = context.userId 
+      ? await this.checkActiveSwordSession(context.userId)
+      : false;
+    
+    state.gateResults.stance = await executeStanceGateAsync(state, context, hasActiveSwordSession);
     state.stance = state.gateResults.stance.output.stance;
 
     // ─── STAGE 5: CAPABILITY ───
@@ -678,160 +683,22 @@ export class ExecutionPipeline {
     state.capabilities = state.gateResults.capability.output;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STAGE 5.5: SWORDGATE — Goal Creation Flow (Phase 13)
+    // STAGE 5.5: SWORDGATE — Route based on stance decision
     // ═══════════════════════════════════════════════════════════════════════════
     //
-    // Route to SwordGate if:
-    //   1. User has an ACTIVE sword session (explore OR refinement), OR
-    //   2. This is a NEW learning intent (detected by intent OR pattern)
-    //
-    // This ensures follow-up messages like "sure" or "skip" are
-    // routed back to SwordGate even if they don't match the education intent.
-    //
-    // SwordGate handles: explore → capture → refine → suggest → create
-    // If suppressModelGeneration is true, return SwordGate's response directly.
+    // If stance is SWORD, route to SwordGate.
+    // The LLM-powered stance gate already considered:
+    // - Active sessions (explore/refinement)
+    // - Learning intent patterns
+    // - Practice queries
     //
     // ═══════════════════════════════════════════════════════════════════════════
     
-    // Check 1: Does user have an ACTIVE sword session (explore OR refinement)?
-    const hasActiveSwordSession = context.userId 
-      ? await this.checkActiveSwordSession(context.userId)
-      : false;
-    
-    // Check 2: Is this a NEW learning intent?
-    // Check both intent classification AND keyword patterns for robustness
-    const isLearningIntentByClassifier = 
-      state.intent?.primaryDomain === 'education' &&
-      (state.intent?.type === 'action' || state.intent?.type === 'planning');
-    
-    // ★ Pattern-based learning intent detection (catches "i want to learn X")
-    // These patterns are specific enough that we should route to SwordGate
-    // REGARDLESS of what the intent classifier says about the domain
-    const learningPatterns = [
-      /\b(i want to learn|teach me|help me learn|i'?d like to learn|learn how to)\b/i,
-      /\b(create a (learning )?plan|make a (learning )?plan|set up a plan)\b/i,
-      /\b(new goal|start learning|begin learning|get started with)\b/i,
-      /\b(master|become proficient|get better at|improve my)\b/i,
-    ];
-    const isLearningIntentByPattern = learningPatterns.some(p => p.test(state.userMessage));
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 20: SIMPLIFIED PRACTICE MODE PATTERNS
-    // Route practice queries to SwordGate → LessonMode
-    // ═══════════════════════════════════════════════════════════════════════════
-    const practicePatterns = [
-      // Number selection (for "which goal?" prompts)
-      /^[1-9]$/,                    // Single digit: 1, 2, 3...
-      /^[1-9]\d?$/,                 // One or two digits: 1-99
-      /^#?[1-9]\d?\.?$/,            // With optional # or dot: #1, 1., #2.
-      /^(option|number|choice)\s*#?[1-9]\d?$/i,  // "option 1", "number 2"
-      /^(the\s+)?(first|second|third|fourth|fifth)(\s+one)?$/i,  // ordinals
-
-      // View commands
-      /^view$/i,
-      /^show$/i,
-      /(show|list|view|what('?s| is| are)?)\s+(my\s+)?goals/i,
-      /my\s+goals/i,
-      /what('?s| is)?\s+(my\s+)?(lesson|practice|drill)/i,
-      /today('?s)?\s+(lesson|practice|drill)/i,
-      /what\s+(should|do)\s+i\s+(practice|learn|do)/i,
-
-      // Start commands
-      /^start$/i,
-      /^begin$/i,
-      /^go$/i,
-      /let'?s\s+(start|go|begin|practice)/i,
-      /start\s+(now|today|lesson|practice)/i,
-      /begin\s+(now|today|lesson|practice)/i,
-      /practice\s+(now|today)/i,
-      /i\s+want\s+to\s+(start|begin|practice)/i,
-      /give\s+me\s+(my\s+)?(first\s+)?(lesson|drill)/i,
-
-      // Complete commands
-      /^(done|finished|completed|did it)\.?!?$/i,
-      /i('?m| am)?\s*(done|finished|completed)/i,
-      /mark\s+(as\s+)?(done|complete)/i,
-
-      // Fail commands
-      /i\s+(couldn'?t|could not|failed|didn'?t)/i,
-      /i\s+failed/i,
-
-      // Pause commands (lesson-specific)
-      /pause\s+(lesson|practice|goal|\w+)/i,
-      /take\s+a\s+break/i,
-      /save\s+(and\s+)?(exit|quit)/i,
-
-      // Resume commands
-      /^resume$/i,
-      /resume\s+(lesson|practice|goal|\w+)/i,
-      /unpause/i,
-
-      // Delete commands
-      /^delete$/i,
-      /delete\s+(goal|all)/i,
-      /remove\s+(goal|all)/i,
-      /clear\s+all/i,
-
-      // Cancel lesson (lesson-specific, not standalone)
-      /cancel\s+(lesson|practice|goal)/i,
-
-      // Skip commands
-      /skip\s+(today|this|it)/i,
-      /not\s+today/i,
-
-      // Switch/select goal
-      /switch\s+(to\s+)?(goal|\w+)/i,
-      /select\s+goal/i,
-      /focus\s+on/i,
-      /work\s+on/i,
-
-      // Priority
-      /priority/i,
-      /prioritize/i,
-
-      // Progress/week
-      /progress/i,
-      /this\s+week/i,
-      /weekly/i,
-
-      // General lesson/practice keywords (broad catch)
-      /lesson/i,
-      /practice/i,
-      /drill/i,
-    ];
-    const isPracticeQuery = practicePatterns.some(p => p.test(state.userMessage));
-    
-    // ★ FIX: Route to SwordGate if pattern matches, regardless of classifier domain
-    // The patterns are specific enough ("i want to learn", "teach me") that they
-    // indicate clear learning intent even if classifier says domain is "technical"
-    const isNewLearningIntent = isLearningIntentByClassifier || isLearningIntentByPattern;
-    
-    // Route to SwordGate if ANY condition is true:
-    // 1. Active sword session (explore/refine in progress)
-    // 2. New learning intent ("I want to learn X")
-    // 3. Practice query ("what's my lesson today?", "I'm done", etc.) ← Phase 18B
-    const shouldUseSwordGate = 
-      this.enableSwordGate &&
-      context.userId &&
-      (hasActiveSwordSession || isNewLearningIntent || isPracticeQuery);
-    
-    // ★ DIAGNOSTIC: Log the routing decision
-    console.log(`[PIPELINE] SwordGate routing check: enableSwordGate=${this.enableSwordGate}, userId=${!!context.userId}, hasActive=${hasActiveSwordSession}, newIntent=${isNewLearningIntent}, practiceQuery=${isPracticeQuery}, shouldUse=${shouldUseSwordGate}`);
-    
-    if (shouldUseSwordGate) {
-      console.log('[PIPELINE] Entering SwordGate block...');
+    if (state.stance === 'sword' && this.enableSwordGate && context.userId) {
+      console.log('[PIPELINE] Routing to SwordGate (stance: SWORD)');
+      
       try {
-        const routeReason = hasActiveSwordSession 
-          ? 'active sword session' 
-          : isPracticeQuery 
-            ? 'practice query detected'
-            : isLearningIntentByPattern 
-              ? 'learning pattern detected' 
-              : 'education + action intent';
-        console.log(`[PIPELINE] Routing to SwordGate (${routeReason})`);
-        
         // Build a compatible state object for SwordGate
-        // SwordGate expects a different PipelineState type with state.input
         const swordCompatibleState = {
           ...state,
           input: {
@@ -839,13 +706,11 @@ export class ExecutionPipeline {
             message: state.userMessage,
             sessionId: context.sessionId,
           },
-          // SwordGate's PipelineState also expects these fields
           regenerationCount: 0,
           degraded: false,
         };
         
         const swordGate = this.getSwordGate();
-        // Cast to any to bridge the two different PipelineState types
         const swordResult = await swordGate.execute(swordCompatibleState as any, context as any);
         
         const swordOutput = swordResult.output as SwordGateOutput;
@@ -854,7 +719,6 @@ export class ExecutionPipeline {
         if (swordOutput.suppressModelGeneration && swordOutput.responseMessage) {
           console.log(`[PIPELINE] SwordGate mode: ${swordOutput.mode}, suppressing LLM`);
           
-          // Convert SwordGateOutput to SparkResult for type compatibility
           state.gateResults.spark = {
             gateId: 'spark',
             status: swordResult.status,
@@ -878,7 +742,6 @@ export class ExecutionPipeline {
             metadata: {
               requestId: context.requestId,
               totalTimeMs: Date.now() - pipelineStart,
-              // Note: swordMode and refinementProgress stored in gateResults.spark
             },
           };
         }
@@ -895,12 +758,10 @@ export class ExecutionPipeline {
           executionTimeMs: swordResult.executionTimeMs,
         };
         
-        // Continue with normal LLM generation
         console.log(`[PIPELINE] SwordGate mode: ${swordOutput.mode}, continuing to LLM`);
         
       } catch (swordError) {
         console.error('[PIPELINE] SwordGate error, falling back to normal flow:', swordError);
-        // Continue with normal spark gate on error
       }
     }
 

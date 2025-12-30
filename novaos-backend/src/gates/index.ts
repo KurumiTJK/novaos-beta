@@ -13,7 +13,6 @@ import type {
   Domain,
   ShieldResult,
   LensResult,
-  StanceResult,
   CapabilityResult,
   Generation,
   ValidatedOutput,
@@ -55,6 +54,16 @@ export {
   type DegradationReason,
   type ReliabilityTier,
 } from './lens/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LLM-POWERED STANCE GATE (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  executeStanceGateAsync,
+  resetOpenAIClient as resetStanceOpenAIClient,
+  type StanceResult,
+} from './stance/index.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // INTENT GATE (LEGACY - SYNC)
@@ -527,87 +536,6 @@ export function executeLensGate(
   };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// STANCE GATE
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export function executeStanceGate(
-  state: PipelineState,
-  _context: PipelineContext
-): GateResult<StanceResult> {
-  const start = Date.now();
-
-  // Priority: CONTROL > SHIELD > LENS > SWORD
-  
-  // Check for control mode
-  if (state.shieldResult?.controlMode) {
-    return {
-      gateId: 'stance',
-      status: 'pass',
-      output: {
-        stance: 'control',
-        reason: 'Crisis mode activated',
-      },
-      action: 'continue',
-      executionTimeMs: Date.now() - start,
-    };
-  }
-
-  // Check for shield veto
-  if (state.shieldResult?.vetoType) {
-    return {
-      gateId: 'stance',
-      status: 'pass',
-      output: {
-        stance: 'shield',
-        reason: 'Shield veto active',
-      },
-      action: 'continue',
-      executionTimeMs: Date.now() - start,
-    };
-  }
-
-  // Check for lens degradation
-  if (state.lensResult?.status === 'degraded') {
-    return {
-      gateId: 'stance',
-      status: 'pass',
-      output: {
-        stance: 'lens',
-        reason: 'Information degradation active',
-      },
-      action: 'continue',
-      executionTimeMs: Date.now() - start,
-    };
-  }
-
-  // Default to SWORD for action-oriented intents
-  const intentType = state.intent?.type;
-  if (intentType === 'action' || intentType === 'planning') {
-    return {
-      gateId: 'stance',
-      status: 'pass',
-      output: {
-        stance: 'sword',
-        reason: 'Action-oriented request',
-      },
-      action: 'continue',
-      executionTimeMs: Date.now() - start,
-    };
-  }
-
-  // Default LENS for information requests
-  return {
-    gateId: 'stance',
-    status: 'pass',
-    output: {
-      stance: 'lens',
-      reason: 'Information request',
-    },
-    action: 'continue',
-    executionTimeMs: Date.now() - start,
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CAPABILITY GATE

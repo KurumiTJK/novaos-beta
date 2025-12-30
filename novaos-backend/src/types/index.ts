@@ -167,13 +167,13 @@ export interface LensResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STANCE RESULT (corrected)
+// STANCE RESULT (LLM-powered stance gate output)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface StanceResult {
-  readonly stance: Stance;
-  readonly reason?: string;
-  readonly priorities?: readonly string[];
+  readonly stance: 'lens' | 'sword';
+  readonly reason: string;
+  readonly confidence: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
