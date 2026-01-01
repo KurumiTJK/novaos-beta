@@ -1,23 +1,21 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TYPES — Main Type Exports (CORRECTED to match actual code usage)
+// TYPES — Main Type Exports
+// NovaOS Pipeline Types — Cleaned Up
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Re-exports
-export * from './categories.js';
-export * from './data-need.js';
-export * from './constraints.js';
-export * from './entities.js';
-export * from './provider-results.js';
-export * from './search.js';
+export * from './result.js';
+export * from './branded.js';
+export * from './common.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STANCE (Legacy - kept for backwards compatibility)
+// STANCE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type Stance = 'control' | 'shield' | 'lens' | 'sword';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// INTENT SUMMARY (NEW)
+// INTENT SUMMARY (Intent Gate Output)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type PrimaryRoute = 'SAY' | 'MAKE' | 'FIX' | 'DO';
@@ -36,18 +34,6 @@ export interface IntentSummary {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RISK LEVEL (includes 'safe' and 'elevated' used in code)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type RiskLevel = 'safe' | 'low' | 'medium' | 'elevated' | 'high' | 'critical';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// STAKES LEVEL
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type StakesLevel = 'low' | 'medium' | 'high';
-
-// ─────────────────────────────────────────────────────────────────────────────────
 // CONVERSATION MESSAGE
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -58,56 +44,7 @@ export interface ConversationMessage {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// INTENT TYPES (LEGACY - kept for backwards compatibility)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type IntentType =
-  | 'question'
-  | 'command'
-  | 'action'
-  | 'planning'
-  | 'discussion'
-  | 'conversation'
-  | 'creative'
-  | 'analysis'
-  | 'support'
-  | 'rewrite'
-  | 'summarize'
-  | 'translate'
-  | 'unknown';
-
-export type Domain =
-  | 'general'
-  | 'technical'
-  | 'technology'
-  | 'financial'
-  | 'finance'
-  | 'medical'
-  | 'health'
-  | 'legal'
-  | 'creative'
-  | 'educational'
-  | 'education'
-  | 'personal'
-  | 'mental_health'
-  | 'career'
-  | 'relationships';
-
-export interface Intent {
-  readonly type: IntentType;
-  readonly domain?: Domain;
-  readonly primaryDomain?: Domain;
-  readonly domains?: readonly Domain[];
-  readonly confidence: number;
-  readonly keywords?: readonly string[];
-  readonly entities?: readonly string[];
-  readonly urgency?: 'low' | 'medium' | 'high';
-  readonly complexity?: 'simple' | 'moderate' | 'complex' | 'low' | 'medium' | 'high';
-  readonly isHypothetical?: boolean;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// GATE ACTION & STATUS (corrected to match actual code usage)
+// GATE ACTION & STATUS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type GateAction = 
@@ -128,7 +65,7 @@ export type GateStatus =
   | 'hard_fail';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// GATE RESULTS
+// GATE RESULT
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface GateResult<T = unknown> {
@@ -145,7 +82,7 @@ export interface GateResult<T = unknown> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SHIELD GATE OUTPUT (NEW - Router)
+// SHIELD GATE OUTPUT (Router)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type ShieldRoute = 'shield' | 'skip';
@@ -157,7 +94,7 @@ export interface ShieldGateOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// TOOLS GATE OUTPUT (NEW - Router)
+// TOOLS GATE OUTPUT (Router)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type ToolsRoute = 'tools' | 'skip';
@@ -168,22 +105,7 @@ export interface ToolsGateOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SHIELD RESULT (LEGACY - kept for backwards compatibility)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface ShieldResult {
-  readonly safe?: boolean;
-  readonly riskLevel: RiskLevel;
-  readonly message?: string;
-  readonly ackToken?: string;
-  readonly controlMode?: boolean | string;
-  readonly vetoType?: 'hard' | 'soft';
-  readonly blockedCategories?: readonly string[];
-  readonly triggers?: readonly string[];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// STANCE GATE OUTPUT (NEW - Router)
+// STANCE GATE OUTPUT (Router)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type StanceRoute = 'sword' | 'lens';
@@ -195,21 +117,7 @@ export interface StanceGateOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY RESULT (LEGACY - kept for backwards compatibility)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface CapabilityResult {
-  readonly canProvideInfo?: boolean;
-  readonly canTakeAction?: boolean;
-  readonly canRecommend?: boolean;
-  readonly restrictions?: readonly string[];
-  readonly allowedCapabilities?: readonly string[];
-  readonly deniedCapabilities?: readonly string[];
-  readonly explicitActions?: readonly string[] | readonly ActionSource[];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY GATE OUTPUT (NEW)
+// CAPABILITY GATE OUTPUT
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface EvidenceItem {
@@ -226,7 +134,17 @@ export interface CapabilityGateOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SPARK
+// RESPONSE GATE OUTPUT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface Generation {
+  readonly text: string;
+  readonly model: string;
+  readonly tokensUsed: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SPARK (For Sword — Future)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface Spark {
@@ -246,55 +164,7 @@ export interface SparkResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// GENERATION CONSTRAINTS (corrected - mutable for code that assigns)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface GenerationConstraints {
-  numericPrecisionAllowed?: boolean;
-  actionRecommendationsAllowed?: boolean;
-  mustInclude?: readonly string[];
-  mustPrepend?: string;
-  bannedPhrases?: readonly string[];
-  maxWe?: number;
-  tone?: string;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// GENERATION (corrected)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface Generation {
-  readonly text: string;
-  readonly model: string;
-  readonly tokensUsed: number;
-  readonly constraints?: GenerationConstraints;
-  readonly fallbackUsed?: boolean;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// VALIDATED OUTPUT (corrected)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface ValidatedOutput {
-  readonly text: string;
-  readonly valid?: boolean;
-  readonly edited?: boolean;
-  readonly violations?: readonly string[] | readonly {
-    type: string;
-    phrase: string;
-    severity: 'high' | 'medium' | 'low';
-    canSurgicalEdit: boolean;
-  }[];
-  readonly corrections?: readonly string[];
-  readonly regenerationConstraints?: {
-    readonly bannedPhrases?: readonly string[];
-    readonly mustInclude?: readonly string[];
-    readonly maxLength?: number;
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// GATE RESULTS COLLECTION (UPDATED to use IntentSummary)
+// GATE RESULTS COLLECTION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface GateResults {
@@ -303,33 +173,12 @@ export interface GateResults {
   tools?: GateResult<ToolsGateOutput>;
   stance?: GateResult<StanceGateOutput>;
   capability?: GateResult<CapabilityGateOutput>;
-  model?: GateResult<Generation>;
-  personality?: GateResult<ValidatedOutput>;
+  response?: GateResult<Generation>;
   spark?: GateResult<SparkResult>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ACTION SOURCE (corrected)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type ActionSourceType = 
-  | 'explicit' 
-  | 'implicit' 
-  | 'inferred' 
-  | 'nl_inference' 
-  | 'system'
-  | 'ui_button'
-  | 'command_parser'
-  | 'api_field';
-
-export interface ActionSource {
-  readonly type: ActionSourceType;
-  readonly action?: string;
-  readonly timestamp?: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// PIPELINE CONTEXT (corrected)
+// PIPELINE CONTEXT
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface PipelineContext {
@@ -344,12 +193,11 @@ export interface PipelineContext {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly timezone?: string;
   readonly locale?: string;
-  readonly actionSources?: readonly ActionSource[];
   timestamp?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// PIPELINE STATE (UPDATED to use IntentSummary)
+// PIPELINE STATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface PipelineState {
@@ -362,18 +210,17 @@ export interface PipelineState {
     [key: string]: number;
   };
   
-  // Intermediate results (mutable)
-  intent?: Intent;                    // Legacy - kept for backwards compatibility
-  intent_summary?: IntentSummary;     // NEW - primary intent output
-  shieldResult?: ShieldGateOutput;    // NEW - router output
-  toolsResult?: ToolsGateOutput;      // NEW - router output
-  stanceResult?: StanceGateOutput;    // NEW - router output
-  capabilityResult?: CapabilityGateOutput; // NEW - capability output
-  stance?: Stance;                    // Legacy - kept for backwards compatibility
-  capabilities?: CapabilityResult;    // Legacy - kept for backwards compatibility
+  // Gate outputs
+  intent_summary?: IntentSummary;
+  shieldResult?: ShieldGateOutput;
+  toolsResult?: ToolsGateOutput;
+  stanceResult?: StanceGateOutput;
+  capabilityResult?: CapabilityGateOutput;
   generation?: Generation;
-  validatedOutput?: ValidatedOutput;
   spark?: Spark;
+  
+  // For pipeline flow control
+  stance?: Stance;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

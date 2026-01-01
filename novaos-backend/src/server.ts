@@ -4,15 +4,12 @@
 
 import express from 'express';
 import cors from 'cors';
-import { createRouterAsync, errorHandler } from './api/routes.js';  // ← Changed to createRouterAsync
+import { createRouterAsync, errorHandler } from './api/routes.js';
 import { createHealthRouter } from './api/routes/health.js';
 import { requestMiddleware } from './api/middleware/request.js';
 import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify } from './config/index.js';
 import { getLogger } from './logging/index.js';
-
-// Debug imports for live data providers
-import { getAvailableProviders, getFinnhubProvider, getWeatherProvider, getCryptoProvider, getFxProvider } from './services/data-providers/providers/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENVIRONMENT CONFIG
@@ -34,7 +31,7 @@ const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true';
 const REDIS_URL = process.env.REDIS_URL;
 
 // StepGenerator configuration
-const ENABLE_FULL_STEP_GENERATOR = process.env.ENABLE_FULL_STEP_GENERATOR !== 'false';  // ← NEW: Default true
+const ENABLE_FULL_STEP_GENERATOR = process.env.ENABLE_FULL_STEP_GENERATOR !== 'false';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER
@@ -92,7 +89,7 @@ app.get('/', (_req, res) => {
   res.json({ 
     status: 'ok', 
     service: 'novaos-backend',
-    version: '7.0.0',
+    version: '10.0.0',
     storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
   });
 });
@@ -103,28 +100,6 @@ app.get('/', (_req, res) => {
 
 async function startServer() {
   const startTime = Date.now();
-  
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // LIVE DATA PROVIDER DEBUG
-  // ═══════════════════════════════════════════════════════════════════════════════
-  console.log('\n=== LIVE DATA PROVIDER DEBUG ===');
-  console.log('Environment variables:');
-  console.log('  FINNHUB_API_KEY:', process.env.FINNHUB_API_KEY ? `set (${process.env.FINNHUB_API_KEY.slice(0, 8)}...)` : 'NOT SET');
-  console.log('  OPENWEATHERMAP_API_KEY:', process.env.OPENWEATHERMAP_API_KEY ? `set (${process.env.OPENWEATHERMAP_API_KEY.slice(0, 8)}...)` : 'NOT SET');
-  
-  console.log('\nProvider availability:');
-  const finnhub = getFinnhubProvider();
-  const weather = getWeatherProvider();
-  const crypto = getCryptoProvider();
-  const fx = getFxProvider();
-  console.log('  Finnhub (stocks):', finnhub.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗');
-  console.log('  OpenWeatherMap:', weather.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗');
-  console.log('  CoinGecko (crypto):', crypto.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗ (no key needed - check rate limit)');
-  console.log('  Frankfurter (FX):', fx.isAvailable() ? 'AVAILABLE ✓' : 'UNAVAILABLE ✗ (no key needed)');
-  
-  const available = getAvailableProviders();
-  console.log('\nAll available providers:', available.map(p => p.name).join(', ') || 'NONE');
-  console.log('================================\n');
 
   // Initialize storage (Redis or memory fallback)
   await storeManager.initialize();
@@ -132,7 +107,7 @@ async function startServer() {
   const config = loadConfig();
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // CREATE ROUTER (NOW ASYNC)
+  // CREATE ROUTER
   // ═══════════════════════════════════════════════════════════════════════════════
   console.log('[SERVER] Creating API router...');
   console.log('[SERVER] Full StepGenerator mode:', ENABLE_FULL_STEP_GENERATOR ? 'ENABLED' : 'DISABLED');
@@ -143,7 +118,7 @@ async function startServer() {
     preferredProvider: PREFERRED_PROVIDER,
     useMockProvider: USE_MOCK,
     requireAuth: REQUIRE_AUTH,
-    enableFullStepGenerator: ENABLE_FULL_STEP_GENERATOR,  // ← NEW: Enable full mode
+    enableFullStepGenerator: ENABLE_FULL_STEP_GENERATOR,
   });
 
   app.use('/api/v1', router);

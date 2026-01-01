@@ -14,7 +14,6 @@ import {
   getRecentVetoCount,
 } from '../auth/index.js';
 import { conversations } from '../conversations/index.js';
-import { getWebObserver } from '../services/web/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
 import {
   getSwordStore,
@@ -619,22 +618,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // WEB/VERIFICATION METRICS
+  // CONFIG ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
-
-  router.get('/metrics/web', auth.middleware(true), async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const observer = getWebObserver();
-      const metrics = observer.getMetrics();
-      
-      res.json({
-        metrics,
-        recentEvents: observer.getRecentEvents(20),
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
 
   router.get('/config', auth.middleware(true), async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
