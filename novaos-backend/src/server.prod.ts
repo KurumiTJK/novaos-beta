@@ -1,6 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // NOVAOS BACKEND — Production-Hardened Server Entry Point
-// Phase 20: Production Hardening
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import express from 'express';
@@ -15,6 +14,7 @@ import {
 import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify } from './config/index.js';
 import { getLogger } from './logging/index.js';
+import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
 import {
   circuitRegistry,
   circuitBreakerStatusMiddleware,
@@ -28,12 +28,6 @@ import {
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const NODE_ENV = process.env.NODE_ENV ?? 'development';
-
-// Provider configuration
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const PREFERRED_PROVIDER = (process.env.PREFERRED_PROVIDER as 'openai' | 'gemini' | 'mock') ?? 'openai';
-const USE_MOCK = process.env.USE_MOCK_PROVIDER === 'true';
 
 // Auth configuration
 const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true';
@@ -61,7 +55,7 @@ app.set('trust proxy', securityConfig.trustProxy ? 1 : false);
 app.disable('x-powered-by');
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SECURITY MIDDLEWARE (Phase 20)
+// SECURITY MIDDLEWARE
 // Order matters: security headers → HTTPS redirect → CORS → body parsing
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -96,7 +90,7 @@ app.use(express.urlencoded({
   parameterLimit: 100,
 }));
 
-// Input sanitization (Phase 20)
+// Input sanitization
 app.use(sanitizeRequest());
 
 // Request ID and logging middleware
@@ -110,7 +104,7 @@ app.use(requestMiddleware);
 const healthRouter = createHealthRouter();
 app.use('/', healthRouter);
 
-// Circuit breaker status endpoint (Phase 20)
+// Circuit breaker status endpoint
 app.get('/circuits', circuitBreakerStatusMiddleware());
 
 // Simple root check for load balancers
@@ -118,17 +112,10 @@ app.get('/', (_req, res) => {
   res.json({ 
     status: 'ok', 
     service: 'novaos-backend',
-    version: '10.0.0',
-    phase: 20,
+    version: '1.0.0',
     storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
   });
 });
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// API ROUTES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-// Router is created asynchronously in startup() function
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ERROR HANDLING
@@ -197,10 +184,7 @@ function gracefulShutdown(signal: string) {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 async function startup() {
-  logger.info('═══════════════════════════════════════════════════════════════════════');
-  logger.info('  NovaOS Backend Starting');
-  logger.info('  Phase 20: Production Hardening');
-  logger.info('═══════════════════════════════════════════════════════════════════════');
+  const startTime = Date.now();
   
   // Initialize storage
   try {
@@ -217,35 +201,10 @@ async function startup() {
     });
   }
   
-  // Determine verification capability
-  const verificationStatus = canVerify() ? 'enabled' : 'disabled';
-  
-  // Log configuration
-  logger.info('─────────────────────────────────────────────────────────────────────────');
-  logger.info('Configuration:');
-  logger.info(`  Environment: ${NODE_ENV}`);
-  logger.info(`  Port: ${PORT}`);
-  logger.info(`  Auth Required: ${REQUIRE_AUTH || NODE_ENV === 'production'}`);
-  logger.info(`  Provider: ${USE_MOCK ? 'mock' : PREFERRED_PROVIDER}`);
-  logger.info(`  Verification: ${verificationStatus}`);
-  logger.info(`  Redis: ${REDIS_URL ? 'configured' : 'not configured'}`);
-  logger.info('─────────────────────────────────────────────────────────────────────────');
-  logger.info('Security:');
-  logger.info(`  HTTPS Redirect: ${securityConfig.isProduction}`);
-  logger.info(`  HSTS: ${securityConfig.isProduction ? `max-age=${securityConfig.hstsMaxAge}` : 'disabled'}`);
-  logger.info(`  CSP: enabled`);
-  logger.info(`  CORS Origins: ${securityConfig.isProduction ? securityConfig.allowedOrigins.length + ' domains' : 'all (*)'}`);
-  logger.info(`  Input Sanitization: enabled`);
-  logger.info(`  Rate Limiting: enabled`);
-  logger.info('─────────────────────────────────────────────────────────────────────────');
-  
   // Create and mount API router (async)
   try {
     const apiRouter = await createRouterAsync({
       requireAuth: REQUIRE_AUTH || NODE_ENV === 'production',
-      preferredProvider: USE_MOCK ? 'mock' : PREFERRED_PROVIDER,
-      openaiApiKey: OPENAI_API_KEY,
-      geminiApiKey: GEMINI_API_KEY,
     });
     app.use('/api/v1', apiRouter);
     logger.info('API router mounted');
@@ -256,8 +215,104 @@ async function startup() {
   
   // Start server
   server = app.listen(PORT, () => {
-    logger.info(`Server listening on port ${PORT}`);
-    logger.info('═══════════════════════════════════════════════════════════════════════');
+    const storageStatus = storeManager.isUsingRedis() ? 'redis' : 'memory';
+    const verifyStatus = canVerify() ? 'enabled' : 'disabled';
+    const openaiStatus = isOpenAIAvailable() ? 'connected' : 'unavailable';
+    const startupTime = Date.now() - startTime;
+    
+    // Structured log for startup
+    logger.info('Server started', {
+      port: PORT,
+      environment: NODE_ENV,
+      storage: storageStatus,
+      verification: verifyStatus,
+      pipelineModel: pipeline_model,
+      generationModel: model_llm,
+      startupMs: startupTime,
+    });
+    
+    console.log(`
+╔═══════════════════════════════════════════════════════════════════╗
+║                 NOVAOS BACKEND v1.0.0 (PRODUCTION)                ║
+╠═══════════════════════════════════════════════════════════════════╣
+║  Environment:  ${NODE_ENV.padEnd(49)}║
+║  Port:         ${String(PORT).padEnd(49)}║
+║  OpenAI:       ${openaiStatus.padEnd(49)}║
+║  Pipeline:     ${pipeline_model.padEnd(49)}║
+║  Generation:   ${model_llm.padEnd(49)}║
+║  Auth:         ${(REQUIRE_AUTH || NODE_ENV === 'production' ? 'required' : 'optional').padEnd(49)}║
+║  Storage:      ${storageStatus.padEnd(49)}║
+║  Verification: ${verifyStatus.padEnd(49)}║
+╠═══════════════════════════════════════════════════════════════════╣
+║  SECURITY                                                         ║
+║  HTTPS:        ${(securityConfig.isProduction ? 'enforced' : 'disabled').padEnd(49)}║
+║  HSTS:         ${(securityConfig.isProduction ? 'enabled' : 'disabled').padEnd(49)}║
+║  CSP:          ${'enabled'.padEnd(49)}║
+║  Sanitization: ${'enabled'.padEnd(49)}║
+║  CORS:         ${(securityConfig.isProduction ? 'whitelisted' : 'open (*)').padEnd(49)}║
+║  Circuits:     ${'enabled'.padEnd(49)}║
+╚═══════════════════════════════════════════════════════════════════╝
+
+Health:
+  GET  /health                      Liveness check
+  GET  /ready                       Readiness check
+  GET  /status                      Detailed status
+  GET  /circuits                    Circuit breaker status
+
+Core:
+  POST /api/v1/chat                 Main chat endpoint
+  POST /api/v1/chat/enhanced        Chat + Memory + Sword
+  GET  /api/v1/context              Preview user context
+  GET  /api/v1/conversations        List conversations
+  GET  /api/v1/conversations/:id    Get conversation
+
+Auth:
+  POST /api/v1/auth/register        Get token
+  GET  /api/v1/auth/verify          Verify token
+  GET  /api/v1/auth/status          Auth status
+
+Sword:
+  POST /api/v1/goals                Create goal
+  GET  /api/v1/goals                List goals
+  GET  /api/v1/goals/:id            Get goal + path
+  PATCH /api/v1/goals/:id           Update goal
+  POST /api/v1/goals/:id/transition Transition state
+  POST /api/v1/quests               Create quest
+  GET  /api/v1/quests/:id           Get quest
+  POST /api/v1/quests/:id/transition Transition state
+  POST /api/v1/steps                Create step
+  POST /api/v1/steps/:id/transition Transition state
+  POST /api/v1/sparks/generate      Generate spark
+  GET  /api/v1/sparks/active        Active spark
+  GET  /api/v1/sparks               List sparks
+  POST /api/v1/sparks/:id/transition Transition state
+  GET  /api/v1/path/:goalId         Full path
+  POST /api/v1/path/:goalId/next-spark Next spark
+
+Memory:
+  GET  /api/v1/profile              Get profile
+  PATCH /api/v1/profile             Update profile
+  GET  /api/v1/preferences          Get preferences
+  PATCH /api/v1/preferences         Update preferences
+  GET  /api/v1/memories             List memories
+  GET  /api/v1/memories/stats       Memory stats
+  POST /api/v1/memories             Create memory
+  GET  /api/v1/memories/:id         Get memory
+  PATCH /api/v1/memories/:id        Update memory
+  DELETE /api/v1/memories/:id       Delete memory
+  DELETE /api/v1/memories           Clear memories
+  POST /api/v1/memories/extract     Extract from message
+  POST /api/v1/memories/context     Get LLM context
+  POST /api/v1/memories/decay       Run decay
+
+Admin:
+  POST /api/v1/admin/block-user     Block user
+  POST /api/v1/admin/unblock-user   Unblock user
+  GET  /api/v1/admin/audit-logs     Audit logs
+  GET  /api/v1/config               View config
+
+Ready to enforce the Nova Constitution. Startup: ${startupTime}ms
+    `);
   });
   
   // Handle server errors

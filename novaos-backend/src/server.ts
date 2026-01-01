@@ -10,6 +10,7 @@ import { requestMiddleware } from './api/middleware/request.js';
 import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify } from './config/index.js';
 import { getLogger } from './logging/index.js';
+import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENVIRONMENT CONFIG
@@ -17,12 +18,6 @@ import { getLogger } from './logging/index.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const NODE_ENV = process.env.NODE_ENV ?? 'development';
-
-// Provider configuration
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const PREFERRED_PROVIDER = (process.env.PREFERRED_PROVIDER as 'openai' | 'gemini' | 'mock') ?? 'openai';
-const USE_MOCK = process.env.USE_MOCK_PROVIDER === 'true';
 
 // Auth configuration
 const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true';
@@ -89,7 +84,7 @@ app.get('/', (_req, res) => {
   res.json({ 
     status: 'ok', 
     service: 'novaos-backend',
-    version: '10.0.0',
+    version: '1.0.0',
     storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
   });
 });
@@ -113,12 +108,7 @@ async function startServer() {
   console.log('[SERVER] Full StepGenerator mode:', ENABLE_FULL_STEP_GENERATOR ? 'ENABLED' : 'DISABLED');
   
   const router = await createRouterAsync({
-    openaiApiKey: OPENAI_API_KEY,
-    geminiApiKey: GEMINI_API_KEY,
-    preferredProvider: PREFERRED_PROVIDER,
-    useMockProvider: USE_MOCK,
     requireAuth: REQUIRE_AUTH,
-    enableFullStepGenerator: ENABLE_FULL_STEP_GENERATOR,
   });
 
   app.use('/api/v1', router);
@@ -127,12 +117,9 @@ async function startServer() {
   app.use(errorHandler);
   
   const server = app.listen(PORT, () => {
-    const providerStatus = USE_MOCK 
-      ? 'mock' 
-      : [OPENAI_API_KEY ? 'openai' : '', GEMINI_API_KEY ? 'gemini' : ''].filter(Boolean).join(', ') || 'none (mock fallback)';
     const storageStatus = storeManager.isUsingRedis() ? 'redis' : 'memory';
     const verifyStatus = canVerify() ? 'enabled' : 'disabled';
-    const stepGenStatus = ENABLE_FULL_STEP_GENERATOR && storeManager.isUsingRedis() ? 'full' : 'stub';
+    const openaiStatus = isOpenAIAvailable() ? 'connected' : 'unavailable';
     const startupTime = Date.now() - startTime;
     
     // Structured log for startup
@@ -141,74 +128,81 @@ async function startServer() {
       environment: NODE_ENV,
       storage: storageStatus,
       verification: verifyStatus,
-      stepGenerator: stepGenStatus,
+      pipelineModel: pipeline_model,
+      generationModel: model_llm,
       startupMs: startupTime,
     });
     
     console.log(`
 ╔═══════════════════════════════════════════════════════════════════╗
-║                     NOVAOS BACKEND v10.0.0                        ║
+║                     NOVAOS BACKEND v1.0.0                         ║
 ╠═══════════════════════════════════════════════════════════════════╣
 ║  Environment:  ${NODE_ENV.padEnd(49)}║
 ║  Port:         ${String(PORT).padEnd(49)}║
-║  Providers:    ${providerStatus.padEnd(49)}║
-║  Preferred:    ${PREFERRED_PROVIDER.padEnd(49)}║
+║  OpenAI:       ${openaiStatus.padEnd(49)}║
+║  Pipeline:     ${pipeline_model.padEnd(49)}║
+║  Generation:   ${model_llm.padEnd(49)}║
 ║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(49)}║
 ║  Storage:      ${storageStatus.padEnd(49)}║
 ║  Verification: ${verifyStatus.padEnd(49)}║
-║  StepGenerator:${stepGenStatus.padEnd(50)}║
-║  Mode:         ${config.staging.preferCheaperModels ? 'staging (cheaper)' : 'production'.padEnd(41)}║
 ╚═══════════════════════════════════════════════════════════════════╝
 
-Health Endpoints:
-  GET  /health                     Liveness check (Kubernetes)
-  GET  /ready                      Readiness check (Kubernetes)
-  GET  /status                     Detailed status
+Health:
+  GET  /health                      Liveness check
+  GET  /ready                       Readiness check
+  GET  /status                      Detailed status
 
-API Endpoints:
-  POST /api/v1/chat                Main chat endpoint
-  POST /api/v1/chat/enhanced       Chat with Memory + Sword integration
-  GET  /api/v1/context             Preview user context
-  GET  /api/v1/conversations       Conversation history
+Core:
+  POST /api/v1/chat                 Main chat endpoint
+  POST /api/v1/chat/enhanced        Chat + Memory + Sword
+  GET  /api/v1/context              Preview user context
+  GET  /api/v1/conversations        List conversations
+  GET  /api/v1/conversations/:id    Get conversation
 
-Sword (Path/Spark Engine):
-  POST /api/v1/goals               Create goal
-  GET  /api/v1/goals               List goals
-  GET  /api/v1/goals/:id           Get goal + path
-  POST /api/v1/goals/:id/transition Change goal status
-  
-  POST /api/v1/quests              Create quest (milestone)
-  POST /api/v1/quests/:id/transition Change quest status
-  
-  POST /api/v1/steps               Create step
-  POST /api/v1/steps/:id/transition Complete/skip step
-  
-  POST /api/v1/sparks/generate     Generate minimal action
-  GET  /api/v1/sparks/active       Current active spark
-  POST /api/v1/sparks/:id/transition Accept/complete spark
-  
-  GET  /api/v1/path/:goalId        Full path to goal
-  POST /api/v1/path/:goalId/next-spark Auto-generate next spark
+Auth:
+  POST /api/v1/auth/register        Get token
+  GET  /api/v1/auth/verify          Verify token
+  GET  /api/v1/auth/status          Auth status
 
-Memory (User Context):
-  GET  /api/v1/profile             Get user profile
-  PATCH /api/v1/profile            Update profile
-  GET  /api/v1/preferences         Get preferences
-  PATCH /api/v1/preferences        Update preferences
-  
-  GET  /api/v1/memories            List memories
-  POST /api/v1/memories            Create memory
-  PATCH /api/v1/memories/:id       Update memory
-  DELETE /api/v1/memories/:id      Delete memory
-  DELETE /api/v1/memories          Clear all/category
-  
-  POST /api/v1/memories/extract    Extract from message
-  POST /api/v1/memories/context    Get LLM context
+Sword:
+  POST /api/v1/goals                Create goal
+  GET  /api/v1/goals                List goals
+  GET  /api/v1/goals/:id            Get goal + path
+  PATCH /api/v1/goals/:id           Update goal
+  POST /api/v1/goals/:id/transition Transition state
+  POST /api/v1/quests               Create quest
+  GET  /api/v1/quests/:id           Get quest
+  POST /api/v1/quests/:id/transition Transition state
+  POST /api/v1/steps                Create step
+  POST /api/v1/steps/:id/transition Transition state
+  POST /api/v1/sparks/generate      Generate spark
+  GET  /api/v1/sparks/active        Active spark
+  GET  /api/v1/sparks               List sparks
+  POST /api/v1/sparks/:id/transition Transition state
+  GET  /api/v1/path/:goalId         Full path
+  POST /api/v1/path/:goalId/next-spark Next spark
+
+Memory:
+  GET  /api/v1/profile              Get profile
+  PATCH /api/v1/profile             Update profile
+  GET  /api/v1/preferences          Get preferences
+  PATCH /api/v1/preferences         Update preferences
+  GET  /api/v1/memories             List memories
+  GET  /api/v1/memories/stats       Memory stats
+  POST /api/v1/memories             Create memory
+  GET  /api/v1/memories/:id         Get memory
+  PATCH /api/v1/memories/:id        Update memory
+  DELETE /api/v1/memories/:id       Delete memory
+  DELETE /api/v1/memories           Clear memories
+  POST /api/v1/memories/extract     Extract from message
+  POST /api/v1/memories/context     Get LLM context
+  POST /api/v1/memories/decay       Run decay
 
 Admin:
-  POST /api/v1/admin/block-user    Block a user
-  POST /api/v1/admin/unblock-user  Unblock a user
-  GET  /api/v1/admin/audit-logs    View audit logs
+  POST /api/v1/admin/block-user     Block user
+  POST /api/v1/admin/unblock-user   Unblock user
+  GET  /api/v1/admin/audit-logs     Audit logs
+  GET  /api/v1/config               View config
 
 Ready to enforce the Nova Constitution. Startup: ${startupTime}ms
     `);

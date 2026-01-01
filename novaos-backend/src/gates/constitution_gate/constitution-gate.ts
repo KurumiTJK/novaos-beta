@@ -9,9 +9,9 @@ import type {
   PipelineState,
   PipelineContext,
   GateResult,
-  Generation,
 } from '../../types/index.js';
 
+import { generateForConstitutionGate } from '../../pipeline/llm_engine.js';
 import { CONSTITUTIONAL_CHECK_PROMPT } from './constitution.js';
 import type {
   ConstitutionGateOutput,
@@ -33,7 +33,7 @@ function shouldRunConstitutionCheck(state: PipelineState): RouterDecision {
   const safetySignal = state.intent_summary?.safety_signal ?? 'safe';
   
   // Get shield acceptance from shield gate (defaults to false until implemented)
-  const shieldAcceptance = state.shieldResult?.shield_acceptance ?? false;
+  const shieldAcceptance = (state.shieldResult as any)?.shield_acceptance ?? false;
   
   // Run check if safety_signal is medium or high
   if (safetySignal === 'medium' || safetySignal === 'high') {
@@ -64,6 +64,7 @@ function shouldRunConstitutionCheck(state: PipelineState): RouterDecision {
 
 /**
  * Constitution Gate with router logic and LLM constitutional check.
+ * Calls llm_engine directly — no callback injection.
  * 
  * Router runs check if:
  * - safety_signal is 'medium' or 'high', OR
@@ -74,7 +75,6 @@ function shouldRunConstitutionCheck(state: PipelineState): RouterDecision {
 export async function executeConstitutionGateAsync(
   state: PipelineState,
   _context: PipelineContext,
-  checkFn: (prompt: string, systemPrompt: string) => Promise<Generation>,
   config?: ConstitutionGateConfig
 ): Promise<GateResult<ConstitutionGateOutput>> {
   const start = Date.now();
@@ -115,8 +115,11 @@ ${generatedText}
 
 Analyze this response for constitutional violations.`;
 
-    // Call LLM for constitutional check
-    const checkResponse = await checkFn(userPrompt, CONSTITUTIONAL_CHECK_PROMPT);
+    // Call LLM directly via llm_engine
+    const checkResponse = await generateForConstitutionGate(
+      CONSTITUTIONAL_CHECK_PROMPT,
+      userPrompt
+    );
     
     // Parse the JSON response
     const checkResult = parseCheckResult(checkResponse.text);

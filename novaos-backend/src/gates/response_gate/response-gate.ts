@@ -9,11 +9,9 @@ import type {
   PipelineState,
   PipelineContext,
   GateResult,
-  Generation,
-  GenerationConstraints,
 } from '../../types/index.js';
 
-import { model_llm } from '../../pipeline/llm_engine.js';
+import { generateForResponseGate, model_llm } from '../../pipeline/llm_engine.js';
 import { PERSONALITY_DESCRIPTORS } from './personality_descriptor.js';
 import type {
   ResponseGateOutput,
@@ -50,21 +48,6 @@ Use plain text only. For lists, use simple dashes on new lines.`,
 
 /**
  * Stitch all components into a single prompt for the LLM.
- * 
- * Structure:
- * 
- * SYSTEM:
- *   Given the following personality:
- *   ROLE: ...
- *   TONE: ...
- *   DESCRIPTORS: ...
- * 
- * USER:
- *   {message}
- *   
- *   EVIDENCE:
- *   [STOCK]
- *   ...
  */
 export function stitchPrompt(
   state: PipelineState,
@@ -122,7 +105,6 @@ function buildUserPrompt(state: PipelineState): string {
 
 /**
  * Build evidence block from Capability Gate output.
- * Also indicates if capabilities were attempted but returned no evidence.
  */
 function buildEvidenceBlock(state: PipelineState): string | null {
   const capOutput = state.capabilityResult as CapabilityGateOutput | undefined;
@@ -159,20 +141,11 @@ No data was returned. Acknowledge this to the user and offer alternatives.`;
 
 /**
  * Asynchronous Response Gate for real LLM calls.
- * 
- * @param state - Pipeline state with capabilities, etc.
- * @param context - Pipeline context
- * @param generateFn - Function to call the LLM (injected from ProviderManager)
- * @param config - Optional configuration overrides
+ * Calls llm_engine directly — no callback injection.
  */
 export async function executeResponseGateAsync(
   state: PipelineState,
-  _context: PipelineContext,
-  generateFn: (
-    prompt: string,
-    systemPrompt: string,
-    constraints?: GenerationConstraints
-  ) => Promise<Generation>,
+  context: PipelineContext,
   config?: ResponseGateConfig
 ): Promise<GateResult<ResponseGateOutput>> {
   const start = Date.now();
@@ -186,36 +159,38 @@ export async function executeResponseGateAsync(
     console.log(`[RESPONSE] USER PROMPT:\n${user}`);
   }
 
-  try {
-    // Call the LLM
-    const generation = await generateFn(user, system);
+  // Call LLM directly via llm_engine
+  const generation = await generateForResponseGate(
+    system,
+    user,
+    context.conversationHistory
+  );
 
-    console.log(`[RESPONSE] Response: ${generation.text.length} chars, model: ${model_llm}`);
+  console.log(`[RESPONSE] Response: ${generation.text.length} chars, model: ${model_llm}`);
 
-    return {
-      gateId: 'response',
-      status: 'pass',
-      output: generation,
-      action: 'continue',
-      executionTimeMs: Date.now() - start,
-    };
-  } catch (error) {
-    console.error('[RESPONSE] Generation failed:', error);
-
+  // Check if generation failed
+  if (generation.model === 'error' || generation.model === 'unavailable') {
     return {
       gateId: 'response',
       status: 'hard_fail',
       output: {
-        text: 'I apologize, but I encountered an error generating a response. Please try again.',
-        model: 'error',
-        tokensUsed: 0,
-        fallbackUsed: true,
+        text: generation.text,
+        model: generation.model,
+        tokensUsed: generation.tokensUsed,
       },
       action: 'stop',
-      failureReason: error instanceof Error ? error.message : 'Unknown error',
+      failureReason: 'LLM generation failed',
       executionTimeMs: Date.now() - start,
     };
   }
+
+  return {
+    gateId: 'response',
+    status: 'pass',
+    output: generation,
+    action: 'continue',
+    executionTimeMs: Date.now() - start,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -223,7 +198,6 @@ export async function executeResponseGateAsync(
 // ─────────────────────────────────────────────────────────────────────────────────
 
 function logGateState(state: PipelineState): void {
-  // Evidence
   const capOutput = state.capabilityResult as CapabilityGateOutput | undefined;
   if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
     console.log(`[RESPONSE] Evidence: ${capOutput.evidenceItems.length} item(s)`);

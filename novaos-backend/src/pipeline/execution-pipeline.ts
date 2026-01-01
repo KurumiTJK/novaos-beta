@@ -21,10 +21,7 @@ import {
   type ConstitutionGateOutput,
 } from '../gates/index.js';
 
-import { 
-  ProviderManager, 
-  type ProviderManagerConfig 
-} from '../providers/index.js';
+import { isOpenAIAvailable } from './llm_engine.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -36,9 +33,8 @@ const MAX_REGENERATIONS = 2;
 // PIPELINE CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export interface PipelineConfig extends ProviderManagerConfig {
-  responseModel?: string;
-  capabilitySelectorModel?: string;
+export interface PipelineConfig {
+  // Reserved for future configuration options
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -46,16 +42,8 @@ export interface PipelineConfig extends ProviderManagerConfig {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export class ExecutionPipeline {
-  private providerManager: ProviderManager;
-
-  constructor(config: PipelineConfig = {}) {
-    this.providerManager = new ProviderManager({
-      openaiApiKey: config.openaiApiKey,
-      geminiApiKey: config.geminiApiKey,
-      preferredProvider: config.preferredProvider,
-      enableFallback: config.enableFallback ?? true,
-      responseModel: config.responseModel,
-    });
+  constructor(_config: PipelineConfig = {}) {
+    // Gates now call llm_engine directly, no setup needed here
   }
 
   /**
@@ -140,22 +128,18 @@ export class ExecutionPipeline {
 
     while (regenerationCount <= MAX_REGENERATIONS) {
       // ─── STAGE 6: RESPONSE (The Stitcher) ───
+      // Gate calls llm_engine directly - no callback needed
       state.gateResults.model = await executeResponseGateAsync(
         { ...state, userMessage: currentUserMessage },
-        context,
-        (prompt, systemPrompt, constraints) => 
-          this.providerManager.generate(prompt, systemPrompt, constraints, {
-            conversationHistory: context.conversationHistory ? [...context.conversationHistory] : undefined,
-          })
+        context
       );
       state.generation = state.gateResults.model.output;
 
       // ─── STAGE 7: CONSTITUTION (Constitutional Check) ───
+      // Gate calls llm_engine directly - no callback needed
       state.gateResults.constitution = await executeConstitutionGateAsync(
         state,
-        context,
-        (prompt, systemPrompt) => 
-          this.providerManager.generate(prompt, systemPrompt, {})
+        context
       );
       state.validatedOutput = state.gateResults.constitution.output;
 
@@ -184,11 +168,10 @@ export class ExecutionPipeline {
     }
 
     // ─── STAGE 8: MEMORY (Memory Detection and Storage) ───
+    // Gate calls llm_engine directly - no callback needed
     state.gateResults.memory = await executeMemoryGateAsync(
       state,
-      context,
-      (prompt, systemPrompt) => 
-        this.providerManager.generate(prompt, systemPrompt, {})
+      context
     );
 
     // ─── BUILD FINAL RESPONSE ───
@@ -207,7 +190,10 @@ export class ExecutionPipeline {
     };
   }
 
+  /**
+   * Get available LLM providers.
+   */
   getAvailableProviders(): string[] {
-    return this.providerManager.getAvailableProviders();
+    return isOpenAIAvailable() ? ['openai'] : [];
   }
 }

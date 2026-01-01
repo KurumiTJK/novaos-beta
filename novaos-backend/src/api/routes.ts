@@ -4,7 +4,8 @@
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { ExecutionPipeline, type PipelineConfig } from '../pipeline/execution-pipeline.js';
+import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
+import { pipeline_model, model_llm, isOpenAIAvailable } from '../pipeline/llm_engine.js';
 import type { PipelineContext, ActionSource } from '../types/index.js';
 import { storeManager } from '../storage/index.js';
 import {
@@ -74,7 +75,7 @@ export class ClientError extends Error {
 // ROUTER CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export interface RouterConfig extends PipelineConfig {
+export interface RouterConfig {
   requireAuth?: boolean;
 }
 
@@ -90,22 +91,17 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   const router = Router();
   const requireAuth = config.requireAuth ?? false;
 
-  // Create pipeline with configurable models
-  const pipeline = new ExecutionPipeline({
-    ...config,
-    responseModel: process.env.RESPONSE_MODEL || 'gpt-4o-mini',
-    capabilitySelectorModel: process.env.CAPABILITY_SELECTOR_MODEL || 'gpt-4o-mini',
-  });
+  // Create pipeline (uses llm_engine.ts for model config)
+  const pipeline = new ExecutionPipeline();
 
   // ─────────────────────────────────────────────────────────────────────────────
   // PUBLIC ENDPOINTS (no auth)
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.get('/health', (_req: Request, res: Response) => {
-    const config = loadConfig();
     res.json({
       status: 'healthy',
-      version: '10.0.0',
+      version: '1.0.0',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
@@ -114,11 +110,15 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   });
 
   router.get('/version', (_req: Request, res: Response) => {
-    const config = loadConfig();
+    const appConfig = loadConfig();
     res.json({
-      api: '10.0.0',
+      api: '1.0.0',
       constitution: '1.2',
-      gates: ['intent', 'shield', 'lens', 'stance', 'capability', 'model', 'personality', 'spark'],
+      gates: ['intent', 'shield', 'tools', 'stance', 'capability', 'response', 'constitution', 'memory'],
+      models: {
+        pipeline: pipeline_model,
+        generation: model_llm,
+      },
       features: [
         'auth',
         'rate-limiting',
@@ -130,16 +130,19 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'sword-path-spark',
         'memory-system',
         'pipeline-integration',
-        config.features.verificationEnabled ? 'verification' : null,
-        config.features.webFetchEnabled ? 'web-fetch' : null,
+        appConfig.features.verificationEnabled ? 'verification' : null,
+        appConfig.features.webFetchEnabled ? 'web-fetch' : null,
       ].filter(Boolean),
     });
   });
 
   router.get('/providers', (_req: Request, res: Response) => {
     res.json({
-      available: pipeline.getAvailableProviders(),
-      preferred: config.preferredProvider ?? 'openai',
+      available: isOpenAIAvailable() ? ['openai'] : [],
+      models: {
+        pipeline: pipeline_model,
+        generation: model_llm,
+      },
     });
   });
 

@@ -9,10 +9,9 @@ import type {
   PipelineState,
   PipelineContext,
   GateResult,
-  Generation,
 } from '../../types/index.js';
 
-import { pipeline_model } from '../../pipeline/llm_engine.js';
+import { classifyWithPipelineModel, pipeline_model } from '../../pipeline/llm_engine.js';
 import { hasMemoryKeyword, matchStrongPattern } from './patterns.js';
 import { getMemoryStore, isMemoryStoreInitialized, generateMemoryId } from './store.js';
 import type {
@@ -99,6 +98,7 @@ function shouldRunMemoryCheck(state: PipelineState): RouterDecision {
 
 /**
  * Memory Gate - detects and stores user memory requests.
+ * Calls llm_engine directly — no callback injection.
  * 
  * Flow:
  * 1. Router: Check stance=LENS, primary_route=SAY, has memory keyword
@@ -109,7 +109,6 @@ function shouldRunMemoryCheck(state: PipelineState): RouterDecision {
 export async function executeMemoryGateAsync(
   state: PipelineState,
   context: PipelineContext,
-  checkFn: (prompt: string, systemPrompt: string) => Promise<Generation>,
   config?: MemoryGateConfig
 ): Promise<GateResult<MemoryGateOutput>> {
   const start = Date.now();
@@ -156,9 +155,16 @@ export async function executeMemoryGateAsync(
     console.log(`[MEMORY] LLM check (model: ${pipeline_model})...`);
     
     const userPrompt = `${MEMORY_CHECK_PROMPT}\nUser: "${state.userMessage}"`;
-    const checkResponse = await checkFn(userPrompt, '');
     
-    const checkResult = parseCheckResult(checkResponse.text);
+    // Call LLM directly via llm_engine
+    const response = await classifyWithPipelineModel(userPrompt, '', { max_tokens: 100 });
+    
+    if (!response) {
+      console.log('[MEMORY] LLM returned null, skipping');
+      return createNoMatchResult(responseText, start);
+    }
+    
+    const checkResult = parseCheckResult(response);
     
     console.log(`[MEMORY] LLM result: isMemoryRequest=${checkResult.isMemoryRequest}`);
     
