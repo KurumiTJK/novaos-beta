@@ -18,15 +18,15 @@ primary_route — What type of action is needed?
 • DO: Execute an external action
 
 stance — Which system handles this?
-• SHIELD: Safety concern (safety_signal is high)
+• SHIELD: Protection needed — user faces risk that warrants friction before proceeding (safety_signal is medium or high)
 • SWORD: Extended learning / lesson plan requests (learning_intent is true)
 • LENS: Everything else (default)
 
-safety_signal — Is there a safety concern?
-• none: Normal conversation
-• low: Mild stress/frustration
-• medium: Elevated concern (anxiety, distress)
-• high: Crisis (self-harm, suicide, harm to others)
+safety_signal — Is there a risk to the user's wellbeing?
+• none: Normal conversation, no elevated risk
+• low: Emotional dysregulation that could impair judgment (venting, stress, anxiety, frustration)
+• medium: Risk to financial stability, career, reputation, or legal standing (gambling, options/leverage, impulsive quitting, angry messages, large irreversible decisions)
+• high: Immediate threat to life or freedom (self-harm, suicide, harm to others, illegal activity, medical emergency)
 
 urgency — Time pressure?
 • low: No time pressure
