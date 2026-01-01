@@ -12,10 +12,29 @@ export * from './provider-results.js';
 export * from './search.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STANCE
+// STANCE (Legacy - kept for backwards compatibility)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type Stance = 'control' | 'shield' | 'lens' | 'sword';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// INTENT SUMMARY (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type PrimaryRoute = 'SAY' | 'MAKE' | 'FIX' | 'DO';
+export type IntentStance = 'LENS' | 'SWORD' | 'SHIELD';
+export type SafetySignal = 'none' | 'low' | 'medium' | 'high';
+export type Urgency = 'low' | 'medium' | 'high';
+
+export interface IntentSummary {
+  primary_route: PrimaryRoute;
+  stance: IntentStance;
+  safety_signal: SafetySignal;
+  urgency: Urgency;
+  live_data: boolean;
+  external_tool: boolean;
+  learning_intent: boolean;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // RISK LEVEL (includes 'safe' and 'elevated' used in code)
@@ -40,7 +59,7 @@ export interface ConversationMessage {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// INTENT TYPES (corrected to match actual code usage)
+// INTENT TYPES (LEGACY - kept for backwards compatibility)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type IntentType =
@@ -247,11 +266,11 @@ export interface ValidatedOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// GATE RESULTS COLLECTION
+// GATE RESULTS COLLECTION (UPDATED to use IntentSummary)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface GateResults {
-  intent?: GateResult<Intent>;
+  intent?: GateResult<IntentSummary>;
   shield?: GateResult<ShieldResult>;
   lens?: GateResult<LensResult>;
   stance?: GateResult<StanceResult>;
@@ -302,7 +321,7 @@ export interface PipelineContext {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// PIPELINE STATE (corrected - mutable)
+// PIPELINE STATE (UPDATED to use IntentSummary)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface PipelineState {
@@ -316,7 +335,8 @@ export interface PipelineState {
   };
   
   // Intermediate results (mutable)
-  intent?: Intent;
+  intent?: Intent;                    // Legacy - kept for backwards compatibility
+  intent_summary?: IntentSummary;     // NEW - primary intent output
   shieldResult?: ShieldResult;
   lensResult?: LensResult;
   stance?: Stance;

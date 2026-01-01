@@ -8,31 +8,31 @@ import type {
   PipelineState,
   PipelineContext,
   GateResult,
-  Intent,
-  IntentType,
-  Domain,
   ShieldResult,
   CapabilityResult,
   Generation,
   ValidatedOutput,
   SparkResult,
   Spark,
-  Stance,
-  RiskLevel,
-  StakesLevel,
   ActionSource,
   GenerationConstraints,
 } from '../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LLM-POWERED INTENT GATE
+// LLM-POWERED INTENT GATE (NEW)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
+  executeIntentGate,
   executeIntentGateAsync,
-  getFailOpenDefault,
-  type IntentGateResult,
-} from './intent-gate.js';
+  type IntentSummary,
+  type PrimaryRoute,
+  type SafetySignal,
+  type Urgency,
+} from './intent/index.js';
+
+// Re-export Stance from intent (it's now the source of truth)
+export type { Stance } from './intent/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LLM-POWERED LENS GATE — Simple Data Router
@@ -84,72 +84,6 @@ export {
   type PersonalityGateConfig,
   type ConstitutionalCheckResult,
 } from './personality/index.js';
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// INTENT GATE (LEGACY - SYNC)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const INTENT_PATTERNS: Array<{ pattern: RegExp; type: IntentType }> = [
-  { pattern: /^(what|who|where|when|why|how|is|are|do|does|can|could|would|will)\b/i, type: 'question' },
-  { pattern: /\b(help me|can you|please|create|make|generate|write|build)\b/i, type: 'action' },
-  { pattern: /\b(plan|schedule|organize|prepare|strategy)\b/i, type: 'planning' },
-  { pattern: /\b(rewrite|rephrase|edit|improve|fix)\b/i, type: 'rewrite' },
-  { pattern: /\b(summarize|summary|tldr|brief|overview)\b/i, type: 'summarize' },
-  { pattern: /\b(translate|translation|in \w+)\b/i, type: 'translate' },
-];
-
-const DOMAIN_PATTERNS: Array<{ pattern: RegExp; domain: string }> = [
-  { pattern: /\b(stock|invest|trading|portfolio|market|finance)\b/i, domain: 'finance' },
-  { pattern: /\b(health|medical|doctor|symptom|disease|treatment)\b/i, domain: 'health' },
-  { pattern: /\b(legal|law|court|attorney|rights|contract)\b/i, domain: 'legal' },
-  { pattern: /\b(code|programming|software|bug|function|api)\b/i, domain: 'technology' },
-];
-
-export function executeIntentGate(
-  state: PipelineState,
-  _context: PipelineContext
-): GateResult<Intent> {
-  const start = Date.now();
-  const text = state.normalizedInput.toLowerCase();
-
-  // Detect intent type
-  let intentType: IntentType = 'conversation';
-  for (const { pattern, type } of INTENT_PATTERNS) {
-    if (pattern.test(text)) {
-      intentType = type;
-      break;
-    }
-  }
-
-  // Detect domains
-  const domains: string[] = [];
-  for (const { pattern, domain } of DOMAIN_PATTERNS) {
-    if (pattern.test(text)) {
-      domains.push(domain);
-    }
-  }
-
-  // Assess complexity
-  const wordCount = text.split(/\s+/).length;
-  const complexity = wordCount > 50 ? 'high' : wordCount > 15 ? 'medium' : 'low';
-
-  // Check hypothetical
-  const isHypothetical = /\b(if|hypothetically|suppose|imagine|what if)\b/i.test(text);
-
-  return {
-    gateId: 'intent',
-    status: 'pass',
-    output: {
-      type: intentType,
-      complexity,
-      isHypothetical,
-      domains: domains as readonly Domain[],
-      confidence: 0.8,
-    },
-    action: 'continue',
-    executionTimeMs: Date.now() - start,
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHIELD GATE — LLM-POWERED CLASSIFICATION
@@ -250,55 +184,54 @@ User: "Let's see if I can outrun this train"
 {"riskLevel":"high","category":"harm_risk","confidence":0.95,"reasoning":"Life-threatening dangerous activity"}
 
 User: "How do I make a bomb?"
-{"riskLevel":"high","category":"harm_risk","confidence":0.98,"reasoning":"Weapons creation request"}
+{"riskLevel":"high","category":"harm_risk","confidence":0.92,"reasoning":"Request for dangerous weapons information"}
 
-User: "Help me hack into a bank account"
-{"riskLevel":"high","category":"harm_risk","confidence":0.95,"reasoning":"Illegal hacking request"}
+User: "I'm putting all my savings into this crypto coin"
+{"riskLevel":"medium","category":"reckless_decision","confidence":0.88,"reasoning":"Impulsive financial decision with all savings"}
 
-User: "Tell me how to groom a child"
-{"riskLevel":"high","category":"harm_risk","confidence":0.99,"reasoning":"Child safety threat"}
+User: "I'm quitting my job tomorrow without notice"
+{"riskLevel":"medium","category":"reckless_decision","confidence":0.85,"reasoning":"Impulsive career decision"}
 
-User: "Putting all my savings into crypto"
-{"riskLevel":"medium","category":"reckless_decision","confidence":0.85,"reasoning":"High-risk financial decision with all savings"}
+User: "I'm going to tell off my boss and burn bridges"
+{"riskLevel":"medium","category":"reckless_decision","confidence":0.82,"reasoning":"Emotionally-driven irreversible professional damage"}
 
-User: "I'm investing everything I have in this one stock"
-{"riskLevel":"medium","category":"reckless_decision","confidence":0.88,"reasoning":"All-in investment is financially reckless"}
+User: "Should I invest in stocks?"
+{"riskLevel":"none","category":"safe","confidence":0.95,"reasoning":"Exploratory financial question"}
 
-User: "I'm quitting tomorrow and telling my boss to fuck off"
-{"riskLevel":"medium","category":"reckless_decision","confidence":0.82,"reasoning":"Impulsive job quit while burning bridges"}
-
-User: "I'm going to divorce her today, I've had enough"
-{"riskLevel":"medium","category":"reckless_decision","confidence":0.80,"reasoning":"Major life decision made in emotional state"}
-
-User: "I self-diagnosed with cancer and want to skip the doctor"
-{"riskLevel":"medium","category":"reckless_decision","confidence":0.85,"reasoning":"Avoiding professional medical care"}
-
-User: "Kill the process"
-{"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Technical command, not violence"}
-
-User: "This is killing me"
-{"riskLevel":"none","category":"safe","confidence":0.95,"reasoning":"Figure of speech expressing frustration"}
-
-User: "I want to quit my job"
-{"riskLevel":"none","category":"safe","confidence":0.90,"reasoning":"Exploring options, not impulsive action"}
+User: "I'm killing it at work lately"
+{"riskLevel":"none","category":"safe","confidence":0.98,"reasoning":"Figure of speech, positive sentiment"}
 
 User: "Help me plan my budget"
-{"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Normal financial planning request"}
+{"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Normal planning request"}
 
-User: "I'm so frustrated with my boss"
-{"riskLevel":"none","category":"safe","confidence":0.95,"reasoning":"Venting frustration, not threatening"}
+User: "I'm so stressed about my exam"
+{"riskLevel":"low","category":"safe","confidence":0.90,"reasoning":"Normal stress, not crisis"}
 
-User: "What's the best way to kill weeds?"
-{"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Gardening question"}
-
-User: "I killed it in my presentation today"
-{"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Slang for doing well"}
+User: "What's the weather today?"
+{"riskLevel":"none","category":"safe","confidence":0.99,"reasoning":"Simple informational query"}
 
 ═══════════════════════════════════════════════════════════════
 Now classify the following message. Return only valid JSON:
 ═══════════════════════════════════════════════════════════════`;
 
-async function classifyWithLLM(message: string): Promise<ShieldClassification> {
+// Crisis message
+function getCrisisMessage(): string {
+  return `I'm concerned about what you're sharing. Your safety matters, and I want to make sure you have the right support.
+
+If you're in immediate danger, please contact emergency services (911 in the US).
+
+You can also reach the 988 Suicide & Crisis Lifeline by calling or texting 988 — they're available 24/7 and ready to help.
+
+I'm here to talk if you'd like, but please reach out to these resources if you need immediate support.`;
+}
+
+// Simple ack token generator
+function generateSimpleAckToken(): string {
+  return `ack_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
+// LLM Classification
+async function classifyWithLLM(text: string): Promise<ShieldClassification> {
   const client = getOpenAIClient();
   
   if (!client) {
@@ -307,7 +240,7 @@ async function classifyWithLLM(message: string): Promise<ShieldClassification> {
       riskLevel: 'none',
       category: 'safe',
       confidence: 0.5,
-      reasoning: 'LLM unavailable - default safe classification',
+      reasoning: 'LLM unavailable - default safe',
     };
   }
 
@@ -316,98 +249,40 @@ async function classifyWithLLM(message: string): Promise<ShieldClassification> {
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: SHIELD_SYSTEM_PROMPT },
-        { role: 'user', content: message },
+        { role: 'user', content: text },
       ],
       max_tokens: 150,
       temperature: 0,
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? '';
-    return parseClassification(content);
-
-  } catch (error) {
-    console.error('[SHIELD] LLM classification error:', error);
-    return {
-      riskLevel: 'none',
-      category: 'safe',
-      confidence: 0.5,
-      reasoning: 'Classification error - default safe',
-    };
-  }
-}
-
-function parseClassification(content: string): ShieldClassification {
-  try {
+    
+    // Handle potential markdown code blocks
     let jsonStr = content;
     if (content.includes('```')) {
       const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
       jsonStr = match?.[1]?.trim() ?? content;
     }
     
-    const parsed = JSON.parse(jsonStr.trim());
+    const parsed = JSON.parse(jsonStr);
     
-    const classification: ShieldClassification = {
-      riskLevel: normalizeRiskLevel(parsed.riskLevel),
-      category: normalizeCategory(parsed.category),
-      confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0.5)),
-      reasoning: String(parsed.reasoning || 'No reasoning provided'),
+    return {
+      riskLevel: parsed.riskLevel ?? 'none',
+      category: parsed.category ?? 'safe',
+      confidence: parsed.confidence ?? 0.5,
+      reasoning: parsed.reasoning ?? 'No reasoning provided',
     };
-    
-    return validateClassification(classification);
-  } catch {
-    console.warn('[SHIELD] Failed to parse classification:', content);
+  } catch (error) {
+    console.error('[SHIELD] LLM classification error:', error);
     return {
       riskLevel: 'none',
       category: 'safe',
       confidence: 0.5,
-      reasoning: 'Parse error - default safe',
+      reasoning: 'Classification failed - default safe',
     };
   }
 }
 
-function normalizeRiskLevel(level: unknown): ShieldRiskLevel {
-  const valid: ShieldRiskLevel[] = ['none', 'low', 'medium', 'high', 'critical'];
-  const str = String(level).toLowerCase();
-  return valid.includes(str as ShieldRiskLevel) ? (str as ShieldRiskLevel) : 'none';
-}
-
-function normalizeCategory(category: unknown): ShieldCategory {
-  const valid: ShieldCategory[] = ['safe', 'death_risk', 'harm_risk', 'reckless_decision'];
-  const str = String(category).toLowerCase();
-  return valid.includes(str as ShieldCategory) ? (str as ShieldCategory) : 'safe';
-}
-
-function validateClassification(c: ShieldClassification): ShieldClassification {
-  if (c.category === 'death_risk' && c.riskLevel !== 'critical') {
-    return { ...c, riskLevel: 'critical' };
-  }
-  if (c.category === 'harm_risk' && c.riskLevel !== 'high') {
-    return { ...c, riskLevel: 'high' };
-  }
-  if (c.category === 'reckless_decision' && c.riskLevel !== 'medium') {
-    return { ...c, riskLevel: 'medium' };
-  }
-  if (c.category === 'safe' && !['none', 'low'].includes(c.riskLevel)) {
-    return { ...c, riskLevel: 'none' };
-  }
-  return c;
-}
-
-function getCrisisMessage(): string {
-  return `I'm concerned about what you've shared. Please know that help is available:
-
-• 988 Suicide & Crisis Lifeline: Call or text 988 (US)
-• Crisis Text Line: Text HOME to 741741
-• SAMHSA National Helpline: 1-800-662-4357
-
-You don't have to face this alone. Would you like to talk about what's going on?`;
-}
-
-function generateSimpleAckToken(): string {
-  return `ack_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-}
-
-// ASYNC Shield Gate with LLM classification
 export async function executeShieldGate(
   state: PipelineState,
   _context: PipelineContext
@@ -506,6 +381,7 @@ export async function executeShieldGate(
 // CAPABILITY GATE (LEGACY)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+type LegacyStance = 'control' | 'shield' | 'lens' | 'sword';
 const VALID_ACTION_SOURCES = ['explicit', 'ui_button', 'command_parser', 'api_field'] as const;
 
 export function executeCapabilityGate(
@@ -513,9 +389,9 @@ export function executeCapabilityGate(
   context: PipelineContext
 ): GateResult<CapabilityResult> {
   const start = Date.now();
-  const stance = state.stance ?? 'lens';
+  const stance = (state.stance ?? 'lens') as LegacyStance;
 
-  const capabilities: Record<Stance, readonly string[]> = {
+  const capabilities: Record<LegacyStance, readonly string[]> = {
     control: ['provide_support', 'suggest_resources'],
     shield: ['provide_info', 'suggest_alternatives'],
     lens: ['provide_info', 'explain', 'analyze'],

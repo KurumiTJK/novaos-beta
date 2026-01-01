@@ -11,6 +11,7 @@ import type {
   Stance,
   GenerationConstraints,
   Generation,
+  IntentSummary,
 } from '../types/index.js';
 
 import {
@@ -29,6 +30,7 @@ import {
   executeSparkGate,
   buildModelConstraints,
   type PersonalityGateOutput,
+  type IntentSummary,
 } from '../gates/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -627,7 +629,7 @@ export class ExecutionPipeline {
 
     // ─── STAGE 1: INTENT (ASYNC - LLM POWERED) ───
     state.gateResults.intent = await executeIntentGateAsync(state, context);
-    state.intent = state.gateResults.intent.output;
+    state.intent_summary = state.gateResults.intent.output;
 
     // ─── STAGE 2: SHIELD (ASYNC - LLM POWERED) ───
     state.gateResults.shield = await executeShieldGate(state, context);
