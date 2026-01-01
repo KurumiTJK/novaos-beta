@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import type { Capability, CapabilityMeta, EvidenceItem } from './types.js';
 import { getCapabilityRegistry } from './registry.js';
 
@@ -157,7 +157,9 @@ export async function loadAndRegisterCapabilities(): Promise<void> {
     }
 
     try {
-      const module = await import(filePath);
+      // Convert Windows path to file:// URL for ESM import
+      const fileUrl = pathToFileURL(filePath).href;
+      const module = await import(fileUrl);
 
       if (typeof module.execute !== 'function') {
         console.warn(`[CAPABILITY] ${key} missing execute function`);

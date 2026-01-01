@@ -8,6 +8,12 @@ import type { SelectorInput, SelectorResult } from './types.js';
 import { getCapabilityRegistry } from './registry.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// DEBUG FLAG
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const DEBUG = process.env.DEBUG_CAPABILITY_SELECTOR === 'true'; // Default OFF
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // SYSTEM PROMPT
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -18,6 +24,7 @@ RULES:
 2. Select MINIMUM capabilities needed
 3. Return empty array if no capabilities match
 4. Consider the user's intent route and urgency
+5. Use web_search for questions about people, characters, recent events, news, or anything the model might not know
 
 OUTPUT FORMAT (JSON only, no markdown):
 {"capabilities":["capability_name"]}
@@ -76,6 +83,11 @@ ${menuText}
 
 Which capabilities should be activated? Return JSON.`;
 
+  if (DEBUG) {
+    console.log('[CAPABILITY] Selector prompt:\n', userPrompt);
+    console.log('[CAPABILITY] Valid names:', registry.getNames());
+  }
+
   try {
     const response = await client.chat.completions.create({
       model: pipeline_model,
@@ -87,6 +99,10 @@ Which capabilities should be activated? Return JSON.`;
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? '';
+
+    if (DEBUG) {
+      console.log('[CAPABILITY] LLM returned:', content);
+    }
 
     if (!content) {
       return { ok: false, error: 'Empty response from LLM' };

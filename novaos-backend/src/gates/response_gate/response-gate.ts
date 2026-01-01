@@ -28,7 +28,7 @@ import type {
 // DEBUG FLAG
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const DEBUG = process.env.DEBUG_RESPONSE_GATE === 'true'; // Default OFF
+const DEBUG = process.env.DEBUG_RESPONSE_GATE !== 'false'; // Default ON
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — PERSONALITY
@@ -91,6 +91,12 @@ function buildSystemPrompt(personality: Personality): string {
   parts.push(`ROLE: ${personality.role}`);
   parts.push(`TONE: ${personality.tone}`);
   parts.push(`DESCRIPTORS: ${personality.descriptors}`);
+  parts.push('');
+  parts.push('EVIDENCE HANDLING:');
+  parts.push('When EVIDENCE is provided, treat it as verified and authoritative.');
+  parts.push('Base your response on the evidence. Do not contradict, dismiss, or second-guess evidence.');
+  parts.push('If evidence conflicts with your training data, trust the evidence — it is more current.');
+  parts.push('Present information naturally as facts. Do not reference "evidence," "sources," or "what you provided" — just state the information directly.');
 
   return parts.join('\n');
 }
@@ -119,7 +125,7 @@ function buildUserPrompt(state: PipelineState): string {
  * Also indicates if capabilities were attempted but returned no evidence.
  */
 function buildEvidenceBlock(state: PipelineState): string | null {
-  const capOutput = state.capabilities as CapabilityGateOutput | undefined;
+  const capOutput = state.capabilityResult as CapabilityGateOutput | undefined;
   
   // Case 1: Has evidence items
   if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
@@ -218,7 +224,7 @@ export async function executeResponseGateAsync(
 
 function logGateState(state: PipelineState): void {
   // Evidence
-  const capOutput = state.capabilities as CapabilityGateOutput | undefined;
+  const capOutput = state.capabilityResult as CapabilityGateOutput | undefined;
   if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
     console.log(`[RESPONSE] Evidence: ${capOutput.evidenceItems.length} item(s)`);
     for (const item of capOutput.evidenceItems) {
