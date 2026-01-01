@@ -1,6 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXECUTION PIPELINE — Gate Orchestration
-// PATCHED: Integrated new Capability Gate with LLM selector
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -18,10 +17,9 @@ import {
   executeIntentGate,
   executeIntentGateAsync,
   executeShieldGate,
-  executeLensGate,
-  executeLensGateAsync,
-  executeStanceGateAsync,
-  // REMOVED: executeCapabilityGate (old sync version)
+  executeToolsGate,
+  executeStanceGate,
+  executeCapabilityGate,
   executeModelGate,
   executeModelGateAsync,
   executePersonalityGate,
@@ -32,17 +30,6 @@ import {
   type PersonalityGateOutput,
   type IntentSummary,
 } from '../gates/index.js';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// NEW: CAPABILITY GATE IMPORTS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-import {
-  executeCapabilityGateAsync,
-  initializeCapabilityGate,
-  setSelectorConfig,
-  type CapabilityGateOutput,
-} from '../gates/capability/index.js';
 
 import { 
   ProviderManager, 
@@ -245,16 +232,6 @@ export class ExecutionPipeline {
         enableFallback: config.enableFallback ?? true,
         responseModel: config.responseModel,  // ← Pass responseModel to provider
       });
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Initialize Capability Gate
-    // ─────────────────────────────────────────────────────────────────────────────
-    initializeCapabilityGate();
-    
-    // Configure selector model if specified
-    if (config.capabilitySelectorModel) {
-      setSelectorConfig({ model: config.capabilitySelectorModel });
     }
   }
   
@@ -631,120 +608,25 @@ export class ExecutionPipeline {
     state.gateResults.intent = await executeIntentGateAsync(state, context);
     state.intent_summary = state.gateResults.intent.output;
 
-    // ─── STAGE 2: SHIELD (ASYNC - LLM POWERED) ───
-    state.gateResults.shield = await executeShieldGate(state, context);
+    // ─── STAGE 2: SHIELD (Router - no intervention yet) ───
+    state.gateResults.shield = executeShieldGate(state, context);
     state.shieldResult = state.gateResults.shield.output;
 
-    // Check for hard veto (stop immediately)
-    if (state.gateResults.shield.action === 'stop') {
-      state.stance = state.shieldResult.controlMode ? 'control' : 'shield';
-      return {
-        status: 'stopped',
-        response: state.shieldResult.message ?? 'Request cannot be processed.',
-        stance: state.stance,
-        gateResults: state.gateResults,
-        metadata: {
-          requestId: context.requestId,
-          totalTimeMs: Date.now() - pipelineStart,
-        },
-      };
-    }
+    // ─── STAGE 3: TOOLS (Router - no intervention yet) ───
+    state.gateResults.tools = executeToolsGate(state, context);
+    state.toolsResult = state.gateResults.tools.output;
 
-    // Check for soft veto (await acknowledgment)
-    if (state.gateResults.shield.action === 'await_ack') {
-      if (context.ackTokenValid) {
-        state.flags.ackTokenValid = true;
-      } else {
-        state.stance = 'shield';
-        return {
-          status: 'await_ack',
-          response: state.shieldResult.message ?? 'Acknowledgment required.',
-          stance: 'shield',
-          gateResults: state.gateResults,
-          ackToken: state.shieldResult.ackToken,
-          ackMessage: 'Please acknowledge to proceed with this high-stakes request.',
-          metadata: {
-            requestId: context.requestId,
-            totalTimeMs: Date.now() - pipelineStart,
-          },
-        };
-      }
-    }
-
-    // ─── STAGE 3: LENS (ASYNC - LLM DATA ROUTER) ───
-    const shouldUseAsyncLens = !this.useMock && 
-                               this.providerManager !== null &&
-                               !!process.env.OPENAI_API_KEY;
-    
-    if (shouldUseAsyncLens) {
-      try {
-        state.gateResults.lens = await executeLensGateAsync(state, context);
-        state.lensResult = state.gateResults.lens.output;
-      } catch (lensError) {
-        console.error('[PIPELINE] Lens gate error, falling back to sync:', lensError);
-        state.gateResults.lens = executeLensGate(state, context);
-        state.lensResult = state.gateResults.lens.output;
-      }
-    } else {
-      state.gateResults.lens = executeLensGate(state, context);
-      state.lensResult = state.gateResults.lens.output;
-    }
-
-    // ─── STAGE 4: STANCE (LLM-POWERED) ───
-    // Check for active sword session BEFORE stance classification
-    const hasActiveSwordSession = context.userId 
-      ? await this.checkActiveSwordSession(context.userId)
-      : false;
-    
-    state.gateResults.stance = await executeStanceGateAsync(state, context, hasActiveSwordSession);
-    state.stance = state.gateResults.stance.output.stance;
+    // ─── STAGE 4: STANCE (Router - no intervention yet) ───
+    state.gateResults.stance = executeStanceGate(state, context);
+    state.stanceResult = state.gateResults.stance.output;
+    // Legacy: map route to stance for backwards compatibility
+    state.stance = state.stanceResult.route as any;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STAGE 5: CAPABILITY (ASYNC - LLM Selector + Data Fetching) — NEW!
+    // STAGE 5: CAPABILITY (Live Data Fetching)
     // ═══════════════════════════════════════════════════════════════════════════
-    const shouldUseAsyncCapability = !this.useMock && !!process.env.OPENAI_API_KEY;
-    
-    if (shouldUseAsyncCapability) {
-      try {
-        state.gateResults.capability = await executeCapabilityGateAsync(state, context);
-        state.capabilities = state.gateResults.capability.output;
-        
-        const capOutput = state.capabilities as CapabilityGateOutput;
-        console.log(`[CAPABILITY] Route: ${capOutput.route}, Used: ${capOutput.capabilitiesUsed.join(', ') || 'none'}`);
-        
-        if (capOutput.evidenceItems.length > 0) {
-          console.log(`[CAPABILITY] Evidence items: ${capOutput.evidenceItems.length}`);
-        }
-      } catch (capError) {
-        console.error('[PIPELINE] Capability gate error:', capError);
-        // Fallback: empty capability result
-        state.gateResults.capability = {
-          gateId: 'capability',
-          status: 'soft_fail',
-          action: 'continue',
-          output: {
-            route: 'lens',
-            capabilitiesUsed: [],
-            evidenceItems: [],
-          },
-          failureReason: 'Capability gate error',
-        };
-        state.capabilities = state.gateResults.capability.output;
-      }
-    } else {
-      // Mock mode: skip capability selection
-      state.gateResults.capability = {
-        gateId: 'capability',
-        status: 'pass',
-        action: 'continue',
-        output: {
-          route: state.stance === 'sword' ? 'sword' : 'lens',
-          capabilitiesUsed: [],
-          evidenceItems: [],
-        },
-      };
-      state.capabilities = state.gateResults.capability.output;
-    }
+    state.gateResults.capability = await executeCapabilityGate(state, context);
+    state.capabilityResult = state.gateResults.capability.output;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STAGE 5.5: SWORDGATE — Route based on stance decision

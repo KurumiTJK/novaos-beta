@@ -33,9 +33,9 @@ urgency — Time pressure?
 • medium: Soon but not immediate
 • high: Immediate action needed
 
-live_data — Can I answer correctly WITHOUT a web search / up-to-date public info?
-• true: NO, I need fresh data to be correct
-• false: YES, I can answer without fresh data
+live_data — Am I being asked about a specific fact I could be wrong about?
+• true: Yes
+• false: No
 
 external_tool — Did user explicitly request an external tool?
 • true: YES, user wants calendar/email/file search/image gen/etc.

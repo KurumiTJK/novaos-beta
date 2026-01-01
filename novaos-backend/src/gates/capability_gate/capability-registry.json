@@ -1,0 +1,32 @@
+{
+  "stock.capability": {
+    "name": "stock_fetcher",
+    "description": "Fetches live stock prices (e.g., AAPL, TSLA, MSFT)",
+    "evidenceType": "stock"
+  },
+  "weather.capability": {
+    "name": "weather_fetcher",
+    "description": "Fetches current weather for a location",
+    "evidenceType": "weather"
+  },
+  "crypto.capability": {
+    "name": "crypto_fetcher",
+    "description": "Fetches cryptocurrency prices (e.g., Bitcoin, Ethereum)",
+    "evidenceType": "crypto"
+  },
+  "fx.capability": {
+    "name": "fx_fetcher",
+    "description": "Fetches foreign exchange rates (e.g., USD/EUR)",
+    "evidenceType": "fx"
+  },
+  "time.capability": {
+    "name": "time_fetcher",
+    "description": "Fetches current time for a timezone or city",
+    "evidenceType": "time"
+  },
+  "web-search.capability": {
+    "name": "web_searcher",
+    "description": "Searches the web for current information and news",
+    "evidenceType": "web_result"
+  }
+}

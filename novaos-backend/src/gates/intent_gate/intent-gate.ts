@@ -46,9 +46,6 @@ const DEFAULT_INTENT_SUMMARY: IntentSummary = {
 
 function parseIntentOutput(content: string): IntentSummary {
   try {
-    // Debug: log raw output
-    // console.log('[INTENT] Raw LLM output:', content);
-    
     // Handle potential markdown code blocks
     let jsonStr = content;
     if (content.includes('```')) {
@@ -134,6 +131,8 @@ export async function executeIntentGateAsync(
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? '';
+    
+    console.log('[INTENT] Raw LLM response:', content);
     
     // Handle empty response
     if (!content) {

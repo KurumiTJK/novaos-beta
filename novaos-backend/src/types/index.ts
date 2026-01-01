@@ -8,7 +8,6 @@ export * from './data-need.js';
 export * from './constraints.js';
 export * from './entities.js';
 export * from './provider-results.js';
-// NOTE: LensResult now defined in this file (was './lens.js')
 export * from './search.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -146,7 +145,30 @@ export interface GateResult<T = unknown> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SHIELD RESULT (corrected)
+// SHIELD GATE OUTPUT (NEW - Router)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type ShieldRoute = 'shield' | 'skip';
+
+export interface ShieldGateOutput {
+  route: ShieldRoute;
+  safety_signal: SafetySignal;
+  urgency: Urgency;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// TOOLS GATE OUTPUT (NEW - Router)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type ToolsRoute = 'tools' | 'skip';
+
+export interface ToolsGateOutput {
+  route: ToolsRoute;
+  external_tool: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SHIELD RESULT (LEGACY - kept for backwards compatibility)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface ShieldResult {
@@ -161,30 +183,19 @@ export interface ShieldResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LENS RESULT (NEW — Simple LLM Data Router)
+// STANCE GATE OUTPUT (NEW - Router)
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export type DataType = 'realtime' | 'web_search' | 'none';
+export type StanceRoute = 'sword' | 'lens';
 
-export interface LensResult {
-  readonly needsExternalData: boolean;
-  readonly dataType: DataType;
-  readonly reason: string;
-  readonly confidence: number;
+export interface StanceGateOutput {
+  route: StanceRoute;
+  primary_route: PrimaryRoute;
+  learning_intent: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STANCE RESULT (LLM-powered stance gate output)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface StanceResult {
-  readonly stance: 'lens' | 'sword';
-  readonly reason: string;
-  readonly confidence: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY RESULT (corrected)
+// CAPABILITY RESULT (LEGACY - kept for backwards compatibility)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface CapabilityResult {
@@ -195,6 +206,23 @@ export interface CapabilityResult {
   readonly allowedCapabilities?: readonly string[];
   readonly deniedCapabilities?: readonly string[];
   readonly explicitActions?: readonly string[] | readonly ActionSource[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CAPABILITY GATE OUTPUT (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface EvidenceItem {
+  readonly type: string;
+  readonly formatted: string;
+  readonly source: string;
+  readonly raw?: unknown;
+  readonly fetchedAt: number;
+}
+
+export interface CapabilityGateOutput {
+  readonly capabilitiesUsed: string[];
+  readonly evidenceItems: EvidenceItem[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -271,10 +299,10 @@ export interface ValidatedOutput {
 
 export interface GateResults {
   intent?: GateResult<IntentSummary>;
-  shield?: GateResult<ShieldResult>;
-  lens?: GateResult<LensResult>;
-  stance?: GateResult<StanceResult>;
-  capability?: GateResult<CapabilityResult>;
+  shield?: GateResult<ShieldGateOutput>;
+  tools?: GateResult<ToolsGateOutput>;
+  stance?: GateResult<StanceGateOutput>;
+  capability?: GateResult<CapabilityGateOutput>;
   model?: GateResult<Generation>;
   personality?: GateResult<ValidatedOutput>;
   spark?: GateResult<SparkResult>;
@@ -337,10 +365,12 @@ export interface PipelineState {
   // Intermediate results (mutable)
   intent?: Intent;                    // Legacy - kept for backwards compatibility
   intent_summary?: IntentSummary;     // NEW - primary intent output
-  shieldResult?: ShieldResult;
-  lensResult?: LensResult;
-  stance?: Stance;
-  capabilities?: CapabilityResult;
+  shieldResult?: ShieldGateOutput;    // NEW - router output
+  toolsResult?: ToolsGateOutput;      // NEW - router output
+  stanceResult?: StanceGateOutput;    // NEW - router output
+  capabilityResult?: CapabilityGateOutput; // NEW - capability output
+  stance?: Stance;                    // Legacy - kept for backwards compatibility
+  capabilities?: CapabilityResult;    // Legacy - kept for backwards compatibility
   generation?: Generation;
   validatedOutput?: ValidatedOutput;
   spark?: Spark;

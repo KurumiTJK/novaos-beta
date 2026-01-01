@@ -19,7 +19,7 @@ import OpenAI from 'openai';
  * 
  * Default: gpt-5-mini (fast, cost-effective for classification)
  */
-export const pipeline_model: string = 'gpt-5-mini';
+export const pipeline_model: string = 'gpt-5.2';
 
 /**
  * Model LLM — Used for heavy generation tasks:
