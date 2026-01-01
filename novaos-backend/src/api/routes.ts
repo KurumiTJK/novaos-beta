@@ -77,7 +77,6 @@ export class ClientError extends Error {
 
 export interface RouterConfig extends PipelineConfig {
   requireAuth?: boolean;
-  enableFullStepGenerator?: boolean;  // Enable full resource discovery mode
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -91,40 +90,13 @@ export interface RouterConfig extends PipelineConfig {
 export async function createRouterAsync(config: RouterConfig = {}): Promise<Router> {
   const router = Router();
   const requireAuth = config.requireAuth ?? false;
-  const enableFullStepGenerator = config.enableFullStepGenerator ?? false;
 
-  // Get Redis client for SparkEngine (if available)
-  const redisClient = storeManager.getRedisClient();
-  
-  // Create pipeline with Redis support and configurable models
+  // Create pipeline with configurable models
   const pipeline = new ExecutionPipeline({
     ...config,
-    redis: redisClient ?? undefined,
-    enableFullStepGenerator,
     responseModel: process.env.RESPONSE_MODEL || 'gpt-4o-mini',
     capabilitySelectorModel: process.env.CAPABILITY_SELECTOR_MODEL || 'gpt-4o-mini',
   });
-
-  // Initialize full StepGenerator mode if enabled and Redis is available
-  if (enableFullStepGenerator) {
-    if (redisClient) {
-      console.log('[ROUTER] Initializing full StepGenerator mode...');
-      try {
-        await pipeline.initializeFullMode();
-        // Verify initialization succeeded
-        const status = (pipeline as any).fullModeInitialized;
-        const bootstrap = (pipeline as any).sparkEngineBootstrap;
-        console.log('[ROUTER] Full StepGenerator mode initialized successfully');
-        console.log('[ROUTER] Verification: fullModeInitialized=' + status + ', hasBootstrap=' + !!bootstrap);
-      } catch (error) {
-        console.error('[ROUTER] Failed to initialize full StepGenerator mode:', error);
-        console.log('[ROUTER] Falling back to stub mode');
-      }
-    } else {
-      console.warn('[ROUTER] Full StepGenerator mode requested but Redis not available');
-      console.log('[ROUTER] Using stub mode (no Redis connection)');
-    }
-  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // PUBLIC ENDPOINTS (no auth)
@@ -169,7 +141,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     res.json({
       available: pipeline.getAvailableProviders(),
       preferred: config.preferredProvider ?? 'openai',
-      useMock: config.useMockProvider ?? false,
     });
   });
 
@@ -248,13 +219,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/chat', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      // DEBUG: Check pipeline state on each request
-      console.log('[CHAT DEBUG] Pipeline state:', {
-        fullModeInitialized: (pipeline as any).fullModeInitialized,
-        hasSparkEngineBootstrap: !!(pipeline as any).sparkEngineBootstrap,
-        enableFullStepGenerator: (pipeline as any).enableFullStepGenerator,
-      });
-
       // Validate request
       const parseResult = ChatRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -308,7 +272,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       }
 
       // Execute pipeline
-      const result = await pipeline.execute(message, pipelineContext);
+      const result = await pipeline.process(message, pipelineContext);
 
       // Store assistant message (if response generated)
       if (result.response) {
@@ -520,7 +484,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         actionSources: [actionSource],
       };
 
-      const result = await pipeline.execute(command, pipelineContext);
+      const result = await pipeline.process(command, pipelineContext);
 
       res.json({
         ...result,

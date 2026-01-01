@@ -10,4 +10,6 @@ export interface ShieldGateOutput {
   route: ShieldRoute;
   safety_signal: SafetySignal;
   urgency: Urgency;
+  /** Triggers constitution check when true (future: set by Shield Engine) */
+  shield_acceptance: boolean;
 }

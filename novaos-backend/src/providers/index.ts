@@ -355,8 +355,6 @@ export class ProviderManager {
 
     // Always add mock as final fallback
     this.providers.push(mock);
-
-    console.log(`[PROVIDERS] Initialized: ${this.providers.map(p => p.name).join(' → ')} (model: ${openaiModel})`);
   }
 
   async generate(
@@ -371,9 +369,7 @@ export class ProviderManager {
       if (!provider.isAvailable()) continue;
 
       try {
-        console.log(`[PROVIDERS] Attempting ${provider.name}...`);
         const result = await provider.generate(prompt, systemPrompt, constraints, options);
-        console.log(`[PROVIDERS] Success with ${provider.name}`);
         return result;
       } catch (error) {
         console.error(`[PROVIDERS] ${provider.name} failed:`, error);

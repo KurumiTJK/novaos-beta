@@ -1,63 +1,41 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// PRACTICE DISPLAY EXPORTS — Phase 19F Enhanced Chat Response Formats
+// CONSTITUTION GATE — Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// DISPLAY TYPES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type {
-  DrillSectionDisplay,
-  TodayDrillDisplay,
-  DayPlanDisplay,
-  WeekSummaryDisplay,
-  SkillTreeNodeDisplay,
-  QuestProgressSummary,
-  GoalProgressDisplay,
-  MilestoneDisplay,
-} from './practice-display-types.js';
-
-export {
-  SKILL_TYPE_EMOJI,
-  SKILL_TYPE_LABEL,
-  SKILL_STATUS_EMOJI,
-  SKILL_MASTERY_EMOJI,
-  MILESTONE_STATUS_EMOJI,
-  MILESTONE_STATUS_LABEL,
-  DAY_NAMES,
-} from './practice-display-types.js';
+import type { ValidatedOutput } from '../../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DISPLAY BUILDERS
+// CONSTITUTIONAL CHECK RESULT
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export type {
-  DrillDisplayContext,
-  WeekDisplayContext,
-  ProgressDisplayContext,
-  MilestoneDisplayContext,
-} from './practice-display-builder.js';
-
-export {
-  buildTodayDrillDisplay,
-  buildWeekSummaryDisplay,
-  buildGoalProgressDisplay,
-  buildMilestoneDisplay,
-  buildSkillTreeDisplay,
-  buildDrillDisplayFromPracticeResult,
-} from './practice-display-builder.js';
+export interface ConstitutionalCheckResult {
+  violates: boolean;
+  reason: string | null;
+  fix: string | null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RESPONSE FORMATTERS
+// GATE OUTPUT
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export {
-  formatDrillForChat,
-  formatWeekForChat,
-  formatProgressForChat,
-  formatMilestoneForChat,
-  formatSkillTreeForChat,
-  formatDrillCompact,
-  formatProgressCompact,
-  formatWeekCompact,
-} from './practice-response-formatter.js';
+export interface ConstitutionGateOutput extends ValidatedOutput {
+  /** Whether constitution check was run */
+  checkRun: boolean;
+  /** Reason for skipping (if skipped) */
+  skipReason?: string;
+  /** Result of constitutional check (if run) */
+  constitutionalCheck?: ConstitutionalCheckResult;
+  /** Fix guidance for regeneration (if violation) */
+  fixGuidance?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// GATE CONFIG
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ConstitutionGateConfig {
+  /** Force skip constitutional check */
+  forceSkip?: boolean;
+  /** Force run constitutional check (bypass router) */
+  forceRun?: boolean;
+}

@@ -42,6 +42,7 @@ export function executeShieldGate(
       route,
       safety_signal,
       urgency,
+      shield_acceptance: false,  // Default false, future: set by Shield Engine
     },
     action: 'continue',
     executionTimeMs: Date.now() - start,

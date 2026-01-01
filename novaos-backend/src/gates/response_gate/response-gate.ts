@@ -1,0 +1,247 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// RESPONSE GATE — The Stitcher
+// 
+// Assembles personality + message + evidence into a single prompt,
+// sends to LLM, returns response.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import type {
+  PipelineState,
+  PipelineContext,
+  GateResult,
+  Generation,
+  GenerationConstraints,
+} from '../../types/index.js';
+
+import { model_llm } from '../../pipeline/llm_engine.js';
+import { PERSONALITY_DESCRIPTORS } from './personality_descriptor.js';
+import type {
+  ResponseGateOutput,
+  ResponseGateConfig,
+  Personality,
+  StitchedPrompt,
+  CapabilityGateOutput,
+  EvidenceItem,
+} from './types.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// DEBUG FLAG
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const DEBUG = process.env.DEBUG_RESPONSE_GATE !== 'false'; // Default ON
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONSTANTS — PERSONALITY
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_PERSONALITY: Personality = {
+  role: 'Nova, personal assistant',
+  
+  tone: `Allow light conversational softeners to reduce rigid precision and improve natural flow.
+Never use markdown formatting (no **bold**, *italic*, ###headers, or \`code\`).
+Use plain text only. For lists, use simple dashes on new lines.`,
+  
+  descriptors: PERSONALITY_DESCRIPTORS,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PROMPT STITCHER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Stitch all components into a single prompt for the LLM.
+ * 
+ * Structure:
+ * 
+ * SYSTEM:
+ *   Given the following personality:
+ *   ROLE: ...
+ *   TONE: ...
+ *   DESCRIPTORS: ...
+ * 
+ * USER:
+ *   {message}
+ *   
+ *   EVIDENCE:
+ *   [STOCK]
+ *   ...
+ */
+export function stitchPrompt(
+  state: PipelineState,
+  config?: ResponseGateConfig
+): StitchedPrompt {
+  const personality = config?.personality ?? DEFAULT_PERSONALITY;
+
+  // Build system prompt
+  const system = buildSystemPrompt(personality);
+
+  // Build user prompt
+  const user = buildUserPrompt(state);
+
+  return { system, user };
+}
+
+/**
+ * Build the system prompt with personality.
+ */
+function buildSystemPrompt(personality: Personality): string {
+  const parts: string[] = [];
+
+  parts.push('Given the following personality:');
+  parts.push(`ROLE: ${personality.role}`);
+  parts.push(`TONE: ${personality.tone}`);
+  parts.push(`DESCRIPTORS: ${personality.descriptors}`);
+
+  return parts.join('\n');
+}
+
+/**
+ * Build the user prompt with message and evidence.
+ */
+function buildUserPrompt(state: PipelineState): string {
+  const parts: string[] = [];
+
+  // Original message
+  parts.push(state.userMessage);
+
+  // Evidence from capabilities
+  const evidenceBlock = buildEvidenceBlock(state);
+  if (evidenceBlock) {
+    parts.push('');
+    parts.push(evidenceBlock);
+  }
+
+  return parts.join('\n');
+}
+
+/**
+ * Build evidence block from Capability Gate output.
+ * Also indicates if capabilities were attempted but returned no evidence.
+ */
+function buildEvidenceBlock(state: PipelineState): string | null {
+  const capOutput = state.capabilities as CapabilityGateOutput | undefined;
+  
+  // Case 1: Has evidence items
+  if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
+    const parts: string[] = ['EVIDENCE:'];
+
+    for (const item of capOutput.evidenceItems) {
+      parts.push(`[${item.type.toUpperCase()}]`);
+      parts.push(item.formatted);
+      parts.push(''); // blank line between items
+    }
+
+    parts.push('Use this data in your response.');
+    return parts.join('\n');
+  }
+  
+  // Case 2: Capabilities were selected but no evidence returned (fetch failed)
+  if (capOutput?.capabilitiesUsed && capOutput.capabilitiesUsed.length > 0) {
+    const attempted = capOutput.capabilitiesUsed.join(', ');
+    return `EVIDENCE:
+[FETCH FAILED]
+Attempted to fetch: ${attempted}
+No data was returned. Acknowledge this to the user and offer alternatives.`;
+  }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// ASYNC GATE (real LLM)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Asynchronous Response Gate for real LLM calls.
+ * 
+ * @param state - Pipeline state with capabilities, etc.
+ * @param context - Pipeline context
+ * @param generateFn - Function to call the LLM (injected from ProviderManager)
+ * @param config - Optional configuration overrides
+ */
+export async function executeResponseGateAsync(
+  state: PipelineState,
+  _context: PipelineContext,
+  generateFn: (
+    prompt: string,
+    systemPrompt: string,
+    constraints?: GenerationConstraints
+  ) => Promise<Generation>,
+  config?: ResponseGateConfig
+): Promise<GateResult<ResponseGateOutput>> {
+  const start = Date.now();
+
+  // Stitch the prompt
+  const { system, user } = stitchPrompt(state, config);
+  
+  if (DEBUG) {
+    logGateState(state);
+    console.log(`[RESPONSE] SYSTEM PROMPT:\n${system}`);
+    console.log(`[RESPONSE] USER PROMPT:\n${user}`);
+  }
+
+  try {
+    // Call the LLM
+    const generation = await generateFn(user, system);
+
+    console.log(`[RESPONSE] Response: ${generation.text.length} chars, model: ${model_llm}`);
+
+    return {
+      gateId: 'response',
+      status: 'pass',
+      output: generation,
+      action: 'continue',
+      executionTimeMs: Date.now() - start,
+    };
+  } catch (error) {
+    console.error('[RESPONSE] Generation failed:', error);
+
+    return {
+      gateId: 'response',
+      status: 'hard_fail',
+      output: {
+        text: 'I apologize, but I encountered an error generating a response. Please try again.',
+        model: 'error',
+        tokensUsed: 0,
+        fallbackUsed: true,
+      },
+      action: 'stop',
+      failureReason: error instanceof Error ? error.message : 'Unknown error',
+      executionTimeMs: Date.now() - start,
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LOGGING HELPER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+function logGateState(state: PipelineState): void {
+  // Evidence
+  const capOutput = state.capabilities as CapabilityGateOutput | undefined;
+  if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
+    console.log(`[RESPONSE] Evidence: ${capOutput.evidenceItems.length} item(s)`);
+    for (const item of capOutput.evidenceItems) {
+      const firstLine = item.formatted.split('\n')[0] ?? '';
+      const preview = firstLine.length > 60 ? firstLine.slice(0, 60) + '...' : firstLine;
+      console.log(`[RESPONSE]   └─ [${item.type.toUpperCase()}] ${preview}`);
+    }
+  } else if (capOutput?.capabilitiesUsed && capOutput.capabilitiesUsed.length > 0) {
+    console.log(`[RESPONSE] Evidence: FETCH FAILED (attempted: ${capOutput.capabilitiesUsed.join(', ')})`);
+  } else {
+    console.log('[RESPONSE] Evidence: none');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RE-EXPORT TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  ResponseGateOutput,
+  ResponseGateConfig,
+  Personality,
+  StitchedPrompt,
+  EvidenceItem,
+  CapabilityGateOutput,
+};
