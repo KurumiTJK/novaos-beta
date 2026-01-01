@@ -28,7 +28,7 @@ import type {
 // DEBUG FLAG
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const DEBUG = process.env.DEBUG_RESPONSE_GATE !== 'false'; // Default ON
+const DEBUG = process.env.DEBUG_RESPONSE_GATE === 'true'; // Default OFF
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — PERSONALITY
@@ -228,9 +228,7 @@ function logGateState(state: PipelineState): void {
   if (capOutput?.evidenceItems && capOutput.evidenceItems.length > 0) {
     console.log(`[RESPONSE] Evidence: ${capOutput.evidenceItems.length} item(s)`);
     for (const item of capOutput.evidenceItems) {
-      const firstLine = item.formatted.split('\n')[0] ?? '';
-      const preview = firstLine.length > 60 ? firstLine.slice(0, 60) + '...' : firstLine;
-      console.log(`[RESPONSE]   └─ [${item.type.toUpperCase()}] ${preview}`);
+      console.log(`[RESPONSE]   └─ [${item.type.toUpperCase()}]`);
     }
   } else if (capOutput?.capabilitiesUsed && capOutput.capabilitiesUsed.length > 0) {
     console.log(`[RESPONSE] Evidence: FETCH FAILED (attempted: ${capOutput.capabilitiesUsed.join(', ')})`);
