@@ -86,3 +86,17 @@ export {
   type ConstitutionGateConfig,
   type ConstitutionalCheckResult,
 } from './constitution_gate/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// MEMORY GATE — Memory Detection and Storage
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export {
+  executeMemoryGateAsync,
+  getMemoryStore,
+  initializeMemoryStore,
+  isMemoryStoreInitialized,
+  type MemoryGateOutput,
+  type MemoryGateConfig,
+  type MemoryRecord,
+} from './memory_gate/index.js';

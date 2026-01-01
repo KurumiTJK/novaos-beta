@@ -16,6 +16,7 @@ import {
   executeCapabilityGate,
   executeResponseGateAsync,
   executeConstitutionGateAsync,
+  executeMemoryGateAsync,
   buildRegenerationMessage,
   type ConstitutionGateOutput,
 } from '../gates/index.js';
@@ -181,6 +182,14 @@ export class ExecutionPipeline {
 
       break;
     }
+
+    // ─── STAGE 8: MEMORY (Memory Detection and Storage) ───
+    state.gateResults.memory = await executeMemoryGateAsync(
+      state,
+      context,
+      (prompt, systemPrompt) => 
+        this.providerManager.generate(prompt, systemPrompt, {})
+    );
 
     // ─── BUILD FINAL RESPONSE ───
     const finalText = state.validatedOutput?.text ?? state.generation?.text ?? '';
