@@ -28,7 +28,7 @@ import type {
 // DEBUG FLAG
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const DEBUG = process.env.DEBUG_RESPONSE_GATE !== 'true'; // Default OFF
+const DEBUG = process.env.DEBUG_RESPONSE_GATE === 'true'; // Default OFF
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — PERSONALITY
