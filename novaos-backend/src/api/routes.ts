@@ -260,6 +260,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         conversationHistory: contextWindow.messages.slice(0, -1).map(m => ({
           role: m.role,
           content: m.content,
+          metadata: m.metadata ? { liveData: m.metadata.liveData } : undefined,
         })),
       };
 
@@ -282,6 +283,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           stance: result.stance,
           status: result.status,
           tokensUsed: result.gateResults.model?.output?.tokensUsed,
+          liveData: result.gateResults.intent?.output?.live_data,
         });
       }
 

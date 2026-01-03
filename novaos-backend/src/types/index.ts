@@ -41,6 +41,9 @@ export interface ConversationMessage {
   readonly role: 'user' | 'assistant' | 'system';
   readonly content: string;
   readonly timestamp?: number;
+  readonly metadata?: {
+    readonly liveData?: boolean;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

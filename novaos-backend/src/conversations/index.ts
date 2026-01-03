@@ -18,6 +18,7 @@ export interface Message {
     status?: string;
     tokensUsed?: number;
     gateResults?: Record<string, any>;
+    liveData?: boolean;
   };
 }
 

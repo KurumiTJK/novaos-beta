@@ -46,17 +46,13 @@ export {
 } from './stance_gate/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY GATE — Live Data Fetching
+// CAPABILITY GATE — Web Search (live_data=true)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
   executeCapabilityGate,
   executeCapabilityGateAsync,
-  getCapabilityRegistry,
-  initializeCapabilities,
-  setupCapabilities,
   type CapabilityGateOutput,
-  type Capability,
   type EvidenceItem,
 } from './capability_gate/index.js';
 

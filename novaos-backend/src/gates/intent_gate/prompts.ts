@@ -33,9 +33,9 @@ urgency — Time pressure?
 • medium: Soon but not immediate
 • high: Immediate action needed
 
-live_data — Am I being asked about a specific fact I could be wrong about?
-• true: Yes
-• false: No
+live_data — Would I need to search to answer this accurately?
+• true: The answer requires specific factual information I might not know, might be wrong about, or might not exist in my training data. If my default answer would be "I don't know" or "this doesn't exist" — set live_data=true.
+• false: General knowledge I'm confident about, math, creative tasks, opinions, greetings, or continuing a conversation about something already discussed.
 
 external_tool — Did user explicitly request an external tool?
 • true: YES, user wants calendar/email/file search/image gen/etc.
@@ -140,6 +140,17 @@ User: "Thanks!"
 
 User: "What about option 2?"
 {"primary_route":"SAY","stance":"LENS","safety_signal":"none","urgency":"low","live_data":false,"external_tool":false,"learning_intent":false}
+
+═══════════════════════════════════════════════════════════════
+FOLLOW-UP DETECTION
+═══════════════════════════════════════════════════════════════
+
+When conversation history is provided, check if previous messages used live_data=true.
+Messages marked with [USED_LIVE_DATA] indicate the assistant's response was based on real-time data.
+
+If the previous assistant response was based on live_data=true:
+- Bias toward live_data=true for follow-up questions about the same topic
+- Only set live_data=false if the current message is clearly unrelated to the previous topic
 
 ═══════════════════════════════════════════════════════════════
 Now classify the following message. Return only valid JSON:

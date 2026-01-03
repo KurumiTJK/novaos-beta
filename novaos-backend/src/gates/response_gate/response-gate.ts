@@ -130,11 +130,11 @@ function buildEvidenceBlock(state: PipelineState): string | null {
   
   // Case 2: Capabilities were selected but no evidence returned (fetch failed)
   if (capOutput?.capabilitiesUsed && capOutput.capabilitiesUsed.length > 0) {
-    const attempted = capOutput.capabilitiesUsed.join(', ');
     return `EVIDENCE:
 [FETCH FAILED]
-Attempted to fetch: ${attempted}
-No data was returned. Acknowledge this to the user and offer alternatives.`;
+A web search was attempted but failed. Acknowledge this error to the user.
+Do NOT contradict information you provided earlier in this conversation.
+If you cannot fetch new data, say so — but do not claim previous information was wrong.`;
   }
 
   return null;

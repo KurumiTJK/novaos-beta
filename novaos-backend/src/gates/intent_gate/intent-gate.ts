@@ -18,6 +18,12 @@ import type {
 } from '../../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// DEBUG FLAG
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const DEBUG = process.env.DEBUG_INTENT_GATE === 'true';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // VALID VALUES
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -100,7 +106,7 @@ function parseIntentOutput(content: string): IntentSummary {
 
 export async function executeIntentGateAsync(
   state: PipelineState,
-  _context: PipelineContext
+  context: PipelineContext
 ): Promise<GateResult<IntentSummary>> {
   const start = Date.now();
   const userMessage = state.normalizedInput;
@@ -121,18 +127,52 @@ export async function executeIntentGateAsync(
   }
 
   try {
+    // Build messages with conversation history for context
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: INTENT_SYSTEM_PROMPT },
+    ];
+
+    // Add last 4 messages for context (helps with follow-up detection)
+    // Truncate to 100 chars and tag messages that used live data
+    if (context.conversationHistory?.length) {
+      const recent = context.conversationHistory.slice(-4);
+      for (const msg of recent) {
+        // Truncate content to 100 chars to prevent LLM confusion
+        const truncated = msg.content.length > 100
+          ? msg.content.slice(0, 100) + '...'
+          : msg.content;
+        
+        // Tag assistant messages that used live data
+        const content = msg.role === 'assistant' && msg.metadata?.liveData
+          ? `${truncated} [USED_LIVE_DATA]`
+          : truncated;
+        
+        messages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content,
+        });
+      }
+    }
+
+    // Add current message
+    messages.push({ role: 'user', content: userMessage });
+
+    if (DEBUG) {
+      console.log('[INTENT] Conversation history length:', context.conversationHistory?.length ?? 0);
+      console.log('[INTENT] Total messages being sent:', messages.length);
+    }
+
     const response = await client.chat.completions.create({
       model: pipeline_model,
-      messages: [
-        { role: 'system', content: INTENT_SYSTEM_PROMPT },
-        { role: 'user', content: userMessage },
-      ],
+      messages,
       max_completion_tokens: 1000,
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? '';
     
-    console.log('[INTENT] Raw LLM response:', content);
+    if (DEBUG) {
+      console.log('[INTENT] Raw LLM response:', content);
+    }
     
     // Handle empty response
     if (!content) {
@@ -150,7 +190,7 @@ export async function executeIntentGateAsync(
     
     const intent_summary = parseIntentOutput(content);
 
-    // Log the output
+    // Log the output (always show final result)
     console.log('[INTENT]', intent_summary);
 
     return {

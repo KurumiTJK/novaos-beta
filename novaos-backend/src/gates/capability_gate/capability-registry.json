@@ -1,7 +1,0 @@
-{
-  "web-search.capability": {
-    "name": "web_search",
-    "description": "Searches the web for current information, recent news, people, characters, events, or anything the model might not know or that requires up-to-date data",
-    "evidenceType": "web_result"
-  }
-}

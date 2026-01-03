@@ -258,4 +258,65 @@ export async function generateWithModelLLM(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// TOPIC EXTRACTION (pipeline_model) — For contextual web search
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const TOPIC_EXTRACTION_PROMPT = `You are a topic extractor. Your ONLY job is to identify the main topic or entity being discussed.
+
+RULES:
+1. Return ONLY the topic/entity name, nothing else
+2. No explanations, no sentences, no punctuation except spaces
+3. If multiple topics, return the most recent one
+4. If no clear topic, return: general
+5. Maximum 10 words`;
+
+/**
+ * Extract topic from conversation history for contextual search.
+ * Uses pipeline_model with strict constraints.
+ */
+export async function extractTopicFromConversation(
+  conversationHistory: readonly ConversationMessage[]
+): Promise<string | null> {
+  const client = getOpenAIClient();
+  if (!client) return null;
+  if (!conversationHistory?.length) return null;
+
+  // Build conversation summary (truncated)
+  const historyText = conversationHistory
+    .slice(-6)
+    .map(m => `${m.role}: ${m.content.slice(0, 150)}`)
+    .join('\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
+    const response = await client.chat.completions.create({
+      model: pipeline_model,
+      messages: [
+        { role: 'system', content: TOPIC_EXTRACTION_PROMPT },
+        { role: 'user', content: `Extract the topic:\n\n${historyText}\n\nTopic:` },
+      ],
+      max_completion_tokens: 20,
+    }, { signal: controller.signal });
+
+    clearTimeout(timeout);
+
+    const topic = response.choices[0]?.message?.content?.trim() ?? null;
+
+    // Validation: reject if too long or looks like a sentence
+    if (!topic) return null;
+    if (topic.length > 50) return null;
+    if (topic.includes('.') || topic.includes('!') || topic.includes('?')) return null;
+    if (topic.toLowerCase() === 'general') return null;
+
+    return topic;
+
+  } catch (error) {
+    console.error('[LLM_ENGINE] Topic extraction error:', error);
+    return null;
+  }
+}
+
 export type { OpenAI };

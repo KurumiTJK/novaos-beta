@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAPABILITY GATE — Main Implementation
-// Routes live_data requests to capability selector and execution
+// CAPABILITY GATE — Web Search Execution
+// Executes web search when live_data=true
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -8,22 +8,9 @@ import type {
   PipelineContext,
   GateResult,
 } from '../../types/index.js';
-import type { CapabilityGateOutput, SelectorInput } from './types.js';
-import { selectCapabilities } from './selector.js';
-import { getCapabilityRegistry } from './registry.js';
-import { initializeCapabilities } from './discover.js';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// INITIALIZATION
-// ─────────────────────────────────────────────────────────────────────────────────
-
-let initialized = false;
-
-async function ensureInitialized(): Promise<void> {
-  if (initialized) return;
-  await initializeCapabilities();
-  initialized = true;
-}
+import type { CapabilityGateOutput } from './types.js';
+import { execute as executeWebSearch } from './capabilities/web-search.capability.js';
+import { extractTopicFromConversation } from '../../pipeline/llm_engine.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // EXECUTE CAPABILITY GATE
@@ -31,12 +18,9 @@ async function ensureInitialized(): Promise<void> {
 
 export async function executeCapabilityGate(
   state: PipelineState,
-  _context: PipelineContext
+  context: PipelineContext
 ): Promise<GateResult<CapabilityGateOutput>> {
   const start = Date.now();
-
-  // Ensure capabilities are loaded
-  await ensureInitialized();
 
   // Read from Intent Gate output
   const intent = state.intent_summary;
@@ -46,104 +30,79 @@ export async function executeCapabilityGate(
     return {
       gateId: 'capability',
       status: 'soft_fail',
-      output: {
-        capabilitiesUsed: [],
-        evidenceItems: [],
-      },
+      output: { capabilitiesUsed: [], evidenceItems: [] },
       action: 'continue',
       failureReason: 'Missing intent_summary',
       executionTimeMs: Date.now() - start,
     };
   }
 
-  const { primary_route, stance, urgency, live_data } = intent;
-
   // ─── CHECK LIVE_DATA ───
-  if (!live_data) {
+  if (!intent.live_data) {
     console.log('[CAPABILITY] skip (live_data: false)');
     return {
       gateId: 'capability',
       status: 'pass',
-      output: {
-        capabilitiesUsed: [],
-        evidenceItems: [],
-      },
+      output: { capabilitiesUsed: [], evidenceItems: [] },
       action: 'continue',
       executionTimeMs: Date.now() - start,
     };
   }
 
-  // ─── LLM SELECTOR ───
-  const selectorInput: SelectorInput = {
-    userMessage: state.userMessage,
-    primary_route,
-    stance,
-    urgency,
-  };
+  // ─── BUILD CONTEXTUAL SEARCH QUERY ───
+  let searchQuery = state.userMessage;
 
-  const selectorResult = await selectCapabilities(selectorInput);
+  if (context.conversationHistory?.length) {
+    const topic = await extractTopicFromConversation(context.conversationHistory);
+    if (topic) {
+      searchQuery = `${topic}: ${state.userMessage}`;
+      console.log(`[CAPABILITY] topic: "${topic}"`);
+    }
+  }
 
-  if (!selectorResult.ok) {
-    console.log(`[CAPABILITY] selector error: ${selectorResult.error}`);
-    console.log('[CAPABILITY] skip (selector failed)');
+  // ─── EXECUTE WEB SEARCH ───
+  console.log('[CAPABILITY] executing web_search');
+
+  try {
+    const evidence = await executeWebSearch(searchQuery);
+
+    if (evidence) {
+      console.log('[CAPABILITY] evidence: 1 item');
+      return {
+        gateId: 'capability',
+        status: 'pass',
+        output: {
+          capabilitiesUsed: ['web_search'],
+          evidenceItems: [evidence],
+        },
+        action: 'continue',
+        executionTimeMs: Date.now() - start,
+      };
+    }
+
+    // Web search returned null (no results or error)
+    console.log('[CAPABILITY] evidence: 0 items (web search returned null)');
     return {
       gateId: 'capability',
       status: 'soft_fail',
-      output: {
-        capabilitiesUsed: [],
-        evidenceItems: [],
-      },
+      output: { capabilitiesUsed: ['web_search'], evidenceItems: [] },
       action: 'continue',
-      failureReason: `LLM selector failed: ${selectorResult.error}`,
+      failureReason: 'Web search returned no results',
       executionTimeMs: Date.now() - start,
     };
-  }
 
-  const selectedCapabilities = selectorResult.result.capabilities;
-
-  // ─── NO CAPABILITIES SELECTED ───
-  if (selectedCapabilities.length === 0) {
-    console.log('[CAPABILITY] selected: (none)');
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error('[CAPABILITY] web_search error:', errorMsg);
     return {
       gateId: 'capability',
-      status: 'pass',
-      output: {
-        capabilitiesUsed: [],
-        evidenceItems: [],
-      },
+      status: 'soft_fail',
+      output: { capabilitiesUsed: [], evidenceItems: [] },
       action: 'continue',
+      failureReason: `Web search failed: ${errorMsg}`,
       executionTimeMs: Date.now() - start,
     };
   }
-
-  // ─── EXECUTE CAPABILITIES ───
-  console.log(`[CAPABILITY] selected: ${selectedCapabilities.join(', ')}`);
-
-  const registry = getCapabilityRegistry();
-  const { evidenceItems, errors } = await registry.executeAll(
-    selectedCapabilities,
-    state.userMessage
-  );
-
-  // Log results
-  console.log(`[CAPABILITY] evidence: ${evidenceItems.length} items`);
-
-  // Errors are already logged in registry.executeAll
-
-  return {
-    gateId: 'capability',
-    status: errors.length > 0 && evidenceItems.length === 0 ? 'soft_fail' : 'pass',
-    output: {
-      capabilitiesUsed: selectedCapabilities,
-      evidenceItems,
-    },
-    action: 'continue',
-    failureReason: errors.length > 0 && evidenceItems.length === 0 
-      ? `All capabilities failed: ${errors.join(', ')}`
-      : undefined,
-    executionTimeMs: Date.now() - start,
-  };
 }
 
-// Async alias for consistency
 export const executeCapabilityGateAsync = executeCapabilityGate;
