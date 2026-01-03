@@ -80,6 +80,11 @@ function buildSystemPrompt(personality: Personality): string {
   parts.push('Base your response on the evidence. Do not contradict, dismiss, or second-guess evidence.');
   parts.push('If evidence conflicts with your training data, trust the evidence — it is more current.');
   parts.push('Present information naturally as facts. Do not reference "evidence," "sources," or "what you provided" — just state the information directly.');
+  parts.push('');
+  parts.push('CONVERSATION CONTINUITY:');
+  parts.push('Your previous responses in this conversation that contain specific data (prices, statistics, facts, dates) were based on verified real-time sources at that moment.');
+  parts.push('Do not contradict or disclaim your own previous statements with phrases like "I don\'t have access to real-time data."');
+  parts.push('If asked follow-up questions, build on what you already provided. The data may be slightly stale, but it was accurate when you stated it.');
 
   return parts.join('\n');
 }
