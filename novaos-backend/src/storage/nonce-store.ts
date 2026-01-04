@@ -3,7 +3,7 @@
 // Prevents token replay attacks with atomic check-and-set
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { NonceStore, InMemoryNonceStore, RedisNonceStore } from '../helpers/ack-token.js';
+import { NonceStore, InMemoryNonceStore, RedisNonceStore } from '../auth/ack-token.js';
 
 // Re-export the base implementations
 export { NonceStore, InMemoryNonceStore, RedisNonceStore };
