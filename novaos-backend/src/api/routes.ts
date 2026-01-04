@@ -176,8 +176,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'conversation-history',
         'structured-logging',
         'pipeline-integration',
-        appConfig.features.verificationEnabled ? 'verification' : null,
-        appConfig.features.webFetchEnabled ? 'web-fetch' : null,
+        appConfig.verification.enabled ? 'verification' : null,
+        appConfig.webFetch.enabled ? 'web-fetch' : null,
       ].filter(Boolean),
     });
   });
@@ -266,158 +266,96 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     authenticate({ required: requireAuth }),
     rateLimit({ category: 'chat' }),
     validateBody(ParseCommandSchema),
-    abuseProtection({ contentField: 'command' }),
   ];
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CHAT ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/chat', ...chatMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { message, conversationId, ackToken, context: reqContext } = req.body;
-      const userId = req.userId ?? 'anonymous';
-      const requestId = crypto.randomUUID();
+  router.post('/chat',
+    ...chatMiddleware,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { message, conversationId, stance, actionSource } = req.body;
+        const userId = req.userId ?? 'anonymous';
 
-      const convId = conversationId ?? crypto.randomUUID();
-      
-      // SECURITY: Verify ownership if conversationId provided
-      if (conversationId) {
-        const isOwner = await workingMemory.verifyOwnership(conversationId, userId);
-        if (!isOwner) {
-          const existing = await workingMemory.get(conversationId);
-          if (existing) {
-            throw new ClientError('Conversation not found', 404);
-          }
-        }
-      }
-      
-      const conversation = await workingMemory.getOrCreate(userId, convId);
-      
-      let session = await sessionManager.get(convId);
-      if (!session) {
-        session = await sessionManager.create(userId, convId);
-      }
+        // Build pipeline context
+        const context: PipelineContext = {
+          userId,
+          conversationId,
+          message,
+          timestamp: new Date().toISOString(),
+          requestId: (req as any).requestId ?? crypto.randomUUID(),
+          requestedStance: stance,
+          actionSource: actionSource as ActionSource,
+          metadata: {
+            userAgent: req.headers['user-agent'],
+            ip: req.ip,
+          },
+        };
 
-      await workingMemory.addUserMessage(convId, message);
+        // Execute pipeline
+        const result = await pipeline.execute(context);
 
-      const contextWindow = await workingMemory.buildContext(convId);
-
-      const pipelineContext: PipelineContext = {
-        userId,
-        conversationId: convId,
-        requestId,
-        timestamp: Date.now(),
-        actionSources: [],
-        timezone: reqContext?.timezone,
-        locale: reqContext?.locale,
-        conversationHistory: contextWindow.messages.slice(0, -1).map(m => ({
-          role: m.role,
-          content: m.content,
-          metadata: m.metadata ? { liveData: m.metadata.liveData } : undefined,
-        })),
-      };
-
-      // Validate ack token if provided
-      if (ackToken) {
-        const ackStore = getAckTokenStore();
-        const validation = await ackStore.validateAndConsume(ackToken, userId);
-        if (validation.valid) {
-          pipelineContext.ackTokenValid = true;
-        } else {
-          throw new ClientError(`Invalid or expired acknowledgment token: ${validation.error}`);
-        }
-      }
-
-      const result = await pipeline.process(message, pipelineContext);
-
-      if (result.response) {
-        await workingMemory.addAssistantMessage(convId, result.response, {
-          stance: result.stance,
-          status: result.status,
-          tokensUsed: result.gateResults.model?.output?.tokensUsed,
-          liveData: result.gateResults.intent?.output?.live_data,
+        // Log audit
+        await logAudit({
+          category: 'chat',
+          action: 'chat_message',
+          userId,
+          details: {
+            conversationId,
+            stance: result.stance,
+            mode: result.mode,
+            hasVeto: !!result.veto,
+          },
         });
+
+        // Track veto if present
+        if (result.veto) {
+          await trackVeto(userId, result.veto.reason);
+        }
+
+        res.json(result);
+      } catch (error) {
+        next(error);
       }
-
-      if (result.status === 'stopped' || result.status === 'await_ack') {
-        await trackVeto(userId);
-      }
-
-      await sessionManager.update(convId, {
-        messageCount: 1,
-        tokenCount: result.gateResults.model?.output?.tokensUsed ?? 0,
-      });
-
-      // Generate new ack token if needed
-      if (result.ackToken) {
-        // Store the ack token for validation (it's self-signed so just needs tracking)
-        const newAckToken = generateAckToken(userId, result.ackToken, { conversationId: convId });
-        result.ackToken = newAckToken;
-      }
-
-      await logAudit({
-        category: 'auth',
-        action: 'chat',
-        userId,
-        requestId,
-        details: {
-          stance: result.stance,
-          status: result.status,
-          messageLength: message.length,
-          tokensUsed: result.gateResults.model?.output?.tokensUsed,
-          contextTruncated: contextWindow.truncated,
-        },
-      });
-
-      const updatedConv = await workingMemory.get(convId);
-
-      res.json({
-        ...result,
-        conversation: {
-          id: convId,
-          title: updatedConv?.title ?? conversation.title,
-          messageCount: updatedConv?.messageCount ?? conversation.messageCount + 2,
-          contextTruncated: contextWindow.truncated,
-        },
-      });
-    } catch (error) {
-      next(error);
     }
-  });
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // PARSE COMMAND ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/parse-command', ...parseCommandMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { command, source, conversationId } = req.body;
+  router.post('/parse-command',
+    ...parseCommandMiddleware,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { message, conversationId } = req.body;
+        const userId = req.userId ?? 'anonymous';
 
-      const actionSource: ActionSource = {
-        type: source,
-        action: command,
-        timestamp: Date.now(),
-      };
+        const context: PipelineContext = {
+          userId,
+          conversationId,
+          message,
+          timestamp: new Date().toISOString(),
+          requestId: (req as any).requestId ?? crypto.randomUUID(),
+          actionSource: 'command',
+          metadata: {},
+        };
 
-      const pipelineContext: PipelineContext = {
-        userId: req.userId ?? 'anonymous',
-        conversationId: conversationId ?? crypto.randomUUID(),
-        requestId: crypto.randomUUID(),
-        timestamp: Date.now(),
-        actionSources: [actionSource],
-      };
+        const result = await pipeline.execute(context);
 
-      const result = await pipeline.process(command, pipelineContext);
-
-      res.json({
-        ...result,
-        parsedAction: actionSource,
-      });
-    } catch (error) {
-      next(error);
+        res.json({
+          parsed: true,
+          intent: result.intent,
+          stance: result.stance,
+          response: result.response,
+        });
+      } catch (error) {
+        next(error);
+      }
     }
-  });
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CONVERSATION ENDPOINTS
@@ -428,15 +366,12 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     validateQuery(ConversationQuerySchema),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const { limit, offset } = req.query as { limit: number; offset: number };
-        const userId = req.userId!;
-
-        const convList = await workingMemory.list(userId, limit, offset);
-
+        const { limit = 50, offset = 0 } = req.query;
+        const conversations = await workingMemory.listByUser(req.userId!, Number(limit), Number(offset));
+        
         res.json({
-          conversations: convList,
-          count: convList.length,
-          offset,
+          conversations,
+          count: conversations.length,
         });
       } catch (error) {
         next(error);
@@ -566,28 +501,29 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     authenticate({ required: true }),
     async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const config = loadConfig();
+        const appConfig = loadConfig();
         
         res.json({
-          environment: config.env.environment,
+          environment: appConfig.environment,
           features: {
-            verificationEnabled: config.features.verificationEnabled,
-            webFetchEnabled: config.features.webFetchEnabled,
-            authRequired: config.features.authRequired,
-            debugMode: config.features.debugMode,
-            redactPII: config.features.redactPII,
+            verificationEnabled: appConfig.verification.enabled,
+            webFetchEnabled: appConfig.webFetch.enabled,
+            authRequired: appConfig.auth.required,
+            debugMode: appConfig.observability.debugMode,
+            redactPII: appConfig.observability.redactPII,
           },
           verification: {
-            enabled: config.verification.enabled,
-            required: config.verification.required,
-            cacheTTLSeconds: config.verification.cacheTTLSeconds,
-            maxVerificationsPerRequest: config.verification.maxVerificationsPerRequest,
+            enabled: appConfig.verification.enabled,
+            required: appConfig.verification.required,
+            cacheTTLSeconds: appConfig.verification.cacheTTLSeconds,
+            maxVerificationsPerRequest: appConfig.verification.maxVerificationsPerRequest,
           },
           webFetch: {
-            maxResponseSizeBytes: config.webFetch.maxResponseSizeBytes,
-            maxRedirects: config.webFetch.maxRedirects,
-            totalTimeoutMs: config.webFetch.totalTimeoutMs,
-            allowlistEnabled: config.webFetch.allowlist.length > 0,
+            enabled: appConfig.webFetch.enabled,
+            maxSizeBytes: appConfig.webFetch.maxSizeBytes,
+            maxRedirects: appConfig.webFetch.maxRedirects,
+            totalTimeoutMs: appConfig.webFetch.totalTimeoutMs,
+            allowlistEnabled: appConfig.webFetch.allowlist.length > 0,
           },
         });
       } catch (error) {
@@ -709,7 +645,8 @@ export function errorHandler(
     return;
   }
 
-  const message = process.env.NODE_ENV === 'production'
+  const appConfig = loadConfig();
+  const message = appConfig.environment === 'production'
     ? 'Internal server error'
     : error.message;
 

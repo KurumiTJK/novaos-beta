@@ -6,11 +6,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { createRouterAsync, errorHandler } from './api/routes.js';
-import { createHealthRouter } from './api/routes/health.js';
 import { requestMiddleware } from './api/middleware/request.js';
 import { storeManager } from './storage/index.js';
-import { loadConfig, canVerify } from './config/index.js';
-import { getLogger } from './logging/index.js';
+import { loadConfig, canVerify, isProduction } from './config/index.js';
+import { getLogger, createHealthRouter } from './observability/index.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
 import { initializeMemoryStore } from './gates/memory_gate/index.js';
 
@@ -21,12 +20,13 @@ import { initializeMemoryStore } from './gates/memory_gate/index.js';
 import { initSecurity, ipRateLimit } from './security/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ENVIRONMENT CONFIG
+// LOAD CONFIG & ENVIRONMENT
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const NODE_ENV = process.env.NODE_ENV ?? 'development';
-const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true';
+const config = loadConfig();
+const PORT = config.server.port;
+const NODE_ENV = config.environment;
+const REQUIRE_AUTH = config.auth.required;
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER
@@ -42,7 +42,7 @@ const app = express();
 
 // Security headers via Helmet
 app.use(helmet({
-  contentSecurityPolicy: NODE_ENV === 'production' ? undefined : {
+  contentSecurityPolicy: isProduction() ? undefined : {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
@@ -55,17 +55,17 @@ app.use(helmet({
 }));
 
 // Trust proxy
-app.set('trust proxy', 1);
+app.set('trust proxy', config.server.trustProxy ? 1 : 0);
 
 // CORS
 app.use(cors({
-  origin: NODE_ENV === 'production' 
-    ? process.env.ALLOWED_ORIGINS?.split(',') ?? false
+  origin: isProduction() 
+    ? config.cors.allowedOrigins.length > 0 ? config.cors.allowedOrigins : false
     : '*',
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Request-Id'],
   exposedHeaders: ['X-Request-Id', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-  credentials: true,
+  credentials: config.cors.allowCredentials,
 }));
 
 // Body parsing
@@ -81,7 +81,18 @@ app.use(requestMiddleware);
 // ROUTES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const healthRouter = createHealthRouter();
+const healthRouter = createHealthRouter({
+  version: '1.0.0',
+  serviceName: 'novaos-backend',
+  environment: NODE_ENV,
+  getFeatures: () => ({
+    verification: canVerify(),
+    webFetch: config.webFetch.enabled,
+    auth: REQUIRE_AUTH,
+    debug: config.observability.debugMode,
+  }),
+  criticalChecks: [],
+});
 app.use('/', healthRouter);
 
 app.get('/', (_req, res) => {
@@ -109,9 +120,9 @@ async function startServer() {
   
   initSecurity(storeManager.getStore(), {
     tokenConfig: {
-      secret: process.env.JWT_SECRET,
-      accessTokenExpiry: process.env.JWT_ACCESS_EXPIRY ?? '15m',
-      refreshTokenExpiry: process.env.JWT_REFRESH_EXPIRY ?? '7d',
+      secret: config.auth.jwtSecret,
+      accessTokenExpiry: `${config.auth.tokenExpirySeconds}s`,
+      refreshTokenExpiry: '7d',
     },
     abuseConfig: {
       vetoWarningThreshold: 3,
@@ -119,7 +130,7 @@ async function startServer() {
       defaultBlockDurationSeconds: 3600,
     },
     ssrfConfig: {
-      allowHttp: NODE_ENV !== 'production',
+      allowHttp: !isProduction(),
     },
   });
   console.log('[SERVER] Security module initialized');
@@ -130,8 +141,6 @@ async function startServer() {
   // Initialize episodic memory gate store
   initializeMemoryStore(storeManager.getStore());
   console.log('[MEMORY_GATE] Episodic memory store initialized');
-
-  const config = loadConfig();
 
   // Create router
   console.log('[SERVER] Creating API router...');
@@ -177,8 +186,9 @@ async function startServer() {
 ╚═══════════════════════════════════════════════════════════════════╝
 
 Health:
-  GET  /health                      Liveness check
-  GET  /ready                       Readiness check
+  GET  /health                      Full health check
+  GET  /health/live                 Liveness probe
+  GET  /health/ready                Readiness probe
   GET  /status                      Detailed status
 
 Core:
@@ -224,7 +234,7 @@ Ready to enforce the Nova Constitution. Startup: ${startupTime}ms
     setTimeout(() => {
       logger.error('Forced shutdown after timeout');
       process.exit(1);
-    }, 10000);
+    }, config.server.shutdownTimeoutMs);
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

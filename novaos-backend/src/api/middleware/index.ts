@@ -54,13 +54,12 @@ export {
 } from './sanitization.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ERROR HANDLING (Phase 14)
+// ERROR HANDLING
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
   // Error handler middleware
   errorHandler,
-  notFoundHandler,
   asyncHandler,
   
   // Error classes
@@ -79,9 +78,10 @@ export {
 } from './error-handler.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NOT FOUND HANDLER (Phase 14)
+// NOT FOUND HANDLER
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
   notFound,
+  notFoundHandler,
 } from './not-found.js';

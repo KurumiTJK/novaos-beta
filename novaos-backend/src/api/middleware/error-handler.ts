@@ -53,6 +53,11 @@ export class ApiError extends Error {
 }
 
 /**
+ * Backward compatibility alias.
+ */
+export const ClientError = ApiError;
+
+/**
  * Not found error (404).
  */
 export class NotFoundError extends ApiError {
@@ -339,6 +344,7 @@ function getUserId(req: Request): string | undefined {
  * 
  * @example
  * app.use('/api', router);
+ * app.use(notFound());  // From not-found.ts
  * app.use(errorHandler); // Must be last
  */
 export function errorHandler(
@@ -473,45 +479,6 @@ export function errorHandler(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NOT FOUND HANDLER
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Middleware for handling 404 Not Found.
- * 
- * Register AFTER all routes but BEFORE error handler.
- * 
- * @example
- * app.use('/api', router);
- * app.use(notFoundHandler);
- * app.use(errorHandler);
- */
-export function notFoundHandler(
-  req: Request,
-  res: Response,
-  _next: NextFunction
-): void {
-  const requestId = getRequestId(req);
-  
-  logger.debug('Route not found', {
-    path: req.path,
-    method: req.method,
-    requestId,
-  });
-  
-  const response: ErrorResponse = {
-    error: `Cannot ${req.method} ${req.path}`,
-    code: 'NOT_FOUND',
-    requestId,
-    timestamp: new Date().toISOString(),
-  };
-  
-  if (!response.requestId) delete (response as any).requestId;
-  
-  res.status(404).json(response);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
 // ASYNC HANDLER WRAPPER
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -531,12 +498,3 @@ export function asyncHandler<T extends Request = Request>(
     return Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// EXPORTS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export {
-  // Backward compatibility with existing ClientError
-  ApiError as ClientError,
-};

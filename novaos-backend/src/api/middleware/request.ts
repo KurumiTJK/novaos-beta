@@ -2,9 +2,10 @@
 // REQUEST MIDDLEWARE — RequestId, Logging, Timing
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { randomUUID } from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { logRequest, getLogger } from '../../logging/index.js';
-import { loadConfig } from '../../config/index.js';
+import { logRequest, getLogger } from '../../observability/index.js';
+import { loadConfig, isProduction } from '../../config/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // EXTEND EXPRESS TYPES
@@ -26,7 +27,7 @@ declare global {
 
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Use existing request ID from header or generate new one
-  const requestId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  const requestId = (req.headers['x-request-id'] as string) || randomUUID();
   
   req.requestId = requestId;
   req.startTime = Date.now();
@@ -52,7 +53,7 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
     const duration = Date.now() - req.startTime;
     
     // Skip health check logging in production to reduce noise
-    if (config.env.isProduction && (req.path === '/health' || req.path === '/ready' || req.path === '/')) {
+    if (isProduction() && (req.path === '/health' || req.path === '/ready' || req.path === '/')) {
       return;
     }
     
@@ -64,7 +65,7 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
       requestId: req.requestId,
       userId: (req as any).userId,
       userAgent: req.headers['user-agent'],
-      ip: config.features.redactPII ? undefined : req.ip,
+      ip: config.observability.redactPII ? undefined : req.ip,
     });
   });
   
