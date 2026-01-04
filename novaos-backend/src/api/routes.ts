@@ -1,6 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // API ROUTES — Express Endpoints for NovaOS
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+// CLEANED: Removed dead Sword and Semantic Memory endpoints
+//
+// WORKING ENDPOINTS:
+// - /health, /version, /providers (public)
+// - /auth/* (authentication)
+// - /chat (main pipeline)
+// - /parse-command (action parsing)
+// - /conversations/* (working memory)
+// - /config (safe config view)
+// - /admin/* (user management)
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -14,25 +27,8 @@ import {
   trackVeto,
   getRecentVetoCount,
 } from '../auth/index.js';
-// CHANGED: Import workingMemory from new location
 import { workingMemory } from '../core/memory/working_memory/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
-import {
-  getSwordStore,
-  getSparkGenerator,
-  type GoalEvent,
-  type QuestEvent,
-  type StepEvent,
-  type SparkEvent,
-} from '../core/sword/index.js';
-import {
-  getMemoryStore,
-  getMemoryExtractor,
-  getMemoryRetriever,
-  type MemoryCategory,
-  type CreateMemoryRequest,
-  type UpdateMemoryRequest,
-} from '../core/memory/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // REQUEST SCHEMAS
@@ -86,7 +82,6 @@ export interface RouterConfig {
 
 /**
  * Creates the API router with all endpoints.
- * Now async to support full StepGenerator initialization.
  */
 export async function createRouterAsync(config: RouterConfig = {}): Promise<Router> {
   const router = Router();
@@ -128,8 +123,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'audit-logging',
         'conversation-history',
         'structured-logging',
-        'sword-path-spark',
-        'memory-system',
         'pipeline-integration',
         appConfig.features.verificationEnabled ? 'verification' : null,
         appConfig.features.webFetchEnabled ? 'web-fetch' : null,
@@ -151,7 +144,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // AUTH ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Register/get token (simplified - production would use proper auth)
   router.post('/auth/register', (req: Request, res: Response, next: NextFunction) => {
     try {
       const parseResult = RegisterRequestSchema.safeParse(req.body);
@@ -179,7 +171,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // Verify token
   router.get('/auth/verify', auth.middleware(true), (req: AuthenticatedRequest, res: Response) => {
     res.json({
       valid: true,
@@ -187,7 +178,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     });
   });
 
-  // Get current user status
   router.get('/auth/status', auth.middleware(false), async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.userId ?? 'anonymous';
     const blocked = await auth.isUserBlocked(userId);
@@ -209,7 +199,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // PROTECTED ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Apply auth, rate limiting, and abuse detection to chat endpoints
   const protectedMiddleware = [
     auth.middleware(requireAuth),
     auth.rateLimit(),
@@ -222,7 +211,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/chat', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      // Validate request
       const parseResult = ChatRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
         throw new ClientError(
@@ -234,7 +222,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       const userId = req.userId ?? 'anonymous';
       const requestId = crypto.randomUUID();
 
-      // Get or create conversation and session
       const convId = conversationId ?? crypto.randomUUID();
       
       // SECURITY: Verify ownership if conversationId provided
@@ -243,7 +230,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         if (!isOwner) {
           const existing = await workingMemory.get(conversationId);
           if (existing) {
-            // Conversation exists but belongs to someone else
             throw new ClientError('Conversation not found', 404);
           }
         }
@@ -256,13 +242,10 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         session = await auth.session.create(userId, convId);
       }
 
-      // Store user message
       await workingMemory.addUserMessage(convId, message);
 
-      // Build context from conversation history
       const contextWindow = await workingMemory.buildContext(convId);
 
-      // Build pipeline context
       const pipelineContext: PipelineContext = {
         userId,
         conversationId: convId,
@@ -278,7 +261,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         })),
       };
 
-      // Validate ack token if provided
       if (ackToken) {
         const valid = await auth.ackTokens.validate(ackToken, userId);
         if (valid) {
@@ -288,10 +270,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         }
       }
 
-      // Execute pipeline
       const result = await pipeline.process(message, pipelineContext);
 
-      // Store assistant message (if response generated)
       if (result.response) {
         await workingMemory.addAssistantMessage(convId, result.response, {
           stance: result.stance,
@@ -301,28 +281,23 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         });
       }
 
-      // Track veto if shield stopped or awaited
       if (result.status === 'stopped' || result.status === 'await_ack') {
         await trackVeto(userId);
       }
 
-      // Update session
       await auth.session.update(convId, {
         messageCount: 1,
         tokenCount: result.gateResults.model?.output?.tokensUsed ?? 0,
       });
 
-      // Track token usage
       if (result.gateResults.model?.output?.tokensUsed) {
         await auth.trackTokenUsage(userId, result.gateResults.model.output.tokensUsed);
       }
 
-      // Store ack token if returned
       if (result.ackToken) {
         await auth.ackTokens.store(result.ackToken, userId);
       }
 
-      // Audit log
       await auth.audit.log({
         userId,
         action: 'chat',
@@ -336,10 +311,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         },
       });
 
-      // Get updated conversation info
       const updatedConv = await workingMemory.get(convId);
 
-      // Include conversation info in response
       res.json({
         ...result,
         conversation: {
@@ -348,129 +321,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           messageCount: updatedConv?.messageCount ?? conversation.messageCount + 2,
           contextTruncated: contextWindow.truncated,
         },
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ENHANCED CHAT ENDPOINT (with Memory + Sword integration)
-  // NOTE: This endpoint uses enhanced-pipeline.js which is dead code.
-  // Consider removing this endpoint or implementing the enhanced pipeline.
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  router.post('/chat/enhanced', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const parseResult = ChatRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        throw new ClientError(
-          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
-        );
-      }
-
-      const { message, conversationId, context: reqContext } = parseResult.data;
-      const userId = req.userId ?? 'anonymous';
-      const requestId = crypto.randomUUID();
-
-      // Import enhanced pipeline dynamically to avoid circular deps
-      const { createEnhancedPipeline } = await import('../pipeline/enhanced-pipeline.js');
-      const enhancedPipeline = createEnhancedPipeline({
-        enableMemory: true,
-        enableSword: true,
-        enableAutoExtract: true,
-        enableSparkSuggestions: true,
-      });
-
-      // Execute enhanced pipeline
-      const result = await enhancedPipeline.execute(message, {
-        userId,
-        conversationId,
-        requestId,
-        timestamp: Date.now(),
-        actionSources: [],
-        timezone: reqContext?.timezone,
-        locale: reqContext?.locale,
-      });
-
-      // Track veto if shield stopped
-      if (result.status === 'stopped' || result.status === 'await_ack') {
-        await trackVeto(userId);
-      }
-
-      // Track token usage
-      if (result.gateResults.model?.output?.tokensUsed) {
-        await auth.trackTokenUsage(userId, result.gateResults.model.output.tokensUsed);
-      }
-
-      // Audit log
-      await auth.audit.log({
-        userId,
-        action: 'chat_enhanced',
-        requestId,
-        stance: result.stance,
-        status: result.status,
-        details: {
-          messageLength: message.length,
-          tokensUsed: result.gateResults.model?.output?.tokensUsed,
-          memoriesExtracted: result.hooks?.post.memoriesExtracted,
-          sparkSuggested: !!result.sparkSuggested,
-        },
-      });
-
-      res.json({
-        status: result.status,
-        response: result.response,
-        stance: result.stance,
-        conversationId: result.conversationId,
-        metadata: result.metadata,
-        
-        // Enhanced features
-        context: {
-          userName: result.context?.user.profile?.name,
-          activeGoals: result.context?.sword.activeGoals.map(g => ({
-            title: g.title,
-            progress: g.progress,
-          })),
-          currentSpark: result.context?.sword.currentSpark ? {
-            action: result.context.sword.currentSpark.action,
-            status: result.context.sword.currentSpark.status,
-          } : null,
-        },
-        
-        // Spark suggestion if any
-        sparkSuggested: result.sparkSuggested,
-        
-        // Post-processing results
-        processing: {
-          memoriesExtracted: result.hooks?.post.memoriesExtracted ?? 0,
-          profileUpdated: result.hooks?.post.profileUpdated ?? false,
-          goalProgressUpdated: result.hooks?.post.goalProgressUpdated ?? false,
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // CONTEXT PREVIEW ENDPOINT
-  // NOTE: This endpoint uses core/context which is dead code.
-  // Consider removing this endpoint.
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  router.get('/context', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { getContextBuilder } = await import('../core/context/index.js');
-      const builder = getContextBuilder();
-      
-      const conversationId = req.query.conversationId as string | undefined;
-      const context = await builder.build(req.userId!, conversationId ?? null, '');
-      const formatted = builder.formatForLLM(context);
-      
-      res.json({
-        context,
-        formatted,
       });
     } catch (error) {
       next(error);
@@ -521,7 +371,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // CONVERSATION ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // List user's conversations
   router.get('/conversations', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { limit = 20, offset = 0 } = req.query;
@@ -539,7 +388,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // Get single conversation with messages
   router.get('/conversations/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -550,7 +398,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         throw new ClientError('Conversation not found', 404);
       }
 
-      // Verify ownership
       if (conversation.userId !== req.userId) {
         throw new ClientError('Conversation not found', 404);
       }
@@ -566,7 +413,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // Get conversation messages only
   router.get('/conversations/:id/messages', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -589,7 +435,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // Update conversation (title, tags)
   router.patch('/conversations/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -616,7 +461,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // Delete conversation
   router.delete('/conversations/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -648,7 +492,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     try {
       const config = loadConfig();
       
-      // Return safe subset of config (no secrets)
       res.json({
         environment: config.env.environment,
         features: {
@@ -677,636 +520,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // SWORD ENDPOINTS — Goals, Quests, Steps, Sparks (Constitution §2.3)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const swordStore = getSwordStore();
-  const sparkGenerator = getSparkGenerator();
-
-  // ─── GOALS ───
-
-  router.post('/goals', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { title, description, desiredOutcome, interestLevel, targetDate, motivations, constraints, successCriteria, tags } = req.body;
-      
-      if (!title || !description || !desiredOutcome) {
-        throw new ClientError('title, description, and desiredOutcome required');
-      }
-
-      const goal = await swordStore.createGoal(req.userId!, {
-        title,
-        description,
-        desiredOutcome,
-        interestLevel,
-        targetDate,
-        motivations,
-        constraints,
-        successCriteria,
-        tags,
-      });
-
-      res.status(201).json({ goal });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/goals', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const status = req.query.status as string | undefined;
-      const goals = await swordStore.getUserGoals(req.userId!, status as any);
-      res.json({ goals });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/goals/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const goal = await swordStore.getGoal(req.params.id!);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Goal not found', 404);
-      }
-      
-      const quests = await swordStore.getQuestsForGoal(goal.id);
-      const path = await swordStore.getPath(goal.id, req.userId!);
-      
-      res.json({ goal, quests, path });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.patch('/goals/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const goal = await swordStore.getGoal(req.params.id!);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Goal not found', 404);
-      }
-
-      const { title, description, desiredOutcome, targetDate, motivations, constraints, successCriteria, tags } = req.body;
-      
-      const updated = await swordStore.updateGoal(req.params.id!, {
-        title,
-        description,
-        desiredOutcome,
-        targetDate,
-        motivations,
-        constraints,
-        successCriteria,
-        tags,
-      });
-
-      res.json({ goal: updated });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post('/goals/:id/transition', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const goal = await swordStore.getGoal(req.params.id!);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Goal not found', 404);
-      }
-
-      const event = req.body as GoalEvent;
-      if (!event.type) {
-        throw new ClientError('event type required');
-      }
-
-      const result = await swordStore.transitionGoalState(req.params.id!, event);
-      if (!result?.success) {
-        throw new ClientError(result?.error ?? 'Transition failed');
-      }
-
-      res.json({ goal: result.entity, transition: { from: result.previousStatus, to: result.newStatus } });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── QUESTS ───
-
-  router.post('/quests', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { goalId, title, description, outcome, priority, estimatedMinutes, targetDate, order } = req.body;
-      
-      if (!goalId || !title || !description || !outcome) {
-        throw new ClientError('goalId, title, description, and outcome required');
-      }
-
-      const quest = await swordStore.createQuest(req.userId!, {
-        goalId,
-        title,
-        description,
-        outcome,
-        priority,
-        estimatedMinutes,
-        targetDate,
-        order,
-      });
-
-      if (!quest) {
-        throw new ClientError('Goal not found or access denied', 404);
-      }
-
-      res.status(201).json({ quest });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/quests', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const goalId = req.query.goalId as string | undefined;
-      const status = req.query.status as string | undefined;
-      
-      if (goalId) {
-        const quests = await swordStore.getQuestsForGoal(goalId);
-        res.json({ quests: status ? quests.filter(q => q.status === status) : quests });
-      } else {
-        const goals = await swordStore.getUserGoals(req.userId!);
-        const allQuests = await Promise.all(goals.map(g => swordStore.getQuestsForGoal(g.id)));
-        const quests = allQuests.flat();
-        res.json({ quests: status ? quests.filter(q => q.status === status) : quests });
-      }
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/quests/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const quest = await swordStore.getQuest(req.params.id!);
-      if (!quest) {
-        throw new ClientError('Quest not found', 404);
-      }
-      
-      // Verify ownership through goal
-      const goal = await swordStore.getGoal(quest.goalId);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Quest not found', 404);
-      }
-      
-      const steps = await swordStore.getStepsForQuest(quest.id);
-      
-      res.json({ quest, steps });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.patch('/quests/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const quest = await swordStore.getQuest(req.params.id!);
-      if (!quest) {
-        throw new ClientError('Quest not found', 404);
-      }
-      
-      // Verify ownership through goal
-      const goal = await swordStore.getGoal(quest.goalId);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Quest not found', 404);
-      }
-
-      const { title, description, outcome, priority, estimatedMinutes, targetDate, order } = req.body;
-      
-      const updated = await swordStore.updateQuest(req.params.id!, {
-        title,
-        description,
-        outcome,
-        priority,
-        estimatedMinutes,
-        targetDate,
-        order,
-      });
-
-      res.json({ quest: updated });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post('/quests/:id/transition', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const quest = await swordStore.getQuest(req.params.id!);
-      if (!quest) {
-        throw new ClientError('Quest not found', 404);
-      }
-      
-      // Verify ownership through goal
-      const goal = await swordStore.getGoal(quest.goalId);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Quest not found', 404);
-      }
-
-      const event = req.body as QuestEvent;
-      if (!event.type) {
-        throw new ClientError('event type required');
-      }
-
-      const result = await swordStore.transitionQuestState(req.params.id!, event);
-      if (!result?.success) {
-        throw new ClientError(result?.error ?? 'Transition failed');
-      }
-
-      res.json({ quest: result.entity, transition: { from: result.previousStatus, to: result.newStatus } });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── STEPS ───
-
-  router.post('/steps', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { questId, title, description, estimatedMinutes, order } = req.body;
-      
-      if (!questId || !title || !description) {
-        throw new ClientError('questId, title, and description required');
-      }
-
-      const step = await swordStore.createStep(req.userId!, {
-        questId,
-        title,
-        description,
-        estimatedMinutes,
-        order,
-      });
-
-      if (!step) {
-        throw new ClientError('Quest not found or access denied', 404);
-      }
-
-      res.status(201).json({ step });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/steps/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const step = await swordStore.getStep(req.params.id!);
-      if (!step) {
-        throw new ClientError('Step not found', 404);
-      }
-      
-      // Verify ownership through quest -> goal
-      const quest = await swordStore.getQuest(step.questId);
-      if (!quest) {
-        throw new ClientError('Step not found', 404);
-      }
-      
-      const goal = await swordStore.getGoal(quest.goalId);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Step not found', 404);
-      }
-      
-      res.json({ step });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post('/steps/:id/transition', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const step = await swordStore.getStep(req.params.id!);
-      if (!step) {
-        throw new ClientError('Step not found', 404);
-      }
-      
-      // Verify ownership through quest -> goal
-      const quest = await swordStore.getQuest(step.questId);
-      if (!quest) {
-        throw new ClientError('Step not found', 404);
-      }
-      
-      const goal = await swordStore.getGoal(quest.goalId);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Step not found', 404);
-      }
-
-      const event = req.body as StepEvent;
-      if (!event.type) {
-        throw new ClientError('event type required');
-      }
-
-      const result = await swordStore.transitionStepState(req.params.id!, event);
-      if (!result?.success) {
-        throw new ClientError(result?.error ?? 'Transition failed');
-      }
-
-      res.json({ step: result.entity, transition: { from: result.previousStatus, to: result.newStatus } });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── SPARKS ───
-
-  router.post('/sparks/generate', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { goalId } = req.body;
-      
-      if (!goalId) {
-        throw new ClientError('goalId required');
-      }
-
-      const goal = await swordStore.getGoal(goalId);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Goal not found', 404);
-      }
-
-      const spark = await sparkGenerator.generateNextSpark(req.userId!, goalId);
-
-      res.json({ spark });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/sparks/active', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const spark = await swordStore.getActiveSpark(req.userId!);
-      res.json({ spark });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/sparks/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const spark = await swordStore.getSpark(req.params.id!);
-      if (!spark || spark.userId !== req.userId) {
-        throw new ClientError('Spark not found', 404);
-      }
-      
-      res.json({ spark });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post('/sparks/:id/transition', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const spark = await swordStore.getSpark(req.params.id!);
-      if (!spark || spark.userId !== req.userId) {
-        throw new ClientError('Spark not found', 404);
-      }
-
-      const event = req.body as SparkEvent;
-      if (!event.type) {
-        throw new ClientError('event type required');
-      }
-
-      const result = await swordStore.transitionSparkState(req.params.id!, event);
-      if (!result?.success) {
-        throw new ClientError(result?.error ?? 'Transition failed');
-      }
-
-      res.json({ spark: result.entity, transition: { from: result.previousStatus, to: result.newStatus } });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── PATH ───
-
-  router.get('/path/:goalId', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const goal = await swordStore.getGoal(req.params.goalId!);
-      if (!goal || goal.userId !== req.userId) {
-        throw new ClientError('Goal not found', 404);
-      }
-
-      const path = await swordStore.getPath(req.params.goalId!, req.userId!);
-      
-      res.json({ path });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // USER PROFILE & PREFERENCES ENDPOINTS
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const memoryStore = getMemoryStore();
-  const memoryExtractor = getMemoryExtractor();
-  const memoryRetriever = getMemoryRetriever();
-
-  router.get('/profile', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const profile = await memoryStore.getOrCreateProfile(req.userId!);
-      res.json({ profile });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.patch('/profile', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const updates = req.body;
-      const profile = await memoryStore.updateProfile(req.userId!, updates);
-      res.json({ profile });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/preferences', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const preferences = await memoryStore.getOrCreatePreferences(req.userId!);
-      res.json({ preferences });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.patch('/preferences', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const updates = req.body;
-      const preferences = await memoryStore.updatePreferences(req.userId!, updates);
-      res.json({ preferences });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // MEMORIES ENDPOINTS
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  router.get('/memories', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { category, limit = 50 } = req.query;
-      
-      let memories;
-      if (category) {
-        memories = await memoryStore.getMemoriesByCategory(req.userId!, category as MemoryCategory);
-      } else {
-        memories = await memoryStore.queryMemories(req.userId!, { limit: Number(limit) });
-      }
-
-      res.json({ memories });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/memories/stats', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const stats = await memoryStore.getMemoryStats(req.userId!);
-      res.json({ stats });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post('/memories', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { category, key, value, context, confidence, sensitivity, expiresAt } = req.body;
-      
-      if (!category || !key || !value) {
-        throw new ClientError('category, key, and value required');
-      }
-
-      const memory = await memoryStore.createMemory(req.userId!, {
-        category,
-        key,
-        value,
-        context,
-        confidence,
-        sensitivity,
-        expiresAt,
-      });
-
-      res.status(201).json({ memory });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/memories/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const memory = await memoryStore.getMemory(req.params.id!);
-      if (!memory || memory.userId !== req.userId) {
-        throw new ClientError('Memory not found', 404);
-      }
-
-      res.json({ memory });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.patch('/memories/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { value, context, confidence, sensitivity, expiresAt } = req.body;
-      
-      const memory = await memoryStore.updateMemory(req.params.id!, req.userId!, {
-        value,
-        context,
-        confidence,
-        sensitivity,
-        expiresAt,
-      });
-
-      if (!memory) {
-        throw new ClientError('Memory not found', 404);
-      }
-
-      res.json({ memory });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.delete('/memories/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const deleted = await memoryStore.deleteMemory(req.params.id!, req.userId!);
-      if (!deleted) {
-        throw new ClientError('Memory not found', 404);
-      }
-
-      res.json({ deleted: true });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.delete('/memories', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const category = req.query.category as MemoryCategory | undefined;
-      
-      let count: number;
-      if (category) {
-        count = await memoryStore.clearCategoryMemories(req.userId!, category);
-      } else {
-        count = await memoryStore.clearAllMemories(req.userId!);
-      }
-
-      res.json({ deleted: count });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── MEMORY EXTRACTION ───
-
-  router.post('/memories/extract', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { message, conversationId } = req.body;
-      
-      if (!message) {
-        throw new ClientError('message required');
-      }
-
-      const result = await memoryExtractor.extractAndSave(req.userId!, message, conversationId);
-
-      res.json({
-        saved: result.saved.length,
-        memories: result.saved,
-        profileUpdated: result.profileUpdated,
-        preferencesUpdated: result.preferencesUpdated,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── CONTEXT RETRIEVAL ───
-
-  router.post('/memories/context', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { message } = req.body;
-      
-      const injection = await memoryRetriever.buildContextInjection(req.userId!, message || '');
-      const formatted = memoryRetriever.formatContextForLLM(injection);
-
-      res.json({
-        injection,
-        formatted,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─── MEMORY DECAY ───
-
-  router.post('/memories/decay', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const result = await memoryStore.decayMemories(req.userId!);
-      res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ADMIN ENDPOINTS (would be more restricted in production)
+  // ADMIN ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.post('/admin/block-user', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -1359,7 +573,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // Audit logs endpoint
   router.get('/admin/audit-logs', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { userId: targetUserId, limit = 100 } = req.query;
@@ -1412,7 +625,3 @@ export function errorHandler(
     code: 'INTERNAL_ERROR',
   });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// BACKWARD COMPATIBILITY
-// ─────────────────────────────────────────────────────────────────────────────────

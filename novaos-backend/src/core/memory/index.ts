@@ -1,57 +1,30 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MEMORY MODULE — User Profile, Preferences, and Context Learning
+// MEMORY MODULE — Working Memory Only
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// Nova's memory system enables personalization while respecting privacy.
+// CLEANED: Removed broken semantic memory exports (extractor, retriever, store)
 //
-// Components:
-// - Store: Persistence for memories, profile, preferences
-// - Extractor: Learns facts from conversations
-// - Retriever: Retrieves relevant context for LLM injection
+// This module now only exports Working Memory (conversation history).
+// Episodic Memory is handled by gates/memory_gate/ (in pipeline).
+//
+// Future: Semantic Memory (long-term facts, profile, preferences) — TODO
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Types
+// Working Memory (conversation context)
+export {
+  workingMemory,
+  getWorkingMemoryStore,
+  WorkingMemoryStore,
+} from './working_memory/index.js';
+
 export type {
-  MemoryCategory,
-  MemoryConfidence,
-  MemorySensitivity,
-  Memory,
-  MemorySource,
-  UserProfile,
-  ProjectContext,
-  UserPreferences,
-  ExtractedMemory,
-  ExtractionResult,
-  MemoryQuery,
-  RetrievalResult,
-  ContextInjection,
-  CreateMemoryRequest,
-  UpdateMemoryRequest,
-  MemoryStats,
-} from './types.js';
+  Message,
+  MessageMetadata,
+  Conversation,
+  ConversationMetadata,
+  ConversationWithMessages,
+  ContextWindow,
+} from './working_memory/types.js';
 
-export {
-  DEFAULT_PREFERENCES,
-  DEFAULT_PROFILE,
-  MEMORY_DECAY_CONFIG,
-} from './types.js';
-
-// Store
-export {
-  MemoryStore,
-  getMemoryStore,
-} from './store.js';
-
-// Extractor
-export {
-  MemoryExtractor,
-  getMemoryExtractor,
-  createMemoryExtractor,
-} from './extractor.js';
-
-// Retriever
-export {
-  MemoryRetriever,
-  getMemoryRetriever,
-} from './retriever.js';
+export { WORKING_MEMORY_CONFIG } from './working_memory/types.js';
