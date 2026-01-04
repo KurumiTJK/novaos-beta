@@ -1,67 +1,41 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONVERSATION MODULE — History Persistence + Context Management
+// WORKING MEMORY — Store
+// Session-based conversation history with security and performance fixes
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// FIXES APPLIED:
+// 1. LTRIM after LPUSH — prevents unbounded message list growth
+// 2. TTL on messages list — prevents orphaned data
+// 3. Ownership verification — prevents conversation hijacking
+// 4. Refresh TTL on messages list when adding — keeps in sync with conversation
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { getStore, type KeyValueStore } from '../storage/index.js';
+import type { KeyValueStore } from '../../../storage/index.js';
+import type {
+  Message,
+  Conversation,
+  ConversationWithMessages,
+  ContextWindow,
+} from './types.js';
+import { WORKING_MEMORY_CONFIG } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// TYPES
+// REDIS KEY STRUCTURE
+// ─────────────────────────────────────────────────────────────────────────────────
+//
+// conv:{conversationId}           → JSON: Conversation metadata
+// conv:{conversationId}:messages  → List: Messages (newest first via LPUSH)
+// user:{userId}:conversations     → List: User's conversation IDs
+//
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: number;
-  metadata?: {
-    stance?: string;
-    status?: string;
-    tokensUsed?: number;
-    gateResults?: Record<string, any>;
-    liveData?: boolean;
-  };
-}
-
-export interface Conversation {
-  id: string;
-  userId: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messageCount: number;
-  totalTokens: number;
-  metadata?: {
-    lastStance?: string;
-    tags?: string[];
-  };
-}
-
-export interface ConversationWithMessages extends Conversation {
-  messages: Message[];
-}
-
-export interface ContextWindow {
-  messages: Message[];
-  totalTokens: number;
-  truncated: boolean;
-  oldestIncluded: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-const MAX_CONTEXT_TOKENS = 8000;  // Leave room for response
-const MAX_MESSAGES_IN_CONTEXT = 50;
-const CONVERSATION_TTL_DAYS = 30;
-const CONVERSATION_TTL_SECONDS = CONVERSATION_TTL_DAYS * 24 * 60 * 60;
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONVERSATION STORE
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export class ConversationStore {
+export class WorkingMemoryStore {
   constructor(private store: KeyValueStore) {}
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // KEY GENERATORS
+  // ─────────────────────────────────────────────────────────────────────────────
 
   private getConversationKey(conversationId: string): string {
     return `conv:${conversationId}`;
@@ -91,11 +65,13 @@ export class ConversationStore {
       totalTokens: 0,
     };
 
-    // Store conversation
+    const ttl = WORKING_MEMORY_CONFIG.CONVERSATION_TTL_SECONDS;
+
+    // Store conversation with TTL
     await this.store.set(
       this.getConversationKey(conversationId),
       JSON.stringify(conversation),
-      CONVERSATION_TTL_SECONDS
+      ttl
     );
 
     // Add to user's conversation list
@@ -125,7 +101,7 @@ export class ConversationStore {
     await this.store.set(
       this.getConversationKey(conversationId),
       JSON.stringify(updated),
-      CONVERSATION_TTL_SECONDS
+      WORKING_MEMORY_CONFIG.CONVERSATION_TTL_SECONDS
     );
 
     return updated;
@@ -135,22 +111,52 @@ export class ConversationStore {
     const conversation = await this.get(conversationId);
     if (!conversation) return false;
 
-    // Delete conversation data
+    // Delete conversation metadata
     await this.store.delete(this.getConversationKey(conversationId));
     
-    // Delete messages
+    // Delete messages list
     await this.store.delete(this.getMessagesKey(conversationId));
 
-    // Note: We don't remove from user list (would require list manipulation)
-    // The list will naturally clean up when conversations are fetched
+    // Note: User's conversation list will self-clean when fetched (null entries filtered)
+    // A proper cleanup would require LREM which is O(n)
 
     return true;
   }
 
+  /**
+   * Get or create a conversation with ownership verification.
+   * 
+   * SECURITY FIX: Prevents user A from hijacking user B's conversation
+   * by guessing the conversationId.
+   */
   async getOrCreate(userId: string, conversationId: string): Promise<Conversation> {
     const existing = await this.get(conversationId);
-    if (existing) return existing;
+    
+    if (existing) {
+      // SECURITY: Verify ownership
+      if (existing.userId !== userId) {
+        // Log the attempt but don't reveal the conversation exists
+        console.warn(
+          `[WORKING_MEMORY] Ownership mismatch for ${conversationId}. ` +
+          `Requested by ${userId}, owned by ${existing.userId}. Creating new conversation.`
+        );
+        // Create new conversation with modified ID
+        const newId = `${conversationId}_${Date.now()}`;
+        return this.create(userId, newId);
+      }
+      return existing;
+    }
+    
     return this.create(userId, conversationId);
+  }
+
+  /**
+   * Verify that a conversation belongs to a user.
+   * Use this for explicit ownership checks in routes.
+   */
+  async verifyOwnership(conversationId: string, userId: string): Promise<boolean> {
+    const conversation = await this.get(conversationId);
+    return conversation !== null && conversation.userId === userId;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -191,11 +197,17 @@ export class ConversationStore {
       timestamp: Date.now(),
     };
 
-    // Add to messages list
-    await this.store.lpush(
-      this.getMessagesKey(conversationId),
-      JSON.stringify(fullMessage)
-    );
+    const messagesKey = this.getMessagesKey(conversationId);
+    const ttl = WORKING_MEMORY_CONFIG.CONVERSATION_TTL_SECONDS;
+
+    // Add to messages list (newest first)
+    await this.store.lpush(messagesKey, JSON.stringify(fullMessage));
+
+    // FIX 1: Trim to prevent unbounded growth
+    await this.store.ltrim(messagesKey, 0, WORKING_MEMORY_CONFIG.MAX_MESSAGES_STORED - 1);
+
+    // FIX 2: Refresh TTL on messages list to keep in sync with conversation
+    await this.store.expire(messagesKey, ttl);
 
     // Update conversation stats
     const conversation = await this.get(conversationId);
@@ -252,8 +264,8 @@ export class ConversationStore {
 
   async buildContextWindow(
     conversationId: string,
-    maxTokens: number = MAX_CONTEXT_TOKENS,
-    maxMessages: number = MAX_MESSAGES_IN_CONTEXT
+    maxTokens: number = WORKING_MEMORY_CONFIG.MAX_CONTEXT_TOKENS,
+    maxMessages: number = WORKING_MEMORY_CONFIG.MAX_MESSAGES_IN_CONTEXT
   ): Promise<ContextWindow> {
     const messages = await this.getMessages(conversationId, maxMessages * 2);
     
@@ -316,85 +328,16 @@ export class ConversationStore {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SINGLETON INSTANCE
+// SINGLETON
 // ─────────────────────────────────────────────────────────────────────────────────
 
-let conversationStore: ConversationStore | null = null;
+import { getStore } from '../../../storage/index.js';
 
-export function getConversationStore(): ConversationStore {
-  if (!conversationStore) {
-    conversationStore = new ConversationStore(getStore());
+let workingMemoryStore: WorkingMemoryStore | null = null;
+
+export function getWorkingMemoryStore(): WorkingMemoryStore {
+  if (!workingMemoryStore) {
+    workingMemoryStore = new WorkingMemoryStore(getStore());
   }
-  return conversationStore;
+  return workingMemoryStore;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONVERSATION SERVICE (high-level operations)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export const conversations = {
-  async getOrCreate(userId: string, conversationId: string) {
-    return getConversationStore().getOrCreate(userId, conversationId);
-  },
-
-  async get(conversationId: string) {
-    return getConversationStore().get(conversationId);
-  },
-
-  async list(userId: string, limit?: number, offset?: number) {
-    return getConversationStore().listUserConversations(userId, limit, offset);
-  },
-
-  async delete(conversationId: string) {
-    return getConversationStore().delete(conversationId);
-  },
-
-  async addUserMessage(conversationId: string, content: string) {
-    return getConversationStore().addMessage(conversationId, {
-      role: 'user',
-      content,
-    });
-  },
-
-  async addAssistantMessage(
-    conversationId: string,
-    content: string,
-    metadata?: Message['metadata']
-  ) {
-    return getConversationStore().addMessage(conversationId, {
-      role: 'assistant',
-      content,
-      metadata,
-    });
-  },
-
-  async getMessages(conversationId: string, limit?: number) {
-    return getConversationStore().getMessages(conversationId, limit);
-  },
-
-  async getFull(conversationId: string) {
-    return getConversationStore().getFullConversation(conversationId);
-  },
-
-  async buildContext(conversationId: string, maxTokens?: number) {
-    return getConversationStore().buildContextWindow(conversationId, maxTokens);
-  },
-
-  async updateTitle(conversationId: string, title: string) {
-    return getConversationStore().update(conversationId, { title });
-  },
-
-  async addTag(conversationId: string, tag: string) {
-    const conv = await getConversationStore().get(conversationId);
-    if (!conv) return null;
-    
-    const tags = conv.metadata?.tags ?? [];
-    if (!tags.includes(tag)) {
-      tags.push(tag);
-      return getConversationStore().update(conversationId, {
-        metadata: { ...conv.metadata, tags },
-      });
-    }
-    return conv;
-  },
-};

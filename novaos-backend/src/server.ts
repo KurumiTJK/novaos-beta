@@ -11,6 +11,8 @@ import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify } from './config/index.js';
 import { getLogger } from './logging/index.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
+// NEW: Import episodic memory gate initializer
+import { initializeMemoryStore } from './gates/memory_gate/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENVIRONMENT CONFIG
@@ -98,6 +100,10 @@ async function startServer() {
 
   // Initialize storage (Redis or memory fallback)
   await storeManager.initialize();
+
+  // NEW: Initialize episodic memory gate store
+  initializeMemoryStore(storeManager.getStore());
+  console.log('[MEMORY_GATE] Episodic memory store initialized');
 
   const config = loadConfig();
 

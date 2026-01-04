@@ -14,7 +14,8 @@ import {
   trackVeto,
   getRecentVetoCount,
 } from '../auth/index.js';
-import { conversations } from '../conversations/index.js';
+// CHANGED: Import workingMemory from new location
+import { workingMemory } from '../core/memory/working_memory/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
 import {
   getSwordStore,
@@ -235,7 +236,20 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
       // Get or create conversation and session
       const convId = conversationId ?? crypto.randomUUID();
-      const conversation = await conversations.getOrCreate(userId, convId);
+      
+      // SECURITY: Verify ownership if conversationId provided
+      if (conversationId) {
+        const isOwner = await workingMemory.verifyOwnership(conversationId, userId);
+        if (!isOwner) {
+          const existing = await workingMemory.get(conversationId);
+          if (existing) {
+            // Conversation exists but belongs to someone else
+            throw new ClientError('Conversation not found', 404);
+          }
+        }
+      }
+      
+      const conversation = await workingMemory.getOrCreate(userId, convId);
       
       let session = await auth.session.get(convId);
       if (!session) {
@@ -243,10 +257,10 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       }
 
       // Store user message
-      await conversations.addUserMessage(convId, message);
+      await workingMemory.addUserMessage(convId, message);
 
       // Build context from conversation history
-      const contextWindow = await conversations.buildContext(convId);
+      const contextWindow = await workingMemory.buildContext(convId);
 
       // Build pipeline context
       const pipelineContext: PipelineContext = {
@@ -279,7 +293,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
       // Store assistant message (if response generated)
       if (result.response) {
-        await conversations.addAssistantMessage(convId, result.response, {
+        await workingMemory.addAssistantMessage(convId, result.response, {
           stance: result.stance,
           status: result.status,
           tokensUsed: result.gateResults.model?.output?.tokensUsed,
@@ -323,7 +337,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       });
 
       // Get updated conversation info
-      const updatedConv = await conversations.get(convId);
+      const updatedConv = await workingMemory.get(convId);
 
       // Include conversation info in response
       res.json({
@@ -342,6 +356,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ENHANCED CHAT ENDPOINT (with Memory + Sword integration)
+  // NOTE: This endpoint uses enhanced-pipeline.js which is dead code.
+  // Consider removing this endpoint or implementing the enhanced pipeline.
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.post('/chat/enhanced', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -439,6 +455,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CONTEXT PREVIEW ENDPOINT
+  // NOTE: This endpoint uses core/context which is dead code.
+  // Consider removing this endpoint.
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.get('/context', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -509,7 +527,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       const { limit = 20, offset = 0 } = req.query;
       const userId = req.userId!;
 
-      const convList = await conversations.list(userId, Number(limit), Number(offset));
+      const convList = await workingMemory.list(userId, Number(limit), Number(offset));
 
       res.json({
         conversations: convList,
@@ -527,7 +545,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       const id = req.params.id as string;
       const { messagesLimit = 100 } = req.query;
 
-      const conversation = await conversations.get(id);
+      const conversation = await workingMemory.get(id);
       if (!conversation) {
         throw new ClientError('Conversation not found', 404);
       }
@@ -537,7 +555,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         throw new ClientError('Conversation not found', 404);
       }
 
-      const messages = await conversations.getMessages(id, Number(messagesLimit));
+      const messages = await workingMemory.getMessages(id, Number(messagesLimit));
 
       res.json({
         ...conversation,
@@ -554,12 +572,12 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       const id = req.params.id as string;
       const { limit = 100, offset = 0 } = req.query;
 
-      const conversation = await conversations.get(id);
+      const conversation = await workingMemory.get(id);
       if (!conversation || conversation.userId !== req.userId) {
         throw new ClientError('Conversation not found', 404);
       }
 
-      const messages = await conversations.getMessages(id, Number(limit));
+      const messages = await workingMemory.getMessages(id, Number(limit));
 
       res.json({
         conversationId: id,
@@ -577,18 +595,18 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       const id = req.params.id as string;
       const { title, tags } = req.body;
 
-      const conversation = await conversations.get(id);
+      const conversation = await workingMemory.get(id);
       if (!conversation || conversation.userId !== req.userId) {
         throw new ClientError('Conversation not found', 404);
       }
 
       let updated = conversation;
       if (title) {
-        updated = await conversations.updateTitle(id, title) ?? conversation;
+        updated = await workingMemory.updateTitle(id, title) ?? conversation;
       }
       if (tags && Array.isArray(tags)) {
         for (const tag of tags) {
-          updated = await conversations.addTag(id, tag as string) ?? updated;
+          updated = await workingMemory.addTag(id, tag as string) ?? updated;
         }
       }
 
@@ -603,12 +621,12 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     try {
       const id = req.params.id as string;
 
-      const conversation = await conversations.get(id);
+      const conversation = await workingMemory.get(id);
       if (!conversation || conversation.userId !== req.userId) {
         throw new ClientError('Conversation not found', 404);
       }
 
-      await conversations.delete(id);
+      await workingMemory.delete(id);
 
       await auth.audit.log({
         userId: req.userId!,
@@ -799,10 +817,35 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
+  router.get('/quests', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const goalId = req.query.goalId as string | undefined;
+      const status = req.query.status as string | undefined;
+      
+      if (goalId) {
+        const quests = await swordStore.getQuestsForGoal(goalId);
+        res.json({ quests: status ? quests.filter(q => q.status === status) : quests });
+      } else {
+        const goals = await swordStore.getUserGoals(req.userId!);
+        const allQuests = await Promise.all(goals.map(g => swordStore.getQuestsForGoal(g.id)));
+        const quests = allQuests.flat();
+        res.json({ quests: status ? quests.filter(q => q.status === status) : quests });
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/quests/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const quest = await swordStore.getQuest(req.params.id!);
-      if (!quest || quest.userId !== req.userId) {
+      if (!quest) {
+        throw new ClientError('Quest not found', 404);
+      }
+      
+      // Verify ownership through goal
+      const goal = await swordStore.getGoal(quest.goalId);
+      if (!goal || goal.userId !== req.userId) {
         throw new ClientError('Quest not found', 404);
       }
       
@@ -814,10 +857,47 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
+  router.patch('/quests/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const quest = await swordStore.getQuest(req.params.id!);
+      if (!quest) {
+        throw new ClientError('Quest not found', 404);
+      }
+      
+      // Verify ownership through goal
+      const goal = await swordStore.getGoal(quest.goalId);
+      if (!goal || goal.userId !== req.userId) {
+        throw new ClientError('Quest not found', 404);
+      }
+
+      const { title, description, outcome, priority, estimatedMinutes, targetDate, order } = req.body;
+      
+      const updated = await swordStore.updateQuest(req.params.id!, {
+        title,
+        description,
+        outcome,
+        priority,
+        estimatedMinutes,
+        targetDate,
+        order,
+      });
+
+      res.json({ quest: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post('/quests/:id/transition', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const quest = await swordStore.getQuest(req.params.id!);
-      if (!quest || quest.userId !== req.userId) {
+      if (!quest) {
+        throw new ClientError('Quest not found', 404);
+      }
+      
+      // Verify ownership through goal
+      const goal = await swordStore.getGoal(quest.goalId);
+      if (!goal || goal.userId !== req.userId) {
         throw new ClientError('Quest not found', 404);
       }
 
@@ -841,30 +921,49 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/steps', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { questId, title, description, type, estimatedMinutes, sparkPrompt, verificationRequired, order } = req.body;
+      const { questId, title, description, estimatedMinutes, order } = req.body;
       
-      if (!questId || !title) {
-        throw new ClientError('questId and title required');
+      if (!questId || !title || !description) {
+        throw new ClientError('questId, title, and description required');
       }
 
-      // Verify quest ownership
-      const quest = await swordStore.getQuest(questId);
-      if (!quest || quest.userId !== req.userId) {
-        throw new ClientError('Quest not found or access denied', 404);
-      }
-
-      const step = await swordStore.createStep({
+      const step = await swordStore.createStep(req.userId!, {
         questId,
         title,
         description,
-        type,
         estimatedMinutes,
-        sparkPrompt,
-        verificationRequired,
         order,
       });
 
+      if (!step) {
+        throw new ClientError('Quest not found or access denied', 404);
+      }
+
       res.status(201).json({ step });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/steps/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const step = await swordStore.getStep(req.params.id!);
+      if (!step) {
+        throw new ClientError('Step not found', 404);
+      }
+      
+      // Verify ownership through quest -> goal
+      const quest = await swordStore.getQuest(step.questId);
+      if (!quest) {
+        throw new ClientError('Step not found', 404);
+      }
+      
+      const goal = await swordStore.getGoal(quest.goalId);
+      if (!goal || goal.userId !== req.userId) {
+        throw new ClientError('Step not found', 404);
+      }
+      
+      res.json({ step });
     } catch (error) {
       next(error);
     }
@@ -876,11 +975,16 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       if (!step) {
         throw new ClientError('Step not found', 404);
       }
-
-      // Verify ownership via quest
+      
+      // Verify ownership through quest -> goal
       const quest = await swordStore.getQuest(step.questId);
-      if (!quest || quest.userId !== req.userId) {
-        throw new ClientError('Access denied', 403);
+      if (!quest) {
+        throw new ClientError('Step not found', 404);
+      }
+      
+      const goal = await swordStore.getGoal(quest.goalId);
+      if (!goal || goal.userId !== req.userId) {
+        throw new ClientError('Step not found', 404);
       }
 
       const event = req.body as StepEvent;
@@ -903,18 +1007,20 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/sparks/generate', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { stepId, questId, goalId, context, maxMinutes, frictionLevel } = req.body;
+      const { goalId } = req.body;
+      
+      if (!goalId) {
+        throw new ClientError('goalId required');
+      }
 
-      const spark = await sparkGenerator.generate(req.userId!, {
-        stepId,
-        questId,
-        goalId,
-        context,
-        maxMinutes,
-        frictionLevel,
-      });
+      const goal = await swordStore.getGoal(goalId);
+      if (!goal || goal.userId !== req.userId) {
+        throw new ClientError('Goal not found', 404);
+      }
 
-      res.status(201).json({ spark });
+      const spark = await sparkGenerator.generateNextSpark(req.userId!, goalId);
+
+      res.json({ spark });
     } catch (error) {
       next(error);
     }
@@ -929,11 +1035,14 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  router.get('/sparks', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  router.get('/sparks/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const limit = parseInt(req.query.limit as string) || 10;
-      const sparks = await swordStore.getUserSparks(req.userId!, limit);
-      res.json({ sparks });
+      const spark = await swordStore.getSpark(req.params.id!);
+      if (!spark || spark.userId !== req.userId) {
+        throw new ClientError('Spark not found', 404);
+      }
+      
+      res.json({ spark });
     } catch (error) {
       next(error);
     }
@@ -962,43 +1071,30 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   });
 
-  // ─── PATH (combined view) ───
+  // ─── PATH ───
 
   router.get('/path/:goalId', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const path = await swordStore.getPath(req.params.goalId!, req.userId!);
-      if (!path) {
-        throw new ClientError('Goal not found or access denied', 404);
+      const goal = await swordStore.getGoal(req.params.goalId!);
+      if (!goal || goal.userId !== req.userId) {
+        throw new ClientError('Goal not found', 404);
       }
 
+      const path = await swordStore.getPath(req.params.goalId!, req.userId!);
+      
       res.json({ path });
     } catch (error) {
       next(error);
     }
   });
 
-  router.post('/path/:goalId/next-spark', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const spark = await sparkGenerator.generateNextSpark(req.userId!, req.params.goalId!);
-      if (!spark) {
-        throw new ClientError('Could not generate spark for this goal', 400);
-      }
-
-      res.json({ spark });
-    } catch (error) {
-      next(error);
-    }
-  });
-
   // ─────────────────────────────────────────────────────────────────────────────
-  // MEMORY ENDPOINTS — User Profile, Preferences, Learned Context
+  // USER PROFILE & PREFERENCES ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
   const memoryStore = getMemoryStore();
   const memoryExtractor = getMemoryExtractor();
   const memoryRetriever = getMemoryRetriever();
-
-  // ─── PROFILE ───
 
   router.get('/profile', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
@@ -1011,26 +1107,13 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.patch('/profile', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { name, role, organization, location, timezone, expertiseAreas, expertiseLevel, interests } = req.body;
-      
-      const profile = await memoryStore.updateProfile(req.userId!, {
-        name,
-        role,
-        organization,
-        location,
-        timezone,
-        expertiseAreas,
-        expertiseLevel,
-        interests,
-      });
-
+      const updates = req.body;
+      const profile = await memoryStore.updateProfile(req.userId!, updates);
       res.json({ profile });
     } catch (error) {
       next(error);
     }
   });
-
-  // ─── PREFERENCES ───
 
   router.get('/preferences', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
@@ -1043,51 +1126,28 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.patch('/preferences', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const {
-        tone, verbosity, formatting,
-        proactiveReminders, suggestNextSteps, askClarifyingQuestions,
-        riskTolerance, financialAlerts, healthAlerts,
-        memoryEnabled, autoExtractFacts, sensitiveTopics,
-        defaultMode, showConfidenceLevel, showSources,
-      } = req.body;
-      
-      const preferences = await memoryStore.updatePreferences(req.userId!, {
-        tone,
-        verbosity,
-        formatting,
-        proactiveReminders,
-        suggestNextSteps,
-        askClarifyingQuestions,
-        riskTolerance,
-        financialAlerts,
-        healthAlerts,
-        memoryEnabled,
-        autoExtractFacts,
-        sensitiveTopics,
-        defaultMode,
-        showConfidenceLevel,
-        showSources,
-      });
-
+      const updates = req.body;
+      const preferences = await memoryStore.updatePreferences(req.userId!, updates);
       res.json({ preferences });
     } catch (error) {
       next(error);
     }
   });
 
-  // ─── MEMORIES ───
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MEMORIES ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────────
 
   router.get('/memories', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const category = req.query.category as MemoryCategory | undefined;
-      const keywords = req.query.keywords ? String(req.query.keywords).split(',') : undefined;
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+      const { category, limit = 50 } = req.query;
       
-      const memories = await memoryStore.queryMemories(req.userId!, {
-        categories: category ? [category] : undefined,
-        keywords,
-        limit,
-      });
+      let memories;
+      if (category) {
+        memories = await memoryStore.getMemoriesByCategory(req.userId!, category as MemoryCategory);
+      } else {
+        memories = await memoryStore.queryMemories(req.userId!, { limit: Number(limit) });
+      }
 
       res.json({ memories });
     } catch (error) {
