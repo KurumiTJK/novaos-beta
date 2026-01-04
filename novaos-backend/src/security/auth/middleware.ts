@@ -1,326 +1,170 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// AUTHENTICATION MIDDLEWARE — JWT Verification & Context Building
-// NovaOS Security Module — Phase 2
+// AUTH MIDDLEWARE — Express Authentication Middleware
+// NovaOS Security Module
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { Response, NextFunction } from 'express';
-import {
-  createRequestId,
-  createCorrelationId,
-  createTimestamp,
-  type UserId,
-} from '../../types/branded.js';
-import { getLogger } from '../../logging/index.js';
-import {
-  type SecureRequest,
-  type RequestContext,
-  type AuthenticatedUser,
-  type AuthEvent,
-  type TokenError,
-  createAnonymousContext,
-  createUserContext,
-  fromLegacyPayload,
-  type LegacyUserPayload,
+import type {
+  AuthenticatedRequest,
+  AuthMiddlewareOptions,
+  AuthEvent,
+  AuthEventType,
+  AuthenticatedUser,
+  UserTier,
 } from './types.js';
 import {
   verifyToken,
   extractBearerToken,
   extractApiKey,
-  areUserTokensRevoked,
+  isUserTokensRevoked,
 } from './tokens.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LOGGER
+// EVENT HANDLERS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const logger = getLogger({ component: 'auth' });
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// AUTH EVENT EMITTER (for audit logging)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-type AuthEventHandler = (event: AuthEvent) => void | Promise<void>;
-
+type AuthEventHandler = (event: AuthEvent) => void;
 const eventHandlers: AuthEventHandler[] = [];
 
-/**
- * Register an auth event handler (for audit logging).
- */
 export function onAuthEvent(handler: AuthEventHandler): void {
   eventHandlers.push(handler);
 }
 
-/**
- * Emit an auth event to all handlers.
- */
-async function emitAuthEvent(event: AuthEvent): Promise<void> {
-  for (const handler of eventHandlers) {
-    try {
-      await handler(event);
-    } catch (error) {
-      logger.error('Auth event handler error', error instanceof Error ? error : undefined);
-    }
-  }
-}
-
-/**
- * Clear all event handlers (for testing).
- * @internal
- */
 export function clearAuthEventHandlers(): void {
   eventHandlers.length = 0;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONTEXT BUILDER
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Build request context from Express request.
- */
-function buildRequestContext(req: SecureRequest): Omit<RequestContext, 'user' | 'service' | 'isAuthenticated' | 'isService' | 'isAnonymous'> {
-  // Use existing requestId from request middleware, or generate new one
-  const requestId = createRequestId(req.requestId ?? req.headers['x-request-id'] as string);
-  
-  // Correlation ID for distributed tracing (propagate from header or use requestId)
-  const correlationId = createCorrelationId(
-    req.headers['x-correlation-id'] as string ?? requestId
-  );
-
-  return {
-    requestId,
-    correlationId,
-    timestamp: createTimestamp(),
-    startTime: req.startTime ?? Date.now(),
-    ip: getClientIp(req),
+function emitAuthEvent(
+  type: AuthEventType,
+  req: AuthenticatedRequest,
+  details?: Record<string, unknown>
+): void {
+  const event: AuthEvent = {
+    type,
+    userId: req.userId,
+    timestamp: Date.now(),
+    ip: req.ip ?? req.socket?.remoteAddress,
     userAgent: req.headers['user-agent'],
-    origin: req.headers.origin,
+    details,
   };
-}
-
-/**
- * Extract client IP, handling proxies.
- */
-function getClientIp(req: SecureRequest): string {
-  // Trust X-Forwarded-For if behind proxy (configured in Express)
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    // Take first IP in chain (original client)
-    const first = forwarded.split(',')[0];
-    return first?.trim() ?? 'unknown';
+  
+  for (const handler of eventHandlers) {
+    try {
+      handler(event);
+    } catch (error) {
+      console.error('[AUTH] Event handler error:', error);
+    }
   }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    const first = forwarded[0]?.split(',')[0];
-    return first?.trim() ?? 'unknown';
-  }
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ERROR RESPONSES
+// ERROR CODES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Authentication error codes for API responses.
- */
 export const AuthErrorCode = {
   AUTH_REQUIRED: 'AUTH_REQUIRED',
-  TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_INVALID: 'TOKEN_INVALID',
+  TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_REVOKED: 'TOKEN_REVOKED',
   TOKEN_MALFORMED: 'TOKEN_MALFORMED',
-  USER_BLOCKED: 'USER_BLOCKED',
+  INSUFFICIENT_PERMISSIONS: 'INSUFFICIENT_PERMISSIONS',
 } as const;
 
-export type AuthErrorCode = typeof AuthErrorCode[keyof typeof AuthErrorCode];
-
-/**
- * Map internal token error to API error code.
- * Sanitizes internal details for external responses.
- */
-function tokenErrorToApiError(error: TokenError): { code: AuthErrorCode; message: string } {
-  switch (error.code) {
-    case 'EXPIRED':
-      return { code: 'TOKEN_EXPIRED', message: 'Token has expired' };
-    case 'REVOKED':
-      return { code: 'TOKEN_REVOKED', message: 'Token has been revoked' };
-    case 'INVALID_SIGNATURE':
-    case 'INVALID_ISSUER':
-    case 'INVALID_AUDIENCE':
-      return { code: 'TOKEN_INVALID', message: 'Invalid token' };
-    case 'MALFORMED':
-      return { code: 'TOKEN_MALFORMED', message: 'Malformed token' };
-    case 'MISSING':
-      return { code: 'AUTH_REQUIRED', message: 'Authentication required' };
-    default:
-      return { code: 'TOKEN_INVALID', message: 'Invalid token' };
-  }
-}
-
-/**
- * Send 401 response with sanitized error.
- */
-function sendAuthError(
-  res: Response,
-  code: AuthErrorCode,
-  message: string
-): void {
-  res.status(401).json({
-    error: message,
-    code,
-  });
-}
-
 // ─────────────────────────────────────────────────────────────────────────────────
-// AUTHENTICATION MIDDLEWARE
+// MAIN MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Options for authentication middleware.
- */
-export interface AuthMiddlewareOptions {
-  /**
-   * Whether authentication is required.
-   * If false, unauthenticated requests proceed with anonymous context.
-   */
-  readonly required?: boolean;
-
-  /**
-   * Custom error message for missing auth.
-   */
-  readonly missingAuthMessage?: string;
-
-  /**
-   * Skip authentication for specific paths.
-   */
-  readonly skipPaths?: readonly string[];
-
-  /**
-   * Check if user tokens are globally revoked.
-   */
-  readonly checkUserRevocation?: boolean;
-}
-
-/**
- * Create authentication middleware.
+ * Authentication middleware.
  * 
  * @example
- * // Required auth
- * app.use('/api', authenticate({ required: true }));
+ * // Require authentication
+ * router.get('/protected', authenticate(), handler);
  * 
- * // Optional auth (anonymous allowed)
- * app.use('/public', authenticate({ required: false }));
+ * // Optional authentication
+ * router.get('/public', authenticate({ required: false }), handler);
+ * 
+ * // Skip certain paths
+ * app.use(authenticate({ skipPaths: ['/health', '/version'] }));
  */
 export function authenticate(options: AuthMiddlewareOptions = {}) {
   const {
     required = true,
-    missingAuthMessage = 'Authentication required',
+    allowApiKey = true,
     skipPaths = [],
-    checkUserRevocation = true,
   } = options;
-
-  return async (req: SecureRequest, res: Response, next: NextFunction): Promise<void> => {
-    const contextBase = buildRequestContext(req);
-
-    // Check skip paths
+  
+  return async (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    // Check if path should be skipped
     if (skipPaths.some(path => req.path.startsWith(path))) {
-      req.context = createAnonymousContext(contextBase);
-      req.isAuthenticated = false;
-      next();
-      return;
+      return next();
     }
-
-    // Extract token from headers
+    
+    // Extract token
     const bearerToken = extractBearerToken(req.headers.authorization);
-    const apiKey = extractApiKey(req.headers['x-api-key'] as string);
+    const apiKey = allowApiKey ? extractApiKey(req.headers['x-api-key'] as string) : null;
     const token = bearerToken ?? apiKey;
-
+    
     // No token provided
     if (!token) {
       if (required) {
-        await emitAuthEvent({
-          type: 'login_failure',
-          timestamp: contextBase.timestamp,
-          requestId: contextBase.requestId,
-          ip: contextBase.ip,
-          userAgent: contextBase.userAgent,
-          details: { reason: 'missing_token' },
+        emitAuthEvent('login_failure', req, { reason: 'no_token' });
+        res.status(401).json({
+          error: 'Authentication required',
+          code: AuthErrorCode.AUTH_REQUIRED,
         });
-
-        sendAuthError(res, 'AUTH_REQUIRED', missingAuthMessage);
         return;
       }
-
-      // Anonymous access allowed
-      req.context = createAnonymousContext(contextBase);
-      req.isAuthenticated = false;
+      
+      // Set anonymous user
+      req.user = createAnonymousUser();
       req.userId = 'anonymous';
-      next();
-      return;
+      return next();
     }
-
+    
     // Verify token
-    const verification = await verifyToken(token);
-
-    if (!verification.valid) {
-      const apiError = tokenErrorToApiError(verification.error);
-
-      await emitAuthEvent({
-        type: 'token_invalid',
-        timestamp: contextBase.timestamp,
-        requestId: contextBase.requestId,
-        ip: contextBase.ip,
-        userAgent: contextBase.userAgent,
-        details: { 
-          errorCode: verification.error.code,
-          // Don't log the actual token
-        },
+    const result = await verifyToken(token);
+    
+    if (!result.valid) {
+      emitAuthEvent('login_failure', req, { reason: result.error });
+      
+      const statusCode = result.error === 'TOKEN_EXPIRED' ? 401 : 401;
+      const errorMessages: Record<string, string> = {
+        TOKEN_EXPIRED: 'Token has expired',
+        TOKEN_REVOKED: 'Token has been revoked',
+        TOKEN_MALFORMED: 'Invalid token format',
+        SIGNATURE_INVALID: 'Invalid token signature',
+        TOKEN_INVALID: 'Invalid token',
+      };
+      
+      res.status(statusCode).json({
+        error: errorMessages[result.error] ?? 'Invalid token',
+        code: result.error,
       });
-
-      logger.warn('Authentication failed', {
-        errorCode: verification.error.code,
-        ip: contextBase.ip,
-        requestId: contextBase.requestId as string,
-      });
-
-      sendAuthError(res, apiError.code, apiError.message);
       return;
     }
-
-    const user = verification.user;
-
-    // Check if all user tokens are revoked
-    if (checkUserRevocation) {
-      const userRevoked = await areUserTokensRevoked(user.id);
-      if (userRevoked) {
-        await emitAuthEvent({
-          type: 'token_invalid',
-          timestamp: contextBase.timestamp,
-          requestId: contextBase.requestId,
-          userId: user.id,
-          ip: contextBase.ip,
-          userAgent: contextBase.userAgent,
-          details: { reason: 'user_tokens_revoked' },
-        });
-
-        sendAuthError(res, 'TOKEN_REVOKED', 'Session has been invalidated');
-        return;
-      }
+    
+    // Check if user's tokens are revoked
+    const { user } = result;
+    const isRevoked = await isUserTokensRevoked(user.userId, user.issuedAt);
+    if (isRevoked) {
+      emitAuthEvent('token_invalid', req, { reason: 'user_tokens_revoked' });
+      res.status(401).json({
+        error: 'Session has been invalidated',
+        code: AuthErrorCode.TOKEN_REVOKED,
+      });
+      return;
     }
-
-    // Build authenticated context
-    req.context = createUserContext(contextBase, user);
+    
+    // Set user on request
     req.user = user;
-    req.userId = user.id as string;
-    req.isAuthenticated = true;
-
-    // Log successful authentication (debug level to reduce noise)
-    logger.debug('Authentication successful', {
-      userId: user.id as string,
-      tier: user.tier,
-      requestId: contextBase.requestId as string,
-    });
-
+    req.userId = user.userId;
+    
+    emitAuthEvent('login_success', req);
     next();
   };
 }
@@ -328,81 +172,200 @@ export function authenticate(options: AuthMiddlewareOptions = {}) {
 /**
  * Shorthand for required authentication.
  */
-export function requireAuth(): ReturnType<typeof authenticate> {
+export function requireAuth() {
   return authenticate({ required: true });
 }
 
 /**
  * Shorthand for optional authentication.
  */
-export function optionalAuth(): ReturnType<typeof authenticate> {
+export function optionalAuth() {
   return authenticate({ required: false });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LEGACY COMPATIBILITY MIDDLEWARE
+// PERMISSION CHECKING MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Middleware that provides backward compatibility with existing auth module.
- * Converts legacy UserPayload to AuthenticatedUser format.
+ * Require specific permission(s).
  * 
- * Use this as a bridge during migration from src/auth to src/security.
+ * @example
+ * router.post('/goals', authenticate(), requirePermission('goal:create'), handler);
  */
-export function legacyAuthBridge() {
-  return (req: SecureRequest, res: Response, next: NextFunction): void => {
-    // Check if legacy auth has already attached a user
-    const legacyUser = (req as any).user as LegacyUserPayload | undefined;
+export function requirePermission(...permissions: string[]) {
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
+    const user = req.user;
     
-    if (legacyUser && typeof legacyUser.userId === 'string') {
-      // Convert to new format
-      const user = fromLegacyPayload(legacyUser);
-      const contextBase = buildRequestContext(req);
-      
-      req.context = createUserContext(contextBase, user);
-      req.user = user;
-      req.userId = user.id as string;
-      req.isAuthenticated = true;
-    } else if (!req.context) {
-      // No auth, create anonymous context
-      const contextBase = buildRequestContext(req);
-      req.context = createAnonymousContext(contextBase);
-      req.isAuthenticated = false;
+    if (!user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        code: AuthErrorCode.AUTH_REQUIRED,
+      });
+      return;
     }
-
+    
+    const hasAllPermissions = permissions.every(
+      perm => user.permissions.includes(perm) || user.permissions.includes('admin:*')
+    );
+    
+    if (!hasAllPermissions) {
+      res.status(403).json({
+        error: 'Insufficient permissions',
+        code: AuthErrorCode.INSUFFICIENT_PERMISSIONS,
+        required: permissions,
+      });
+      return;
+    }
+    
     next();
   };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONTEXT MIDDLEWARE (standalone)
-// ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Middleware that only builds request context without authentication.
- * Use when you need context but handle auth separately.
+ * Require any of the specified permissions.
  */
-export function buildContext() {
-  return (req: SecureRequest, res: Response, next: NextFunction): void => {
-    if (!req.context) {
-      const contextBase = buildRequestContext(req);
-      req.context = createAnonymousContext(contextBase);
-      req.isAuthenticated = false;
+export function requireAnyPermission(...permissions: string[]) {
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
+    const user = req.user;
+    
+    if (!user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        code: AuthErrorCode.AUTH_REQUIRED,
+      });
+      return;
     }
+    
+    const hasAnyPermission = permissions.some(
+      perm => user.permissions.includes(perm) || user.permissions.includes('admin:*')
+    );
+    
+    if (!hasAnyPermission) {
+      res.status(403).json({
+        error: 'Insufficient permissions',
+        code: AuthErrorCode.INSUFFICIENT_PERMISSIONS,
+        requiredAny: permissions,
+      });
+      return;
+    }
+    
+    next();
+  };
+}
+
+/**
+ * Require admin role.
+ */
+export function requireAdmin() {
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
+    const user = req.user;
+    
+    if (!user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        code: AuthErrorCode.AUTH_REQUIRED,
+      });
+      return;
+    }
+    
+    if (user.role !== 'admin') {
+      res.status(403).json({
+        error: 'Admin access required',
+        code: AuthErrorCode.INSUFFICIENT_PERMISSIONS,
+      });
+      return;
+    }
+    
+    next();
+  };
+}
+
+/**
+ * Require specific tier or higher.
+ */
+export function requireTier(minTier: UserTier) {
+  const tierOrder: UserTier[] = ['free', 'pro', 'enterprise'];
+  
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
+    const user = req.user;
+    
+    if (!user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        code: AuthErrorCode.AUTH_REQUIRED,
+      });
+      return;
+    }
+    
+    const userTierIndex = tierOrder.indexOf(user.tier);
+    const requiredTierIndex = tierOrder.indexOf(minTier);
+    
+    if (userTierIndex < requiredTierIndex) {
+      res.status(403).json({
+        error: `${minTier} tier or higher required`,
+        code: AuthErrorCode.INSUFFICIENT_PERMISSIONS,
+        currentTier: user.tier,
+        requiredTier: minTier,
+      });
+      return;
+    }
+    
     next();
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// TYPE AUGMENTATION
+// HELPER FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-declare global {
-  namespace Express {
-    interface Request {
-      context?: RequestContext;
-      user?: AuthenticatedUser;
-      isAuthenticated?: boolean;
-    }
+function createAnonymousUser(): AuthenticatedUser {
+  return {
+    userId: 'anonymous',
+    tier: 'free',
+    role: 'user',
+    permissions: ['chat:send'],
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+  };
+}
+
+/**
+ * Get the authenticated user from request, or throw.
+ */
+export function getAuthenticatedUser(req: AuthenticatedRequest): AuthenticatedUser {
+  if (!req.user || req.user.userId === 'anonymous') {
+    throw new Error('User not authenticated');
   }
+  return req.user;
+}
+
+/**
+ * Get user ID from request, or 'anonymous'.
+ */
+export function getUserId(req: AuthenticatedRequest): string {
+  return req.userId ?? req.user?.userId ?? 'anonymous';
+}
+
+/**
+ * Check if request is from authenticated user.
+ */
+export function isAuthenticated(req: AuthenticatedRequest): boolean {
+  return !!req.user && req.user.userId !== 'anonymous';
 }

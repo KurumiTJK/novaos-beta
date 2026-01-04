@@ -4,6 +4,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { createRouterAsync, errorHandler } from './api/routes.js';
 import { createHealthRouter } from './api/routes/health.js';
 import { requestMiddleware } from './api/middleware/request.js';
@@ -12,6 +13,12 @@ import { loadConfig, canVerify } from './config/index.js';
 import { getLogger } from './logging/index.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
 import { initializeMemoryStore } from './gates/memory_gate/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SECURITY MODULE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { initSecurity, ipRateLimit } from './security/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ENVIRONMENT CONFIG
@@ -33,24 +40,32 @@ const logger = getLogger({ component: 'server' });
 
 const app = express();
 
-// Permissive CSP for development
-app.use((_req, res, next) => {
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src * 'self';"
-  );
-  next();
-});
+// Security headers via Helmet
+app.use(helmet({
+  contentSecurityPolicy: NODE_ENV === 'production' ? undefined : {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 
 // Trust proxy
 app.set('trust proxy', 1);
 
 // CORS
 app.use(cors({
-  origin: '*',
+  origin: NODE_ENV === 'production' 
+    ? process.env.ALLOWED_ORIGINS?.split(',') ?? false
+    : '*',
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Request-Id'],
-  exposedHeaders: ['X-Request-Id'],
+  exposedHeaders: ['X-Request-Id', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+  credentials: true,
 }));
 
 // Body parsing
@@ -87,6 +102,30 @@ async function startServer() {
 
   // Initialize storage
   await storeManager.initialize();
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // INITIALIZE SECURITY MODULE
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  initSecurity(storeManager.getStore(), {
+    tokenConfig: {
+      secret: process.env.JWT_SECRET,
+      accessTokenExpiry: process.env.JWT_ACCESS_EXPIRY ?? '15m',
+      refreshTokenExpiry: process.env.JWT_REFRESH_EXPIRY ?? '7d',
+    },
+    abuseConfig: {
+      vetoWarningThreshold: 3,
+      vetoBlockThreshold: 5,
+      defaultBlockDurationSeconds: 3600,
+    },
+    ssrfConfig: {
+      allowHttp: NODE_ENV !== 'production',
+    },
+  });
+  console.log('[SERVER] Security module initialized');
+
+  // Global IP rate limiting (before any routes)
+  app.use(ipRateLimit());
 
   // Initialize episodic memory gate store
   initializeMemoryStore(storeManager.getStore());
@@ -134,6 +173,7 @@ async function startServer() {
 ║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(49)}║
 ║  Storage:      ${storageStatus.padEnd(49)}║
 ║  Verification: ${verifyStatus.padEnd(49)}║
+║  Security:     ${'initialized'.padEnd(49)}║
 ╚═══════════════════════════════════════════════════════════════════╝
 
 Health:

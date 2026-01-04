@@ -1,59 +1,51 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// AUTH MODULE INDEX — Authentication Exports
-// NovaOS Security Module — Phase 2
+// AUTH MODULE — Barrel Exports
+// NovaOS Security Module
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Types
+export type {
+  UserTier,
+  UserRole,
+  JWTPayload,
+  AuthenticatedUser,
+  AuthenticatedRequest,
+  TokenType,
+  TokenConfig,
+  GeneratedToken,
+  TokenVerificationResult,
+  TokenError,
+  AuthEventType,
+  AuthEvent,
+  AuthMiddlewareOptions,
+} from './types.js';
+
 export {
-  type UserTier,
-  type UserRole,
-  type Permission,
-  type UserMetadata,
-  type AuthenticatedUser,
-  type JWTPayload,
-  type ServiceIdentity,
-  type RequestContext,
-  type SecureRequest,
-  type TokenVerificationResult,
-  type TokenError,
-  type AuthEvent,
-  type LegacyUserPayload,
-  type GeneratedToken,
-  createAnonymousContext,
-  createUserContext,
-  createServiceContext,
-  fromLegacyPayload,
-  toLegacyPayload,
+  DEFAULT_PERMISSIONS,
+  ROLE_PERMISSIONS,
   getDefaultPermissions,
+  getRoleForTier,
 } from './types.js';
 
 // Tokens
 export {
-  type TokenConfig,
   initTokenConfig,
+  setRevocationStore,
   getTokenConfig,
   generateAccessToken,
   generateRefreshToken,
   generateApiKey,
-  generateServiceToken,
   verifyToken,
   verifyTokenSync,
-  decodeToken,
   revokeToken,
-  revokeTokenByValue,
   revokeAllUserTokens,
   isTokenRevoked,
-  areUserTokensRevoked,
-  clearUserTokenRevocation,
-  refreshToken,
+  isUserTokensRevoked,
+  refreshAccessToken,
   extractBearerToken,
   extractApiKey,
   getTokenRemainingTime,
-  isTokenExpired,
-  TokenRevocationStore,
-  resetTokenConfig,
-  setRevocationStore,
-  resetRevocationStore,
+  isTokenExpiringSoon,
 } from './tokens.js';
 
 // Middleware
@@ -61,11 +53,24 @@ export {
   authenticate,
   requireAuth,
   optionalAuth,
-  legacyAuthBridge,
-  buildContext,
+  requirePermission,
+  requireAnyPermission,
+  requireAdmin,
+  requireTier,
   onAuthEvent,
   clearAuthEventHandlers,
+  getAuthenticatedUser,
+  getUserId,
+  isAuthenticated,
   AuthErrorCode,
-  type AuthErrorCode as AuthErrorCodeType,
-  type AuthMiddlewareOptions,
 } from './middleware.js';
+
+// Ack Tokens
+export {
+  generateAckToken,
+  verifyAckToken,
+  AckTokenStore,
+  initAckTokenStore,
+  getAckTokenStore,
+  type AckTokenPayload,
+} from './ack-token.js';

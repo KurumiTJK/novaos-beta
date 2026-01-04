@@ -1,155 +1,116 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// RATE LIMITING TYPES — Configuration and Result Types
+// COMMON SCHEMAS — Reusable Zod Validation Schemas
 // NovaOS Security Module
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { UserTier } from '../auth/types.js';
+import { z } from 'zod';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CONFIGURATION
+// CUSTOM VALIDATORS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export interface RateLimitConfig {
-  windowMs: number;        // Time window in milliseconds
-  maxRequests: number;     // Maximum requests per window
-  maxTokens?: number;      // Maximum tokens per window (for LLM)
-}
+/**
+ * Non-empty string that trims whitespace.
+ */
+export const nonEmptyString = (message = 'This field is required') =>
+  z.string().trim().min(1, message);
 
-export type TierRateLimits = Record<UserTier, RateLimitConfig>;
+/**
+ * String with min/max length constraints.
+ */
+export const boundedString = (min: number, max: number) =>
+  z.string().trim().min(min).max(max);
 
-export const DEFAULT_TIER_LIMITS: TierRateLimits = {
-  free: {
-    windowMs: 60 * 1000,     // 1 minute
-    maxRequests: 10,
-    maxTokens: 10000,
+/**
+ * Email validator.
+ */
+export const email = z.string().email('Invalid email address').toLowerCase();
+
+/**
+ * URL validator.
+ */
+export const url = z.string().url('Invalid URL');
+
+/**
+ * Positive integer.
+ */
+export const positiveInt = z.coerce.number().int().positive();
+
+/**
+ * Non-negative integer.
+ */
+export const nonNegativeInt = z.coerce.number().int().min(0);
+
+/**
+ * ISO date string.
+ */
+export const isoDateString = z.string().datetime({ message: 'Invalid ISO date format' });
+
+/**
+ * Slug (URL-safe string).
+ */
+export const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Invalid slug format');
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// ID SCHEMAS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const IdParamSchema = z.object({
+  id: z.string().min(1, 'ID is required'),
+});
+
+export const UuidParamSchema = z.object({
+  id: z.string().uuid('Invalid UUID format'),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PAGINATION
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const PaginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export type PaginationInput = z.infer<typeof PaginationSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SEARCH
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const SearchSchema = z.object({
+  q: z.string().trim().min(1).max(500).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export type SearchInput = z.infer<typeof SearchSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// DATE RANGE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const DateRangeSchema = z.object({
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+}).refine(
+  data => {
+    if (data.startDate && data.endDate) {
+      return new Date(data.startDate) <= new Date(data.endDate);
+    }
+    return true;
   },
-  pro: {
-    windowMs: 60 * 1000,
-    maxRequests: 60,
-    maxTokens: 100000,
-  },
-  enterprise: {
-    windowMs: 60 * 1000,
-    maxRequests: 300,
-    maxTokens: 500000,
-  },
-};
+  { message: 'Start date must be before end date' }
+);
 
-// Anonymous/unauthenticated limit
-export const ANONYMOUS_LIMIT: RateLimitConfig = {
-  windowMs: 60 * 1000,
-  maxRequests: 5,
-  maxTokens: 5000,
-};
+export type DateRangeInput = z.infer<typeof DateRangeSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ENDPOINT-SPECIFIC LIMITS
+// BASE ENTITY
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export type EndpointCategory =
-  | 'chat'
-  | 'auth'
-  | 'admin'
-  | 'read'
-  | 'write'
-  | 'expensive';
+export const StatusSchema = z.enum(['active', 'completed', 'abandoned', 'blocked']);
+export type Status = z.infer<typeof StatusSchema>;
 
-export const ENDPOINT_LIMITS: Record<EndpointCategory, Partial<TierRateLimits>> = {
-  chat: {
-    // Use defaults
-  },
-  auth: {
-    free: { windowMs: 60 * 1000, maxRequests: 5 },
-    pro: { windowMs: 60 * 1000, maxRequests: 10 },
-    enterprise: { windowMs: 60 * 1000, maxRequests: 20 },
-  },
-  admin: {
-    free: { windowMs: 60 * 1000, maxRequests: 0 }, // No access
-    pro: { windowMs: 60 * 1000, maxRequests: 0 },   // No access
-    enterprise: { windowMs: 60 * 1000, maxRequests: 100 },
-  },
-  read: {
-    free: { windowMs: 60 * 1000, maxRequests: 30 },
-    pro: { windowMs: 60 * 1000, maxRequests: 120 },
-    enterprise: { windowMs: 60 * 1000, maxRequests: 600 },
-  },
-  write: {
-    free: { windowMs: 60 * 1000, maxRequests: 10 },
-    pro: { windowMs: 60 * 1000, maxRequests: 60 },
-    enterprise: { windowMs: 60 * 1000, maxRequests: 300 },
-  },
-  expensive: {
-    free: { windowMs: 60 * 1000, maxRequests: 3 },
-    pro: { windowMs: 60 * 1000, maxRequests: 15 },
-    enterprise: { windowMs: 60 * 1000, maxRequests: 60 },
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// RATE LIMIT RESULT
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface RateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  limit: number;
-  resetMs: number;         // Time until reset in ms
-  resetAt: number;         // Unix timestamp of reset
-  retryAfterMs?: number;   // If blocked, when to retry
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// RATE LIMIT CONTEXT
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface RateLimitContext {
-  userId: string;
-  tier: UserTier;
-  ip?: string;
-  path?: string;
-  method?: string;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// MIDDLEWARE OPTIONS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface RateLimitMiddlewareOptions {
-  /** Endpoint category for different limits */
-  category?: EndpointCategory;
-  
-  /** Custom key generator */
-  keyGenerator?: (ctx: RateLimitContext) => string;
-  
-  /** Skip rate limiting for certain conditions */
-  skip?: (ctx: RateLimitContext) => boolean;
-  
-  /** Paths to skip */
-  skipPaths?: string[];
-  
-  /** Include IP in rate limit key */
-  includeIp?: boolean;
-  
-  /** Custom error message */
-  errorMessage?: string;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// RATE LIMIT EVENTS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type RateLimitEventType =
-  | 'rate_limit_hit'
-  | 'rate_limit_exceeded'
-  | 'rate_limit_blocked';
-
-export interface RateLimitEvent {
-  type: RateLimitEventType;
-  userId: string;
-  tier: UserTier;
-  ip?: string;
-  path?: string;
-  timestamp: number;
-  remaining: number;
-  limit: number;
-}
+export const PrioritySchema = z.enum(['low', 'medium', 'high', 'urgent']);
+export type Priority = z.infer<typeof PrioritySchema>;

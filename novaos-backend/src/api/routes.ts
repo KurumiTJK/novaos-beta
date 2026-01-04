@@ -2,7 +2,7 @@
 // API ROUTES — Express Endpoints for NovaOS
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// CLEANED: Removed dead Sword and Semantic Memory endpoints
+// MIGRATED TO NEW SECURITY MODULE
 //
 // WORKING ENDPOINTS:
 // - /health, /version, /providers (public)
@@ -16,44 +16,52 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { z } from 'zod';
 import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from '../pipeline/llm_engine.js';
 import type { PipelineContext, ActionSource } from '../types/index.js';
 import { storeManager } from '../storage/index.js';
-import {
-  auth,
-  type AuthenticatedRequest,
-  trackVeto,
-  getRecentVetoCount,
-} from '../auth/index.js';
 import { workingMemory } from '../core/memory/working_memory/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// REQUEST SCHEMAS
+// NEW SECURITY MODULE IMPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const ChatRequestSchema = z.object({
-  message: z.string().min(1).max(100000),
-  conversationId: z.string().optional(),
-  ackToken: z.string().optional(),
-  context: z.object({
-    timezone: z.string().optional(),
-    locale: z.string().optional(),
-  }).optional(),
-});
-
-const ParseCommandRequestSchema = z.object({
-  command: z.string().min(1).max(10000),
-  source: z.enum(['ui_button', 'command_parser', 'api_field']),
-  conversationId: z.string().optional(),
-});
-
-const RegisterRequestSchema = z.object({
-  email: z.string().email(),
-  tier: z.enum(['free', 'pro', 'enterprise']).optional(),
-});
+import {
+  // Auth
+  type AuthenticatedRequest,
+  authenticate,
+  generateAccessToken,
+  generateApiKey,
+  getAckTokenStore,
+  generateAckToken,
+  
+  // Rate limiting
+  rateLimit,
+  
+  // Validation
+  validateBody,
+  validateQuery,
+  validateParams,
+  ChatMessageSchema,
+  ParseCommandSchema,
+  RegisterSchema,
+  ConversationIdParamSchema,
+  UpdateConversationSchema,
+  ConversationQuerySchema,
+  
+  // Abuse detection
+  abuseProtection,
+  blockUser,
+  unblockUser,
+  isUserBlocked,
+  trackVeto,
+  getRecentVetoCount,
+  
+  // Audit
+  logAudit,
+  getAuditStore,
+} from '../security/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ERROR CLASS
@@ -75,6 +83,50 @@ export class ClientError extends Error {
 export interface RouterConfig {
   requireAuth?: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SESSION STORE (simple in-memory, replace with Redis if needed)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const sessions = new Map<string, {
+  userId: string;
+  conversationId: string;
+  createdAt: number;
+  lastActivity: number;
+  messageCount: number;
+  tokenCount: number;
+}>();
+
+const sessionManager = {
+  async create(userId: string, conversationId: string) {
+    const session = {
+      userId,
+      conversationId,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      messageCount: 0,
+      tokenCount: 0,
+    };
+    sessions.set(conversationId, session);
+    return session;
+  },
+  async get(conversationId: string) {
+    return sessions.get(conversationId) ?? null;
+  },
+  async update(conversationId: string, updates: { messageCount?: number; tokenCount?: number }) {
+    const session = sessions.get(conversationId);
+    if (session) {
+      session.lastActivity = Date.now();
+      if (updates.messageCount) session.messageCount += updates.messageCount;
+      if (updates.tokenCount) session.tokenCount += updates.tokenCount;
+      sessions.set(conversationId, session);
+    }
+    return session;
+  },
+  async delete(conversationId: string) {
+    sessions.delete(conversationId);
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ROUTER FACTORY
@@ -144,81 +196,86 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // AUTH ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/auth/register', (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const parseResult = RegisterRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        throw new ClientError(
-          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
-        );
+  router.post('/auth/register',
+    validateBody(RegisterSchema),
+    (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { email, tier = 'free' } = req.body;
+        const userId = `user_${Buffer.from(email).toString('base64').slice(0, 16)}`;
+
+        const accessToken = generateAccessToken(userId, tier, { email });
+        const apiKey = generateApiKey(userId, tier, { email });
+
+        res.json({
+          userId,
+          token: accessToken.token,
+          apiKey: apiKey.token,
+          tier,
+          expiresAt: accessToken.expiresAt,
+        });
+      } catch (error) {
+        next(error);
       }
+    }
+  );
 
-      const { email, tier = 'free' } = parseResult.data;
-      const userId = `user_${Buffer.from(email).toString('base64').slice(0, 16)}`;
+  router.get('/auth/verify',
+    authenticate({ required: true }),
+    (req: AuthenticatedRequest, res: Response) => {
+      res.json({
+        valid: true,
+        user: req.user,
+      });
+    }
+  );
 
-      const token = auth.generateToken({ userId, email, tier });
-      const apiKey = auth.generateApiKey(userId, tier);
+  router.get('/auth/status',
+    authenticate({ required: false }),
+    async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.userId ?? 'anonymous';
+      const blocked = await isUserBlocked(userId);
+      const recentVetos = await getRecentVetoCount(userId);
 
       res.json({
+        authenticated: !!req.user && req.userId !== 'anonymous',
         userId,
-        token,
-        apiKey,
-        tier,
-        expiresIn: '24h',
+        tier: req.user?.tier ?? 'free',
+        blocked: blocked.blocked,
+        blockedReason: blocked.reason,
+        blockedUntil: blocked.until,
+        recentVetos,
+        storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
       });
-    } catch (error) {
-      next(error);
     }
-  });
-
-  router.get('/auth/verify', auth.middleware(true), (req: AuthenticatedRequest, res: Response) => {
-    res.json({
-      valid: true,
-      user: req.user,
-    });
-  });
-
-  router.get('/auth/status', auth.middleware(false), async (req: AuthenticatedRequest, res: Response) => {
-    const userId = req.userId ?? 'anonymous';
-    const blocked = await auth.isUserBlocked(userId);
-    const recentVetos = await getRecentVetoCount(userId);
-
-    res.json({
-      authenticated: !!req.user && req.userId !== 'anonymous',
-      userId,
-      tier: req.user?.tier ?? 'free',
-      blocked: blocked.blocked,
-      blockedReason: blocked.reason,
-      blockedUntil: blocked.until,
-      recentVetos,
-      storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
-    });
-  });
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // PROTECTED ENDPOINTS
+  // PROTECTED MIDDLEWARE STACK
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const protectedMiddleware = [
-    auth.middleware(requireAuth),
-    auth.rateLimit(),
-    auth.abuseDetection(),
+  // Chat endpoint middleware
+  const chatMiddleware = [
+    authenticate({ required: requireAuth }),
+    rateLimit({ category: 'chat' }),
+    validateBody(ChatMessageSchema),
+    abuseProtection(),
+  ];
+
+  // Parse command middleware
+  const parseCommandMiddleware = [
+    authenticate({ required: requireAuth }),
+    rateLimit({ category: 'chat' }),
+    validateBody(ParseCommandSchema),
+    abuseProtection({ contentField: 'command' }),
   ];
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CHAT ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/chat', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  router.post('/chat', ...chatMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const parseResult = ChatRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        throw new ClientError(
-          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
-        );
-      }
-
-      const { message, conversationId, ackToken, context: reqContext } = parseResult.data;
+      const { message, conversationId, ackToken, context: reqContext } = req.body;
       const userId = req.userId ?? 'anonymous';
       const requestId = crypto.randomUUID();
 
@@ -237,9 +294,9 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       
       const conversation = await workingMemory.getOrCreate(userId, convId);
       
-      let session = await auth.session.get(convId);
+      let session = await sessionManager.get(convId);
       if (!session) {
-        session = await auth.session.create(userId, convId);
+        session = await sessionManager.create(userId, convId);
       }
 
       await workingMemory.addUserMessage(convId, message);
@@ -261,12 +318,14 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         })),
       };
 
+      // Validate ack token if provided
       if (ackToken) {
-        const valid = await auth.ackTokens.validate(ackToken, userId);
-        if (valid) {
+        const ackStore = getAckTokenStore();
+        const validation = await ackStore.validateAndConsume(ackToken, userId);
+        if (validation.valid) {
           pipelineContext.ackTokenValid = true;
         } else {
-          throw new ClientError('Invalid or expired acknowledgment token');
+          throw new ClientError(`Invalid or expired acknowledgment token: ${validation.error}`);
         }
       }
 
@@ -285,26 +344,26 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         await trackVeto(userId);
       }
 
-      await auth.session.update(convId, {
+      await sessionManager.update(convId, {
         messageCount: 1,
         tokenCount: result.gateResults.model?.output?.tokensUsed ?? 0,
       });
 
-      if (result.gateResults.model?.output?.tokensUsed) {
-        await auth.trackTokenUsage(userId, result.gateResults.model.output.tokensUsed);
-      }
-
+      // Generate new ack token if needed
       if (result.ackToken) {
-        await auth.ackTokens.store(result.ackToken, userId);
+        // Store the ack token for validation (it's self-signed so just needs tracking)
+        const newAckToken = generateAckToken(userId, result.ackToken, { conversationId: convId });
+        result.ackToken = newAckToken;
       }
 
-      await auth.audit.log({
-        userId,
+      await logAudit({
+        category: 'auth',
         action: 'chat',
+        userId,
         requestId,
-        stance: result.stance,
-        status: result.status,
         details: {
+          stance: result.stance,
+          status: result.status,
           messageLength: message.length,
           tokensUsed: result.gateResults.model?.output?.tokensUsed,
           contextTruncated: contextWindow.truncated,
@@ -331,16 +390,9 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // PARSE COMMAND ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/parse-command', ...protectedMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  router.post('/parse-command', ...parseCommandMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const parseResult = ParseCommandRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        throw new ClientError(
-          `Invalid request: ${parseResult.error.issues.map(i => i.message).join(', ')}`
-        );
-      }
-
-      const { command, source, conversationId } = parseResult.data;
+      const { command, source, conversationId } = req.body;
 
       const actionSource: ActionSource = {
         type: source,
@@ -371,227 +423,268 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   // CONVERSATION ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.get('/conversations', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { limit = 20, offset = 0 } = req.query;
-      const userId = req.userId!;
+  router.get('/conversations',
+    authenticate({ required: true }),
+    validateQuery(ConversationQuerySchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { limit, offset } = req.query as { limit: number; offset: number };
+        const userId = req.userId!;
 
-      const convList = await workingMemory.list(userId, Number(limit), Number(offset));
+        const convList = await workingMemory.list(userId, limit, offset);
 
-      res.json({
-        conversations: convList,
-        count: convList.length,
-        offset: Number(offset),
-      });
-    } catch (error) {
-      next(error);
+        res.json({
+          conversations: convList,
+          count: convList.length,
+          offset,
+        });
+      } catch (error) {
+        next(error);
+      }
     }
-  });
+  );
 
-  router.get('/conversations/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      const { messagesLimit = 100 } = req.query;
+  router.get('/conversations/:id',
+    authenticate({ required: true }),
+    validateParams(ConversationIdParamSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const id = req.params.id;
+        const { messagesLimit = 100 } = req.query;
 
-      const conversation = await workingMemory.get(id);
-      if (!conversation) {
-        throw new ClientError('Conversation not found', 404);
-      }
-
-      if (conversation.userId !== req.userId) {
-        throw new ClientError('Conversation not found', 404);
-      }
-
-      const messages = await workingMemory.getMessages(id, Number(messagesLimit));
-
-      res.json({
-        ...conversation,
-        messages,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get('/conversations/:id/messages', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      const { limit = 100, offset = 0 } = req.query;
-
-      const conversation = await workingMemory.get(id);
-      if (!conversation || conversation.userId !== req.userId) {
-        throw new ClientError('Conversation not found', 404);
-      }
-
-      const messages = await workingMemory.getMessages(id, Number(limit));
-
-      res.json({
-        conversationId: id,
-        messages: messages.slice(Number(offset)),
-        count: messages.length,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.patch('/conversations/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      const { title, tags } = req.body;
-
-      const conversation = await workingMemory.get(id);
-      if (!conversation || conversation.userId !== req.userId) {
-        throw new ClientError('Conversation not found', 404);
-      }
-
-      let updated = conversation;
-      if (title) {
-        updated = await workingMemory.updateTitle(id, title) ?? conversation;
-      }
-      if (tags && Array.isArray(tags)) {
-        for (const tag of tags) {
-          updated = await workingMemory.addTag(id, tag as string) ?? updated;
+        const conversation = await workingMemory.get(id);
+        if (!conversation) {
+          throw new ClientError('Conversation not found', 404);
         }
+
+        if (conversation.userId !== req.userId) {
+          throw new ClientError('Conversation not found', 404);
+        }
+
+        const messages = await workingMemory.getMessages(id, Number(messagesLimit));
+
+        res.json({
+          ...conversation,
+          messages,
+        });
+      } catch (error) {
+        next(error);
       }
-
-      res.json(updated);
-    } catch (error) {
-      next(error);
     }
-  });
+  );
 
-  router.delete('/conversations/:id', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
+  router.get('/conversations/:id/messages',
+    authenticate({ required: true }),
+    validateParams(ConversationIdParamSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const id = req.params.id;
+        const { limit = 100, offset = 0 } = req.query;
 
-      const conversation = await workingMemory.get(id);
-      if (!conversation || conversation.userId !== req.userId) {
-        throw new ClientError('Conversation not found', 404);
+        const conversation = await workingMemory.get(id);
+        if (!conversation || conversation.userId !== req.userId) {
+          throw new ClientError('Conversation not found', 404);
+        }
+
+        const messages = await workingMemory.getMessages(id, Number(limit));
+
+        res.json({
+          conversationId: id,
+          messages: messages.slice(Number(offset)),
+          count: messages.length,
+        });
+      } catch (error) {
+        next(error);
       }
-
-      await workingMemory.delete(id);
-
-      await auth.audit.log({
-        userId: req.userId!,
-        action: 'delete_conversation',
-        details: { conversationId: id },
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      next(error);
     }
-  });
+  );
+
+  router.patch('/conversations/:id',
+    authenticate({ required: true }),
+    validateParams(ConversationIdParamSchema),
+    validateBody(UpdateConversationSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const id = req.params.id;
+        const { title, tags } = req.body;
+
+        const conversation = await workingMemory.get(id);
+        if (!conversation || conversation.userId !== req.userId) {
+          throw new ClientError('Conversation not found', 404);
+        }
+
+        let updated = conversation;
+        if (title) {
+          updated = await workingMemory.updateTitle(id, title) ?? conversation;
+        }
+        if (tags && Array.isArray(tags)) {
+          for (const tag of tags) {
+            updated = await workingMemory.addTag(id, tag as string) ?? updated;
+          }
+        }
+
+        res.json(updated);
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  router.delete('/conversations/:id',
+    authenticate({ required: true }),
+    validateParams(ConversationIdParamSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const id = req.params.id;
+
+        const conversation = await workingMemory.get(id);
+        if (!conversation || conversation.userId !== req.userId) {
+          throw new ClientError('Conversation not found', 404);
+        }
+
+        await workingMemory.delete(id);
+
+        await logAudit({
+          category: 'auth',
+          action: 'delete_conversation',
+          userId: req.userId!,
+          details: { conversationId: id },
+        });
+
+        res.json({ success: true });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CONFIG ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.get('/config', auth.middleware(true), async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const config = loadConfig();
-      
-      res.json({
-        environment: config.env.environment,
-        features: {
-          verificationEnabled: config.features.verificationEnabled,
-          webFetchEnabled: config.features.webFetchEnabled,
-          authRequired: config.features.authRequired,
-          debugMode: config.features.debugMode,
-          redactPII: config.features.redactPII,
-        },
-        verification: {
-          enabled: config.verification.enabled,
-          required: config.verification.required,
-          cacheTTLSeconds: config.verification.cacheTTLSeconds,
-          maxVerificationsPerRequest: config.verification.maxVerificationsPerRequest,
-        },
-        webFetch: {
-          maxResponseSizeBytes: config.webFetch.maxResponseSizeBytes,
-          maxRedirects: config.webFetch.maxRedirects,
-          totalTimeoutMs: config.webFetch.totalTimeoutMs,
-          allowlistEnabled: config.webFetch.allowlist.length > 0,
-        },
-      });
-    } catch (error) {
-      next(error);
+  router.get('/config',
+    authenticate({ required: true }),
+    async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const config = loadConfig();
+        
+        res.json({
+          environment: config.env.environment,
+          features: {
+            verificationEnabled: config.features.verificationEnabled,
+            webFetchEnabled: config.features.webFetchEnabled,
+            authRequired: config.features.authRequired,
+            debugMode: config.features.debugMode,
+            redactPII: config.features.redactPII,
+          },
+          verification: {
+            enabled: config.verification.enabled,
+            required: config.verification.required,
+            cacheTTLSeconds: config.verification.cacheTTLSeconds,
+            maxVerificationsPerRequest: config.verification.maxVerificationsPerRequest,
+          },
+          webFetch: {
+            maxResponseSizeBytes: config.webFetch.maxResponseSizeBytes,
+            maxRedirects: config.webFetch.maxRedirects,
+            totalTimeoutMs: config.webFetch.totalTimeoutMs,
+            allowlistEnabled: config.webFetch.allowlist.length > 0,
+          },
+        });
+      } catch (error) {
+        next(error);
+      }
     }
-  });
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ADMIN ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  router.post('/admin/block-user', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { targetUserId, reason, durationMinutes } = req.body;
-      
-      if (!targetUserId || !reason) {
-        throw new ClientError('targetUserId and reason required');
+  router.post('/admin/block-user',
+    authenticate({ required: true }),
+    // TODO: Add requireAdmin() middleware
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { targetUserId, reason, durationMinutes } = req.body;
+        
+        if (!targetUserId || !reason) {
+          throw new ClientError('targetUserId and reason required');
+        }
+
+        const durationSeconds = (durationMinutes ?? 60) * 60;
+        await blockUser(targetUserId, reason, durationSeconds);
+
+        await logAudit({
+          category: 'admin',
+          severity: 'warning',
+          action: 'admin_block_user',
+          userId: req.userId!,
+          details: { targetUserId, reason, durationMinutes },
+        });
+
+        res.json({
+          success: true,
+          blockedUntil: Date.now() + durationSeconds * 1000,
+        });
+      } catch (error) {
+        next(error);
       }
-
-      const durationMs = (durationMinutes ?? 60) * 60 * 1000;
-      await auth.blockUser(targetUserId, reason, durationMs);
-
-      await auth.audit.log({
-        userId: req.userId!,
-        action: 'admin_block_user',
-        details: { targetUserId, reason, durationMinutes },
-      });
-
-      res.json({
-        success: true,
-        blockedUntil: Date.now() + durationMs,
-      });
-    } catch (error) {
-      next(error);
     }
-  });
+  );
 
-  router.post('/admin/unblock-user', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { targetUserId } = req.body;
-      
-      if (!targetUserId) {
-        throw new ClientError('targetUserId required');
+  router.post('/admin/unblock-user',
+    authenticate({ required: true }),
+    // TODO: Add requireAdmin() middleware
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { targetUserId } = req.body;
+        
+        if (!targetUserId) {
+          throw new ClientError('targetUserId required');
+        }
+
+        const unblocked = await unblockUser(targetUserId);
+
+        await logAudit({
+          category: 'admin',
+          action: 'admin_unblock_user',
+          userId: req.userId!,
+          details: { targetUserId },
+        });
+
+        res.json({
+          success: unblocked,
+        });
+      } catch (error) {
+        next(error);
       }
-
-      const unblocked = await auth.unblockUser(targetUserId);
-
-      await auth.audit.log({
-        userId: req.userId!,
-        action: 'admin_unblock_user',
-        details: { targetUserId },
-      });
-
-      res.json({
-        success: unblocked,
-      });
-    } catch (error) {
-      next(error);
     }
-  });
+  );
 
-  router.get('/admin/audit-logs', auth.middleware(true), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const { userId: targetUserId, limit = 100 } = req.query;
+  router.get('/admin/audit-logs',
+    authenticate({ required: true }),
+    // TODO: Add requireAdmin() middleware
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { userId: targetUserId, limit = 100 } = req.query;
 
-      let logs;
-      if (targetUserId && typeof targetUserId === 'string') {
-        logs = await auth.audit.getUserLogs(targetUserId, Number(limit));
-      } else {
-        logs = await auth.audit.getGlobalLogs(Number(limit));
+        const auditStore = getAuditStore();
+        let logs;
+        if (targetUserId && typeof targetUserId === 'string') {
+          logs = await auditStore.getUserLogs(targetUserId, Number(limit));
+        } else {
+          logs = await auditStore.getGlobalLogs(Number(limit));
+        }
+
+        res.json({
+          logs,
+          count: logs.length,
+        });
+      } catch (error) {
+        next(error);
       }
-
-      res.json({
-        logs,
-        count: logs.length,
-      });
-    } catch (error) {
-      next(error);
     }
-  });
+  );
 
   return router;
 }

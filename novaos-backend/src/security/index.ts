@@ -1,254 +1,168 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SECURITY MODULE INDEX — NovaOS Security Infrastructure
-// NovaOS Security Module — Phase 2
+// SECURITY MODULE — Unified Security Infrastructure
+// NovaOS Security Module
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // This module provides comprehensive security infrastructure for NovaOS:
 //
-// - Authentication: JWT tokens, verification, revocation
-// - Authorization: Ownership checks, permissions, roles
+// - Authentication: JWT tokens, verification, revocation, refresh
+// - Authorization: Permission checks, ownership verification
 // - Rate Limiting: Token bucket algorithm, tiered limits
 // - Validation: Zod-based input validation
-// - Encryption: AES-256-GCM encryption at rest
-// - Audit: Security event logging
+// - Abuse Detection: Prompt injection, harassment, blocking
+// - SSRF Protection: Prevent internal network access
+// - Audit Logging: Security event tracking
 //
 // Usage:
 //
 //   import { 
+//     initSecurity,
 //     authenticate, 
-//     requireOwnership, 
 //     rateLimit, 
-//     validateBody 
+//     validateBody,
+//     abuseProtection,
 //   } from './security/index.js';
 //
-//   router.post('/goals',
+//   // Initialize on startup
+//   await initSecurity(store);
+//
+//   // Apply middleware
+//   router.post('/chat',
 //     authenticate(),
-//     rateLimit({ category: 'GOAL_CREATION' }),
-//     validateBody(CreateGoalSchema),
-//     createGoalHandler
+//     rateLimit({ category: 'chat' }),
+//     validateBody(ChatMessageSchema),
+//     abuseProtection(),
+//     chatHandler
 //   );
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import type { KeyValueStore } from '../storage/index.js';
+
 // ─────────────────────────────────────────────────────────────────────────────────
-// AUTH
+// RE-EXPORTS: AUTH
 // ─────────────────────────────────────────────────────────────────────────────────
 
+export type {
+  UserTier,
+  UserRole,
+  JWTPayload,
+  AuthenticatedUser,
+  AuthenticatedRequest,
+  TokenType,
+  TokenConfig,
+  GeneratedToken,
+  TokenVerificationResult,
+  TokenError,
+  AuthEventType,
+  AuthEvent,
+  AuthMiddlewareOptions,
+} from './auth/index.js';
+
 export {
-  // Types
-  type UserTier,
-  type UserRole,
-  type Permission,
-  type UserMetadata,
-  type AuthenticatedUser,
-  type JWTPayload,
-  type ServiceIdentity,
-  type RequestContext,
-  type SecureRequest,
-  type TokenVerificationResult,
-  type TokenError,
-  type AuthEvent,
-  type LegacyUserPayload,
-  type GeneratedToken,
-  type TokenConfig,
-  type AuthMiddlewareOptions,
-  // Context helpers
-  createAnonymousContext,
-  createUserContext,
-  createServiceContext,
-  fromLegacyPayload,
-  toLegacyPayload,
+  DEFAULT_PERMISSIONS,
+  ROLE_PERMISSIONS,
   getDefaultPermissions,
-  // Token management
+  getRoleForTier,
   initTokenConfig,
+  setRevocationStore,
   getTokenConfig,
   generateAccessToken,
   generateRefreshToken,
   generateApiKey,
-  generateServiceToken,
   verifyToken,
   verifyTokenSync,
-  decodeToken,
   revokeToken,
-  revokeTokenByValue,
   revokeAllUserTokens,
   isTokenRevoked,
-  areUserTokensRevoked,
-  clearUserTokenRevocation,
-  refreshToken,
+  isUserTokensRevoked,
+  refreshAccessToken,
   extractBearerToken,
   extractApiKey,
   getTokenRemainingTime,
-  isTokenExpired,
-  TokenRevocationStore,
-  // Middleware
+  isTokenExpiringSoon,
   authenticate,
   requireAuth,
   optionalAuth,
-  legacyAuthBridge,
-  buildContext,
+  requirePermission,
+  requireAnyPermission,
+  requireAdmin,
+  requireTier,
   onAuthEvent,
   clearAuthEventHandlers,
+  getAuthenticatedUser,
+  getUserId,
+  isAuthenticated,
   AuthErrorCode,
+  generateAckToken,
+  verifyAckToken,
+  AckTokenStore,
+  initAckTokenStore,
+  getAckTokenStore,
 } from './auth/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// AUTHORIZATION
+// RE-EXPORTS: RATE LIMITING
 // ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  RateLimitConfig,
+  TierRateLimits,
+  RateLimitResult,
+  RateLimitContext,
+  RateLimitMiddlewareOptions,
+  RateLimitEventType,
+  RateLimitEvent,
+  EndpointCategory,
+} from './rate-limiting/index.js';
 
 export {
-  // Types
-  type ResourceType,
-  type ResourceIdMap,
-  type OwnedResource,
-  type ResourceAction,
-  type PermissionString,
-  type AuthorizationResult,
-  type AuthorizationDenialReason,
-  type AuthorizationContext,
-  type OwnershipLookup,
-  type OwnershipRegistry,
-  type RolePolicy,
-  type PolicyConfig,
-  type AuthorizationEvent,
-  type OwnershipOptions,
-  type PermissionOptions,
-  type RoleOptions,
-  // Result helpers
-  allowed,
-  denied,
-  createAuthContext,
-  withResource,
-  // Ownership
-  OwnershipChecker,
-  getOwnershipChecker,
-  initOwnershipChecker,
-  resetOwnershipChecker,
-  userOwnsGoal,
-  userOwnsQuest,
-  userOwnsStep,
-  userOwnsSpark,
-  userOwnsReminder,
-  // Policies
-  DEFAULT_ROLE_POLICIES,
-  DEFAULT_POLICY_CONFIG,
-  PolicyManager,
-  getPolicyManager,
-  initPolicyManager,
-  resetPolicyManager,
-  hasPermission,
-  hasRole,
-  canPerform,
-  isAdmin,
-  isPremium,
-  getRoleForTier,
-  getPermissionsForTier,
-  // Middleware
-  requireAuthenticated,
-  requireOwnership,
-  requirePermission,
-  requireAnyPermission,
-  requireAllPermissions,
-  requireRole,
-  requireAnyRole,
-  requireAction,
-  requireOwnershipAndPermission,
-  adminOnly,
-  premiumOnly,
-  onAuthorizationEvent,
-  clearAuthorizationEventHandlers,
-  getAuthenticatedUser,
-  getUserId,
-  assertAuthenticated,
-  AuthzErrorCode,
-} from './authorization/index.js';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// RATE LIMITING
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export {
-  // Types
-  type RateLimitConfig,
-  type TierRateLimits,
-  type RateLimitContext,
-  type RateLimitResult,
-  type RateLimiter,
-  type RateLimitEvent,
-  type RateLimitOptions,
-  type EndpointCategory,
-  // Result helpers
-  createAllowedResult,
-  createDeniedResult,
-  // Key generators
-  keyByUser,
-  keyByIp,
-  keyByUserAndPath,
-  keyByIpAndPath,
-  keyByUserOrIp,
-  // Limiters
-  TokenBucketLimiter,
-  SlidingWindowLimiter,
-  getTokenBucketLimiter,
-  getSlidingWindowLimiter,
-  getRateLimiter,
-  initRateLimiter,
-  resetRateLimiter,
-  // Config
   DEFAULT_TIER_LIMITS,
   ANONYMOUS_LIMIT,
-  EndpointLimits,
-  PATH_PATTERNS,
-  SKIP_PATHS,
-  getCategoryForPath,
-  getLimitForPath,
-  getAnonymousLimit,
-  getRateLimitMultiplier,
-  applyMultiplier,
-  isRateLimitingEnabled,
-  shouldSkipRateLimit,
-  // Middleware
+  ENDPOINT_LIMITS,
+  RateLimiter,
+  IpRateLimiter,
+  initRateLimiter,
+  getRateLimiter,
+  initIpRateLimiter,
+  getIpRateLimiter,
   rateLimit,
   chatRateLimit,
-  goalCreationRateLimit,
-  sparkGenerationRateLimit,
-  webFetchRateLimit,
   authRateLimit,
   adminRateLimit,
-  strictRateLimit,
+  expensiveRateLimit,
   ipRateLimit,
-  getRateLimitStatus,
-  resetUserRateLimit,
-  resetIpRateLimit,
   onRateLimitEvent,
   clearRateLimitEventHandlers,
+  resetUserRateLimit,
+  resetIpRateLimit,
+  getRateLimitStatus,
+  RateLimitErrorCode,
 } from './rate-limiting/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// VALIDATION
+// RE-EXPORTS: VALIDATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export {
-  // Middleware
   validateBody,
   validateQuery,
   validateParams,
   validateHeaders,
   validate,
   ValidationErrorCode,
-  type ValidationError,
-  type FieldError,
-  type ValidationOptions,
-  type RequestSchema,
-  type ValidatedRequest,
-  type InferSchema,
-  // Common schemas
-  IdParamSchema,
-  UuidParamSchema,
-  PaginationSchema,
-  SearchSchema,
-  DateRangeSchema,
-  // Custom validators
+} from './validation/index.js';
+
+export type {
+  ValidationError,
+  FieldError,
+  ValidationOptions,
+  RequestSchemas,
+} from './validation/index.js';
+
+// Schemas
+export {
+  // Common
   nonEmptyString,
   boundedString,
   email,
@@ -257,112 +171,194 @@ export {
   nonNegativeInt,
   isoDateString,
   slug,
-  // Entity schemas
-  BaseEntitySchema,
+  IdParamSchema,
+  UuidParamSchema,
+  PaginationSchema,
+  SearchSchema,
+  DateRangeSchema,
   StatusSchema,
   PrioritySchema,
-  type Status,
-  type Priority,
-  // Goal schemas
-  CreateGoalSchema,
-  UpdateGoalSchema,
-  GoalQuerySchema,
-  type CreateGoalInput,
-  type UpdateGoalInput,
-  type GoalQuery,
-  // Quest schemas
-  CreateQuestSchema,
-  UpdateQuestSchema,
-  type CreateQuestInput,
-  type UpdateQuestInput,
-  // Step schemas
-  CreateStepSchema,
-  UpdateStepSchema,
-  type CreateStepInput,
-  type UpdateStepInput,
-  // Spark schemas
-  SparkTypeSchema,
-  CreateSparkSchema,
-  GenerateSparkSchema,
-  SparkResponseSchema,
-  type SparkType,
-  type CreateSparkInput,
-  type GenerateSparkInput,
-  type SparkResponseInput,
-  // Reminder schemas
-  ReminderFrequencySchema,
-  CreateReminderSchema,
-  type ReminderFrequency,
-  type CreateReminderInput,
-  // Chat schemas
+  // Chat
   ChatMessageSchema,
-  type ChatMessageInput,
-  // Memory schemas
-  MemoryTypeSchema,
-  CreateMemorySchema,
-  MemoryQuerySchema,
-  type MemoryType,
-  type CreateMemoryInput,
-  type MemoryQuery,
-  // Preferences
-  UserPreferencesSchema,
-  type UserPreferencesInput,
-  // Auth schemas
-  LoginSchema,
+  ParseCommandSchema,
+  ConversationIdParamSchema,
+  UpdateConversationSchema,
+  ConversationQuerySchema,
+  // Auth
   RegisterSchema,
+  LoginSchema,
   RefreshTokenSchema,
-  type LoginInput,
-  type RegisterInput,
-  type RefreshTokenInput,
-  // Param schemas
-  GoalIdParamSchema,
-  QuestIdParamSchema,
-  StepIdParamSchema,
-  SparkIdParamSchema,
+  CreateApiKeySchema,
+} from './validation/index.js';
+
+export type {
+  PaginationInput,
+  SearchInput,
+  DateRangeInput,
+  Status,
+  Priority,
+  ChatMessageInput,
+  ParseCommandInput,
+  UpdateConversationInput,
+  ConversationQueryInput,
+  RegisterInput,
+  LoginInput,
+  RefreshTokenInput,
+  CreateApiKeyInput,
 } from './validation/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ENCRYPTION
+// RE-EXPORTS: ABUSE DETECTION
 // ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  AbuseType,
+  AbuseSeverity,
+  AbuseAction,
+  AbusePattern,
+  AbuseCheckResult,
+  BlockStatus,
+  VetoStatus,
+  AbuseConfig,
+  AbuseEventType,
+  AbuseEvent,
+  AbuseMiddlewareOptions,
+} from './abuse/index.js';
 
 export {
-  // Types
-  type EncryptionKey,
-  type EncryptedEnvelope,
-  type SerializedEnvelope,
-  type KeyDerivationOptions,
-  type EncryptionOptions,
-  type DecryptionOptions,
-  // Key Manager
-  KeyManager,
-  // Encryption Service
-  EncryptionService,
-  getEncryptionService,
-  initEncryptionService,
-  resetEncryptionService,
-  // Convenience functions
-  encrypt,
-  decrypt,
-  generateKeyBase64,
-  hashForLogging,
-} from './encryption/index.js';
+  DEFAULT_ABUSE_CONFIG,
+  PROMPT_INJECTION_PATTERNS,
+  HARASSMENT_PATTERNS,
+  SPAM_PATTERNS,
+  AbuseDetector,
+  BlockStore,
+  VetoHistoryStore,
+  initAbuseDetector,
+  getAbuseDetector,
+  initBlockStore,
+  getBlockStore,
+  initVetoHistoryStore,
+  getVetoHistoryStore,
+  checkForAbuse,
+  blockUser,
+  unblockUser,
+  isUserBlocked,
+  trackVeto,
+  getRecentVetoCount,
+  onAbuseEvent,
+  clearAbuseEventHandlers,
+  blockCheck,
+  abuseDetection,
+  abuseProtection,
+  AbuseErrorCode,
+} from './abuse/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// AUDIT
+// RE-EXPORTS: SSRF PROTECTION
 // ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  SSRFValidationResult,
+  SSRFConfig,
+} from './ssrf/index.js';
 
 export {
-  // Types
-  type AuditSeverity,
-  type AuditCategory,
-  type AuditEvent,
-  type CreateAuditEventOptions,
-  // Store
-  SecurityAuditStore,
-  // Logger
-  SecurityAuditLogger,
-  getSecurityAuditLogger,
-  initSecurityAuditLogger,
-  resetSecurityAuditLogger,
-  wireSecurityAuditLogger,
+  DEFAULT_SSRF_CONFIG,
+  SSRFGuard,
+  initSSRFGuard,
+  getSSRFGuard,
+  validateUrl,
+  isUrlSafe,
+  isPrivateIp,
+} from './ssrf/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RE-EXPORTS: AUDIT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  AuditCategory,
+  AuditSeverity,
+  AuditEvent,
+  CreateAuditEventOptions,
 } from './audit/index.js';
+
+export {
+  AuditStore,
+  initAuditStore,
+  getAuditStore,
+  logAudit,
+  logAuthEvent,
+  logSecurityWarning,
+  logSecurityError,
+} from './audit/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// INITIALIZATION
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface SecurityInitOptions {
+  /** Token configuration */
+  tokenConfig?: Partial<import('./auth/types.js').TokenConfig>;
+  
+  /** Abuse detection configuration */
+  abuseConfig?: Partial<import('./abuse/types.js').AbuseConfig>;
+  
+  /** SSRF protection configuration */
+  ssrfConfig?: Partial<import('./ssrf/index.js').SSRFConfig>;
+}
+
+/**
+ * Initialize all security modules.
+ * Call this on server startup.
+ * 
+ * @example
+ * import { initSecurity } from './security/index.js';
+ * import { getStore } from './storage/index.js';
+ * 
+ * await initSecurity(getStore());
+ */
+export function initSecurity(
+  store: KeyValueStore,
+  options: SecurityInitOptions = {}
+): void {
+  // Initialize token config
+  if (options.tokenConfig) {
+    initTokenConfig(options.tokenConfig);
+  }
+  
+  // Set revocation store for tokens
+  setRevocationStore(store);
+  
+  // Initialize rate limiter
+  initRateLimiter(store);
+  initIpRateLimiter(store);
+  
+  // Initialize abuse detection
+  if (options.abuseConfig) {
+    initAbuseDetector(options.abuseConfig);
+  }
+  initBlockStore(store);
+  initVetoHistoryStore(store);
+  
+  // Initialize ack token store
+  initAckTokenStore(store);
+  
+  // Initialize SSRF guard
+  if (options.ssrfConfig) {
+    initSSRFGuard(options.ssrfConfig);
+  }
+  
+  // Initialize audit store
+  initAuditStore(store);
+  
+  console.log('[SECURITY] All security modules initialized');
+}
+
+// Import for init function
+import { initTokenConfig, setRevocationStore } from './auth/index.js';
+import { initRateLimiter, initIpRateLimiter } from './rate-limiting/index.js';
+import { initAbuseDetector, initBlockStore, initVetoHistoryStore } from './abuse/index.js';
+import { initAckTokenStore } from './auth/index.js';
+import { initSSRFGuard } from './ssrf/index.js';
+import { initAuditStore } from './audit/index.js';
