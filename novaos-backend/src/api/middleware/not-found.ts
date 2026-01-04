@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // NOT FOUND MIDDLEWARE — 404 Handler for Unmatched Routes
-// NovaOS API Layer — Phase 14
+// NovaOS API Layer
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { Request, Response, NextFunction } from 'express';
-import { getLogger } from '../../logging/index.js';
+import { getLogger } from '../../observability/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LOGGER

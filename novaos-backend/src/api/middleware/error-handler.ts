@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // ERROR HANDLER — Sanitized Error Responses for API Routes
-// NovaOS API Layer — Phase 14
+// NovaOS API Layer
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // This middleware:
@@ -13,7 +13,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
-import { getLogger } from '../../logging/index.js';
+import { getLogger } from '../../observability/index.js';
 import type { AppError } from '../../types/result.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────

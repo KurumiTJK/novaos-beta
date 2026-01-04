@@ -24,18 +24,40 @@
 export {
   // Context
   type RequestContext,
+  type PartialContext,
+  generateRequestId,
+  generateCorrelationId,
   createContext,
   runWithContext,
+  runWithNewContext,
   getContext,
+  requireContext,
+  getContextValue,
   getRequestId,
   getCorrelationId,
+  getUserId,
+  extendContext,
+  runWithChildContext,
   CONTEXT_HEADERS,
+  extractContextFromHeaders,
+  createContextHeaders,
+  getLoggingContext,
+  getMinimalLoggingContext,
   
   // Redaction
   redact,
   redactEmail,
   redactPhone,
+  redactCreditCard,
+  redactSSN,
   REDACTED,
+  FULL_REDACT_FIELDS,
+  PARTIAL_REDACT_FIELDS,
+  type RedactionOptions,
+  getPinoRedactPaths,
+  getPinoRedactConfig,
+  shouldRedact,
+  createRedactor,
   
   // Logger
   type ILogger,
@@ -44,10 +66,14 @@ export {
   type LoggerOptions,
   type RequestLogData,
   Logger,
+  LOG_LEVELS,
   getLogger,
   configureLogger,
-  logRequest,
+  getLoggerConfig,
   resetLogger,
+  logRequest,
+  logRequestStart,
+  logRequestEnd,
   
   // Specialized loggers
   loggers,
@@ -56,8 +82,12 @@ export {
   getLLMLogger,
   getDBLogger,
   withTiming,
+  logAndThrow,
+  createScopedLogger,
   
   // Middleware
+  type RequestContextMiddlewareOptions,
+  type RequestLoggingMiddlewareOptions,
   requestMiddleware,
   requestContextMiddleware,
   requestLoggingMiddleware,
@@ -73,37 +103,68 @@ export {
   // Types
   type ComponentHealth,
   type ComponentStatus,
+  type SystemStatus,
   type HealthCheckResponse,
   type ReadinessResponse,
   type LivenessResponse,
   type StatusResponse,
+  type HealthCheckFn,
+  type HealthCheckRegistration,
+  type HealthCheckOptions,
+  type DependencyType,
+  type DependencyConfig,
   HEALTH_THRESHOLDS,
   
   // Check helpers
   healthy,
   degraded,
   unhealthy,
+  withTimeout,
   
   // Core checks
   checkMemory,
   checkEventLoop,
+  checkDiskSpace,
   checkSelf,
   
   // Check factories
   createRedisHealthCheck,
   createLLMHealthCheck,
   createExternalAPIHealthCheck,
+  type RedisHealthCheckOptions,
+  type LLMHealthCheckOptions,
+  type ExternalAPIHealthCheckOptions,
+  
+  // Utilities
+  runChecks,
+  determineOverallStatus,
   
   // Dependencies
+  type RedisStoreInterface,
+  type LLMProviderConfig,
+  type ExternalAPIConfig,
   type DependencyHealthConfig,
+  registerDependency,
+  unregisterDependency,
+  getDependencyChecks,
+  clearDependencyChecks,
   configureRedisHealth,
+  getRedisHealthCheck,
+  registerLLMProvider,
   configureOpenAIHealth,
   configureGeminiHealth,
+  checkLLMProviders,
+  registerExternalAPI,
+  configureFinnhubHealth,
+  configureWeatherHealth,
+  configureCoinGeckoHealth,
+  checkExternalAPIs,
   initializeDependencyHealth,
   checkAllDependencies,
   
   // Endpoints
   type HealthEndpointConfig,
+  configureHealthEndpoints,
   createHealthRouter,
   healthHandlers,
   checkHealth,

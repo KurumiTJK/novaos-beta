@@ -5,7 +5,7 @@
 import { randomUUID } from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { logRequest, getLogger } from '../../observability/index.js';
-import { loadConfig, isProduction } from '../../config/index.js';
+import { loadConfig } from '../../config/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // EXTEND EXPRESS TYPES
@@ -53,7 +53,7 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
     const duration = Date.now() - req.startTime;
     
     // Skip health check logging in production to reduce noise
-    if (isProduction() && (req.path === '/health' || req.path === '/ready' || req.path === '/')) {
+    if (config.env.isProduction && (req.path === '/health' || req.path === '/ready' || req.path === '/')) {
       return;
     }
     
@@ -65,7 +65,7 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
       requestId: req.requestId,
       userId: (req as any).userId,
       userAgent: req.headers['user-agent'],
-      ip: config.observability.redactPII ? undefined : req.ip,
+      ip: config.features.redactPII ? undefined : req.ip,
     });
   });
   
