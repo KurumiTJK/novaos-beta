@@ -85,7 +85,7 @@ function buildSystemPrompt(personality: Personality): string {
  */
 function buildUserPrompt(userMessage: string, topic?: string): string {
   if (topic) {
-    return `${topic}: ${userMessage}`;
+    return `TOPIC: ${topic}\nMESSAGE: ${userMessage}`;
   }
   return userMessage;
 }
