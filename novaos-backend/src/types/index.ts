@@ -1,27 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TYPES — Main Type Exports
-// NovaOS Pipeline Types — Cleaned Up
+// TYPES — NovaOS Pipeline Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Re-exports
 export * from './result.js';
 export * from './branded.js';
 export * from './common.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// STANCE
+// STANCE & ACTION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type Stance = 'control' | 'shield' | 'lens' | 'sword';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// ACTION SOURCE
-// ─────────────────────────────────────────────────────────────────────────────────
-
 export type ActionSource = 'chat' | 'command' | 'api' | 'system';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// INTENT SUMMARY (Intent Gate Output)
+// INTENT GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type PrimaryRoute = 'SAY' | 'MAKE' | 'FIX' | 'DO';
@@ -40,42 +33,22 @@ export interface IntentSummary {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CONVERSATION MESSAGE
+// CONVERSATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface ConversationMessage {
   readonly role: 'user' | 'assistant' | 'system';
   readonly content: string;
   readonly timestamp?: number;
-  readonly metadata?: {
-    readonly liveData?: boolean;
-  };
+  readonly metadata?: { readonly liveData?: boolean };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// GATE ACTION & STATUS
+// GATE TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export type GateAction = 
-  | 'continue' 
-  | 'stop' 
-  | 'halt'
-  | 'await_ack' 
-  | 'regenerate'
-  | 'degrade';
-
-export type GateStatus = 
-  | 'pass'
-  | 'passed' 
-  | 'blocked' 
-  | 'awaiting' 
-  | 'warning'
-  | 'soft_fail'
-  | 'hard_fail';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// GATE RESULT
-// ─────────────────────────────────────────────────────────────────────────────────
+export type GateAction = 'continue' | 'stop' | 'halt' | 'await_ack' | 'regenerate' | 'degrade';
+export type GateStatus = 'pass' | 'passed' | 'blocked' | 'awaiting' | 'warning' | 'soft_fail' | 'hard_fail';
 
 export interface GateResult<T = unknown> {
   readonly gate?: string;
@@ -91,34 +64,23 @@ export interface GateResult<T = unknown> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SHIELD GATE OUTPUT (Router)
+// GATE OUTPUTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type ShieldRoute = 'shield' | 'skip';
-
 export interface ShieldGateOutput {
   route: ShieldRoute;
   safety_signal: SafetySignal;
   urgency: Urgency;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// TOOLS GATE OUTPUT (Router)
-// ─────────────────────────────────────────────────────────────────────────────────
-
 export type ToolsRoute = 'tools' | 'skip';
-
 export interface ToolsGateOutput {
   route: ToolsRoute;
   external_tool: boolean;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// STANCE GATE OUTPUT (Router)
-// ─────────────────────────────────────────────────────────────────────────────────
-
 export type StanceRoute = 'sword' | 'lens';
-
 export interface StanceGateOutput {
   route: StanceRoute;
   primary_route: PrimaryRoute;
@@ -126,7 +88,7 @@ export interface StanceGateOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY GATE OUTPUT
+// CAPABILITY GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface EvidenceItem {
@@ -137,7 +99,6 @@ export interface EvidenceItem {
   readonly fetchedAt: number;
 }
 
-// Provider types (from capability_gate)
 export type ProviderName = 'gemini_grounded' | 'openai';
 
 export interface ProviderConfig {
@@ -149,7 +110,6 @@ export interface ProviderConfig {
   topic?: string;
 }
 
-// Combined interface - supports both old and new usage
 export interface CapabilityGateOutput {
   readonly provider?: ProviderName;
   readonly config?: ProviderConfig;
@@ -158,17 +118,17 @@ export interface CapabilityGateOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RESPONSE GATE OUTPUT
+// RESPONSE GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface Generation {
-  text: string;  // Mutable for response-gate
+  text: string;
   readonly model: string;
   readonly tokensUsed: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// VALIDATED OUTPUT (for Constitution Gate)
+// CONSTITUTION GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface ValidatedOutput {
@@ -177,10 +137,6 @@ export interface ValidatedOutput {
   tokensUsed?: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONSTITUTION GATE OUTPUT
-// ─────────────────────────────────────────────────────────────────────────────────
-
 export interface ConstitutionalCheckResult {
   violates: boolean;
   reason: string | null;
@@ -188,24 +144,17 @@ export interface ConstitutionalCheckResult {
 }
 
 export interface ConstitutionGateOutput extends ValidatedOutput {
-  /** Whether the response passed validation */
   valid: boolean;
-  /** Whether the response was edited */
   edited: boolean;
-  /** Whether constitution check was run */
   checkRun: boolean;
-  /** Reason for skipping (if skipped) */
   skipReason?: string;
-  /** Result of constitutional check (if run) */
   constitutionalCheck?: ConstitutionalCheckResult;
-  /** Fix guidance for regeneration (if violation) */
   fixGuidance?: string;
-  /** List of violations found */
   violations?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// MEMORY GATE OUTPUT (matches memory_gate/types.ts)
+// MEMORY GATE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface MemoryRecord {
@@ -218,40 +167,15 @@ export interface MemoryRecord {
 }
 
 export interface MemoryGateOutput {
-  /** Pass through response text */
   text: string;
-  /** Was memory intent detected? */
   memoryDetected: boolean;
-  /** Was memory successfully stored? */
   memoryStored: boolean;
-  /** The stored memory record (if any) */
   memoryRecord?: MemoryRecord;
-  /** Why gate was skipped (if skipped) */
   skipReason?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SPARK (For Sword — Future)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface Spark {
-  readonly action: string;
-  readonly rationale: string;
-  readonly timeframe?: string;
-  readonly timeEstimate?: string;
-  readonly priority?: 'low' | 'medium' | 'high';
-  readonly category?: 'immediate' | 'short_term' | 'long_term';
-}
-
-export interface SparkResult {
-  readonly spark?: Spark | null;
-  readonly reason?: string;
-  readonly eligible?: boolean;
-  readonly ineligibilityReason?: string;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// GATE RESULTS COLLECTION
+// GATE RESULTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface GateResults {
@@ -264,11 +188,10 @@ export interface GateResults {
   model?: GateResult<Generation>;
   constitution?: GateResult<ConstitutionGateOutput>;
   memory?: GateResult<MemoryGateOutput>;
-  spark?: GateResult<SparkResult>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// PIPELINE CONTEXT
+// PIPELINE
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface PipelineContext {
@@ -290,21 +213,12 @@ export interface PipelineContext {
   timestamp?: string | number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// PIPELINE STATE
-// ─────────────────────────────────────────────────────────────────────────────────
-
 export interface PipelineState {
   userMessage: string;
   normalizedInput: string;
   gateResults: GateResults;
   flags: Record<string, unknown>;
-  timestamps: {
-    pipelineStart: number;
-    [key: string]: number;
-  };
-  
-  // Gate outputs
+  timestamps: { pipelineStart: number; [key: string]: number };
   intent_summary?: IntentSummary;
   shieldResult?: ShieldGateOutput;
   toolsResult?: ToolsGateOutput;
@@ -312,29 +226,16 @@ export interface PipelineState {
   capabilityResult?: CapabilityGateOutput;
   generation?: Generation;
   validatedOutput?: ValidatedOutput;
-  spark?: Spark;
-  
-  // For pipeline flow control
   stance?: Stance;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// PIPELINE STATUS & RESULT
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export type PipelineStatus =
-  | 'success'
-  | 'stopped'
-  | 'await_ack'
-  | 'degraded'
-  | 'error';
+export type PipelineStatus = 'success' | 'stopped' | 'await_ack' | 'degraded' | 'error';
 
 export interface PipelineResult {
   readonly status: PipelineStatus;
   readonly response: string;
   readonly stance?: Stance;
   readonly gateResults: GateResults;
-  readonly spark?: Spark;
   readonly ackToken?: string;
   readonly ackMessage?: string;
   readonly metadata: {

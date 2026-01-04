@@ -11,16 +11,10 @@ import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify, isProduction } from './config/index.js';
 import { getLogger, createHealthRouter } from './observability/index.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
-// NOTE: Removed initializeMemoryStore import - memory gate will use its own store
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// SECURITY MODULE
-// ─────────────────────────────────────────────────────────────────────────────────
-
 import { initSecurity, ipRateLimit } from './security/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// LOAD CONFIG & ENVIRONMENT
+// CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const config = loadConfig();
@@ -28,19 +22,15 @@ const PORT = config.server.port;
 const NODE_ENV = config.environment;
 const REQUIRE_AUTH = config.auth.required;
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// LOGGER
-// ─────────────────────────────────────────────────────────────────────────────────
-
 const logger = getLogger({ component: 'server' });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SERVER SETUP
+// EXPRESS APP
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const app = express();
 
-// Security headers via Helmet
+// Security headers
 app.use(helmet({
   contentSecurityPolicy: isProduction() ? undefined : {
     directives: {
@@ -71,14 +61,14 @@ app.use(cors({
 // Body parsing
 app.use(express.json({ limit: '1mb' }));
 
-// Serve frontend
+// Static files
 app.use(express.static('public'));
 
-// Request ID and logging middleware
+// Request middleware
 app.use(requestMiddleware);
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// ROUTES
+// HEALTH ROUTES
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const healthRouter = createHealthRouter({
@@ -114,10 +104,7 @@ async function startServer() {
   // Initialize storage
   await storeManager.initialize();
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // INITIALIZE SECURITY MODULE
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
+  // Initialize security
   initSecurity(storeManager.getStore(), {
     tokenConfig: {
       secret: config.auth.jwtSecret,
@@ -133,88 +120,77 @@ async function startServer() {
       allowHttp: !isProduction(),
     },
   });
-  console.log('[SERVER] Security module initialized');
 
-  // Global IP rate limiting (before any routes)
+  // Rate limiting
   app.use(ipRateLimit());
 
-  // NOTE: Memory gate will initialize its own store internally
-  // The memory gate uses a simpler store interface that doesn't require
-  // all KeyValueStore methods. It will lazy-initialize when first used.
-  console.log('[MEMORY_GATE] Memory gate will initialize on first use');
-
-  // Create router
-  console.log('[SERVER] Creating API router...');
-  
-  const router = await createRouterAsync({
-    requireAuth: REQUIRE_AUTH,
-  });
-
+  // API routes
+  const router = await createRouterAsync({ requireAuth: REQUIRE_AUTH });
   app.use('/api/v1', router);
 
   // Error handler (must be last)
   app.use(errorHandler);
   
   const server = app.listen(PORT, () => {
-    const storageStatus = storeManager.isUsingRedis() ? 'redis' : 'memory';
-    const verifyStatus = canVerify() ? 'enabled' : 'disabled';
-    const openaiStatus = isOpenAIAvailable() ? 'connected' : 'unavailable';
     const startupTime = Date.now() - startTime;
     
     logger.info('Server started', {
       port: PORT,
       environment: NODE_ENV,
-      storage: storageStatus,
-      verification: verifyStatus,
+      storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
+      verification: canVerify() ? 'enabled' : 'disabled',
       pipelineModel: pipeline_model,
       generationModel: model_llm,
       startupMs: startupTime,
     });
     
     console.log(`
-╔═══════════════════════════════════════════════════════════════════╗
-║                     NOVAOS BACKEND v1.0.0                         ║
-╠═══════════════════════════════════════════════════════════════════╣
-║  Environment:  ${NODE_ENV.padEnd(49)}║
-║  Port:         ${String(PORT).padEnd(49)}║
-║  OpenAI:       ${openaiStatus.padEnd(49)}║
-║  Pipeline:     ${pipeline_model.padEnd(49)}║
-║  Generation:   ${model_llm.padEnd(49)}║
-║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(49)}║
-║  Storage:      ${storageStatus.padEnd(49)}║
-║  Verification: ${verifyStatus.padEnd(49)}║
-║  Security:     ${'initialized'.padEnd(49)}║
-╚═══════════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════╗
+║                        NOVAOS BACKEND v1.0.0                          ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  Environment:  ${NODE_ENV.padEnd(53)}║
+║  Port:         ${String(PORT).padEnd(53)}║
+║  OpenAI:       ${(isOpenAIAvailable() ? 'connected' : 'unavailable').padEnd(53)}║
+║  Pipeline:     ${pipeline_model.padEnd(53)}║
+║  Generation:   ${model_llm.padEnd(53)}║
+║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(53)}║
+║  Storage:      ${(storeManager.isUsingRedis() ? 'redis' : 'memory').padEnd(53)}║
+║  Verification: ${(canVerify() ? 'enabled' : 'disabled').padEnd(53)}║
+╚═══════════════════════════════════════════════════════════════════════╝
 
-Health:
-  GET  /health                      Full health check
-  GET  /health/live                 Liveness probe
-  GET  /health/ready                Readiness probe
-  GET  /status                      Detailed status
+  HEALTH
+    GET  /health                           Health check
+    GET  /health/live                      Liveness probe
+    GET  /health/ready                     Readiness probe
 
-Core:
-  POST /api/v1/chat                 Main chat endpoint
-  POST /api/v1/parse-command        Parse action command
+  INFO
+    GET  /api/v1/health                    API health
+    GET  /api/v1/version                   Version info
+    GET  /api/v1/providers                 Available providers
+    GET  /api/v1/config                    Current config
 
-Conversations:
-  GET  /api/v1/conversations        List conversations
-  GET  /api/v1/conversations/:id    Get conversation + messages
-  GET  /api/v1/conversations/:id/messages  Get messages only
-  PATCH /api/v1/conversations/:id   Update title/tags
-  DELETE /api/v1/conversations/:id  Delete conversation
+  AUTH
+    POST /api/v1/auth/register             Get token
+    GET  /api/v1/auth/verify               Verify token
+    GET  /api/v1/auth/status               Auth status
 
-Auth:
-  POST /api/v1/auth/register        Get token
-  GET  /api/v1/auth/verify          Verify token
-  GET  /api/v1/auth/status          Auth status
+  CHAT
+    POST /api/v1/chat                      Main chat endpoint
+    POST /api/v1/parse-command             Parse action command
 
-Admin:
-  POST /api/v1/admin/block-user     Block user
-  POST /api/v1/admin/unblock-user   Unblock user
-  GET  /api/v1/admin/audit-logs     Audit logs
-  GET  /api/v1/config               View config
+  CONVERSATIONS
+    GET  /api/v1/conversations             List conversations
+    GET  /api/v1/conversations/:id         Get conversation
+    GET  /api/v1/conversations/:id/messages Get messages
+    PATCH /api/v1/conversations/:id        Update conversation
+    DELETE /api/v1/conversations/:id       Delete conversation
 
-Ready to enforce the Nova Constitution. Startup: ${startupTime}ms
+  ADMIN
+    POST /api/v1/admin/block-user          Block user
+    POST /api/v1/admin/unblock-user        Unblock user
+    GET  /api/v1/admin/audit-logs          View audit logs
+
+  Ready. Startup: ${startupTime}ms
     `);
   });
 
@@ -224,11 +200,8 @@ Ready to enforce the Nova Constitution. Startup: ${startupTime}ms
     
     server.close(async () => {
       logger.info('HTTP server closed');
-      
       await storeManager.disconnect();
-      logger.info('Storage disconnected');
-      
-      logger.info('Server shutdown complete');
+      logger.info('Shutdown complete');
       process.exit(0);
     });
     
