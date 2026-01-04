@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NovaOS Test Harness</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-tertiary: #1a1a24;
+      --border: #2a2a3a;
+      --text-primary: #e4e4ef;
+      --text-secondary: #8888a0;
+      --text-muted: #555566;
+      --accent-shield: #ff6b6b;
+      --accent-lens: #4ecdc4;
+      --accent-sword: #ffe66d;
+      --success: #4ade80;
+      --error: #f87171;
+      --warning: #fbbf24;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      font-family: 'Space Grotesk', -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 40px;
+      padding-bottom: 100px;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    @media (max-width: 900px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      padding: 24px 0 32px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+
+    .logo {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -1px;
+      margin-bottom: 8px;
+    }
+
+    .logo span:nth-child(1) { color: var(--accent-shield); }
+    .logo span:nth-child(2) { color: var(--accent-lens); }
+    .logo span:nth-child(3) { color: var(--accent-sword); }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Config Section */
+    .config-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .config-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .config-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      min-width: 60px;
+    }
+
+    .config-input {
+      flex: 1;
+      min-width: 200px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .config-input:focus {
+      outline: none;
+      border-color: var(--accent-lens);
+      box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.1);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background 0.3s;
+    }
+
+    .status-dot.connected { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .status-dot.error { background: var(--error); box-shadow: 0 0 8px var(--error); }
+
+    /* Quick Actions */
+    .sidebar-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .sidebar-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    @media (max-width: 900px) {
+      .quick-actions {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    .quick-btn {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 8px;
+      color: var(--text-secondary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+
+    .quick-btn:hover {
+      background: var(--bg-tertiary);
+      border-color: var(--accent-lens);
+      color: var(--text-primary);
+    }
+
+    .quick-btn:active {
+      transform: scale(0.98);
+    }
+
+    .quick-btn .icon {
+      display: block;
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    /* Chat Section */
+    .chat-column {
+      min-width: 0;
+    }
+
+    .chat-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-tertiary);
+    }
+
+    .chat-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .stance-indicator {
+      display: flex;
+      gap: 6px;
+    }
+
+    .stance-pill {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      text-transform: uppercase;
+      opacity: 0.4;
+      transition: opacity 0.3s;
+    }
+
+    .stance-pill.shield { background: rgba(255, 107, 107, 0.2); color: var(--accent-shield); }
+    .stance-pill.lens { background: rgba(78, 205, 196, 0.2); color: var(--accent-lens); }
+    .stance-pill.sword { background: rgba(255, 230, 109, 0.2); color: var(--accent-sword); }
+    .stance-pill.active { opacity: 1; }
+
+    .messages {
+      height: 500px;
+      overflow-y: auto;
+      padding: 20px;
+      scroll-behavior: smooth;
+    }
+
+    .message {
+      margin-bottom: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-user {
+      text-align: right;
+    }
+
+    .message-user .bubble {
+      background: linear-gradient(135deg, var(--accent-lens), #3ba89f);
+      color: var(--bg-primary);
+      border-radius: 16px 16px 4px 16px;
+      display: inline-block;
+      max-width: 85%;
+      padding: 12px 16px;
+      text-align: left;
+    }
+
+    .message-nova .bubble {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 16px 16px 16px 4px;
+      display: inline-block;
+      max-width: 85%;
+      padding: 12px 16px;
+    }
+
+    .message-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .message-error .bubble {
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid var(--error);
+      color: var(--error);
+    }
+
+    /* Markdown styles in bubbles */
+    .bubble ul, .bubble ol {
+      margin: 8px 0;
+      padding-left: 20px;
+    }
+
+    .bubble li {
+      margin: 4px 0;
+      line-height: 1.5;
+    }
+
+    .bubble code {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+    }
+
+    .bubble pre {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+
+    .bubble pre code {
+      background: none;
+      padding: 0;
+    }
+
+    .bubble strong {
+      font-weight: 600;
+    }
+
+    .bubble em {
+      font-style: italic;
+    }
+
+    /* Input Area */
+    .input-area {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-tertiary);
+    }
+
+    .chat-input {
+      flex: 1;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 12px 18px;
+      color: var(--text-primary);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      resize: none;
+      min-height: 44px;
+      max-height: 120px;
+    }
+
+    .chat-input:focus {
+      outline: none;
+      border-color: var(--accent-lens);
+    }
+
+    .send-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-lens), #3ba89f);
+      border: none;
+      color: var(--bg-primary);
+      font-size: 18px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .send-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
+    }
+
+    .send-btn:active {
+      transform: scale(0.95);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Response Panel */
+    .response-panel {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    @media (max-width: 900px) {
+      .response-panel {
+        margin-top: 20px;
+      }
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      cursor: pointer;
+    }
+
+    .panel-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-toggle {
+      color: var(--text-muted);
+      transition: transform 0.3s;
+    }
+
+    .panel-content {
+      padding: 16px;
+      display: none;
+    }
+
+    .panel-content.open {
+      display: block;
+    }
+
+    .json-view {
+      background: var(--bg-primary);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .json-key { color: var(--accent-lens); }
+    .json-string { color: var(--accent-sword); }
+    .json-number { color: var(--accent-shield); }
+    .json-boolean { color: #c084fc; }
+    .json-null { color: var(--text-muted); }
+
+    /* Loading */
+    .loading-dots {
+      display: inline-flex;
+      gap: 4px;
+    }
+
+    .loading-dots span {
+      width: 6px;
+      height: 6px;
+      background: var(--accent-lens);
+      border-radius: 50%;
+      animation: bounce 1.4s ease-in-out infinite;
+    }
+
+    .loading-dots span:nth-child(1) { animation-delay: 0s; }
+    .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text-primary);
+      opacity: 0;
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success { border-color: var(--success); }
+    .toast.error { border-color: var(--error); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    /* Mobile adjustments */
+    @media (max-width: 900px) {
+      .container {
+        padding: 12px;
+      }
+
+      .logo {
+        font-size: 24px;
+      }
+
+      .messages {
+        height: 350px;
+      }
+
+      .config-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .config-input {
+        min-width: 100%;
+      }
+
+      .quick-actions {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      
+      .sidebar {
+        order: -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <span>NOVA</span><span>OS</span><span>_</span>
+      </div>
+      <div class="subtitle">// test harness v1.0</div>
+    </header>
+
+    <!-- Config -->
+    <div class="config-section">
+      <div class="config-row">
+        <span class="config-label">Base URL</span>
+        <input type="text" class="config-input" id="baseUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+        <div class="status-dot" id="statusDot"></div>
+      </div>
+    </div>
+
+    <div class="main-grid">
+      <!-- Chat (Left) -->
+      <div class="chat-column">
+        <div class="chat-section">
+          <div class="chat-header">
+            <span class="chat-title">// pipeline test</span>
+            <div class="stance-indicator">
+              <span class="stance-pill shield" id="stanceShield">SHIELD</span>
+              <span class="stance-pill lens" id="stanceLens">LENS</span>
+              <span class="stance-pill sword" id="stanceSword">SWORD</span>
+            </div>
+          </div>
+          <div class="messages" id="messages">
+            <div class="message message-nova">
+              <div class="bubble">Ready to test NovaOS pipeline. Enter a message or use quick actions.</div>
+            </div>
+          </div>
+          <div class="input-area">
+            <textarea class="chat-input" id="chatInput" placeholder="Type a message..." rows="1"></textarea>
+            <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar (Right) -->
+      <div class="sidebar">
+        <!-- Quick Actions -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Quick Actions</div>
+          <div class="quick-actions">
+            <button class="quick-btn" onclick="checkHealth()">
+              <span class="icon">💓</span>
+              Health
+            </button>
+            <button class="quick-btn" onclick="checkVersion()">
+              <span class="icon">📦</span>
+              Version
+            </button>
+            <button class="quick-btn" onclick="checkProviders()">
+              <span class="icon">🔌</span>
+              Providers
+            </button>
+            <button class="quick-btn" onclick="checkReady()">
+              <span class="icon">✅</span>
+              Ready
+            </button>
+            <button class="quick-btn" onclick="checkLive()">
+              <span class="icon">⚡</span>
+              Live
+            </button>
+            <button class="quick-btn" onclick="clearChat()">
+              <span class="icon">🗑️</span>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <!-- Response Panel -->
+        <div class="response-panel">
+          <div class="panel-header" onclick="togglePanel()">
+            <span class="panel-title">
+              <span>📋</span>
+              Raw Response
+            </span>
+            <span class="panel-toggle" id="panelToggle">▼</span>
+          </div>
+          <div class="panel-content open" id="panelContent">
+            <div class="json-view" id="jsonView">// response will appear here</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // State
+    let lastResponse = null;
+
+    // Elements
+    const baseUrlInput = document.getElementById('baseUrl');
+    const statusDot = document.getElementById('statusDot');
+    const messagesEl = document.getElementById('messages');
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const jsonView = document.getElementById('jsonView');
+    const panelContent = document.getElementById('panelContent');
+    const panelToggle = document.getElementById('panelToggle');
+
+    // Auto-resize textarea
+    chatInput.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+
+    // Enter to send
+    chatInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Get base URL
+    function getBaseUrl() {
+      return baseUrlInput.value.replace(/\/$/, '');
+    }
+
+    // Toast notification
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast ' + type;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    // Add message to chat
+    function addMessage(content, type = 'nova', meta = '') {
+      const div = document.createElement('div');
+      div.className = `message message-${type}`;
+      const formattedContent = type === 'user' ? escapeHtml(content) : parseMarkdown(content);
+      div.innerHTML = `
+        <div class="bubble">${formattedContent}</div>
+        ${meta ? `<div class="message-meta">${escapeHtml(meta)}</div>` : ''}
+      `;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    // Add loading message
+    function addLoading() {
+      const div = document.createElement('div');
+      div.className = 'message message-nova';
+      div.id = 'loadingMsg';
+      div.innerHTML = `
+        <div class="bubble">
+          <div class="loading-dots"><span></span><span></span><span></span></div>
+        </div>
+      `;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // Remove loading
+    function removeLoading() {
+      const el = document.getElementById('loadingMsg');
+      if (el) el.remove();
+    }
+
+    // Escape HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Parse markdown to HTML
+    function parseMarkdown(text) {
+      let html = escapeHtml(text);
+      
+      // Code blocks (``` ... ```)
+      html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+      
+      // Inline code (`...`)
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      
+      // Bold (**text** or __text__)
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+      
+      // Italic (*text* or _text_)
+      html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+      
+      // Bullet points (- item or * item or • item)
+      html = html.replace(/^[\-\*•]\s+(.+)$/gm, '<li>$1</li>');
+      html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+      // Wrap consecutive <li> elements in <ul>
+      html = html.replace(/(<li>[\s\S]*?<\/li>)(?=\s*<li>|$)/g, function(match) {
+        return match;
+      });
+      // Clean up: wrap all consecutive li elements
+      html = html.replace(/((?:<li>.*?<\/li>\s*)+)/g, '<ul>$1</ul>');
+      // Remove nested ul
+      html = html.replace(/<ul>\s*<ul>/g, '<ul>');
+      html = html.replace(/<\/ul>\s*<\/ul>/g, '</ul>');
+      
+      // Numbered lists (1. item)
+      html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+      
+      // Line breaks
+      html = html.replace(/\n/g, '<br>');
+      
+      // Clean up extra <br> around lists
+      html = html.replace(/<br>\s*<ul>/g, '<ul>');
+      html = html.replace(/<\/ul>\s*<br>/g, '</ul>');
+      html = html.replace(/<br>\s*<li>/g, '<li>');
+      html = html.replace(/<\/li>\s*<br>/g, '</li>');
+      
+      return html;
+    }
+
+    // Syntax highlight JSON
+    function highlightJson(obj) {
+      const json = JSON.stringify(obj, null, 2);
+      return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+        let cls = 'json-number';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'json-key';
+            match = match.slice(0, -1);
+            return `<span class="${cls}">${escapeHtml(match)}</span>:`;
+          } else {
+            cls = 'json-string';
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'json-boolean';
+        } else if (/null/.test(match)) {
+          cls = 'json-null';
+        }
+        return `<span class="${cls}">${escapeHtml(match)}</span>`;
+      });
+    }
+
+    // Update JSON view
+    function updateJsonView(data) {
+      lastResponse = data;
+      jsonView.innerHTML = highlightJson(data);
+    }
+
+    // Update status dot
+    function updateStatus(connected) {
+      statusDot.className = 'status-dot ' + (connected ? 'connected' : 'error');
+    }
+
+    // Update stance indicators
+    function updateStance(stance) {
+      document.getElementById('stanceShield').classList.toggle('active', stance === 'shield');
+      document.getElementById('stanceLens').classList.toggle('active', stance === 'lens');
+      document.getElementById('stanceSword').classList.toggle('active', stance === 'sword');
+    }
+
+    // Toggle panel
+    function togglePanel() {
+      panelContent.classList.toggle('open');
+      panelToggle.style.transform = panelContent.classList.contains('open') ? 'rotate(180deg)' : '';
+    }
+
+    // API request helper
+    async function apiRequest(endpoint, options = {}) {
+      const url = getBaseUrl() + endpoint;
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
+        });
+        const data = await response.json();
+        updateStatus(true);
+        return { ok: response.ok, status: response.status, data };
+      } catch (error) {
+        updateStatus(false);
+        return { ok: false, error: error.message };
+      }
+    }
+
+    // Quick actions
+    async function checkHealth() {
+      addMessage('Checking /health...', 'user');
+      addLoading();
+      const result = await apiRequest('/health');
+      removeLoading();
+      if (result.ok) {
+        addMessage(`Health: ${result.data.status}`, 'nova', `status: ${result.status}`);
+        updateJsonView(result.data);
+        showToast('Health check passed', 'success');
+      } else {
+        addMessage(`Error: ${result.error || 'Request failed'}`, 'error');
+        showToast('Health check failed', 'error');
+      }
+    }
+
+    async function checkVersion() {
+      addMessage('Checking /api/v1/version...', 'user');
+      addLoading();
+      const result = await apiRequest('/api/v1/version');
+      removeLoading();
+      if (result.ok) {
+        addMessage(`Version: ${result.data.version || result.data.api}`, 'nova', `status: ${result.status}`);
+        updateJsonView(result.data);
+      } else {
+        addMessage(`Error: ${result.error || 'Request failed'}`, 'error');
+      }
+    }
+
+    async function checkProviders() {
+      addMessage('Checking /api/v1/providers...', 'user');
+      addLoading();
+      const result = await apiRequest('/api/v1/providers');
+      removeLoading();
+      if (result.ok) {
+        const providers = result.data.available || result.data;
+        addMessage(`Providers: ${Array.isArray(providers) ? providers.join(', ') : JSON.stringify(providers)}`, 'nova', `status: ${result.status}`);
+        updateJsonView(result.data);
+      } else {
+        addMessage(`Error: ${result.error || 'Request failed'}`, 'error');
+      }
+    }
+
+    async function checkReady() {
+      addMessage('Checking /health/ready...', 'user');
+      addLoading();
+      const result = await apiRequest('/health/ready');
+      removeLoading();
+      if (result.ok) {
+        addMessage(`Ready: ${result.data.status}`, 'nova', `status: ${result.status}`);
+        updateJsonView(result.data);
+        showToast('System ready', 'success');
+      } else {
+        addMessage(`Not ready: ${result.error || result.data?.status}`, 'error');
+        showToast('System not ready', 'error');
+      }
+    }
+
+    async function checkLive() {
+      addMessage('Checking /health/live...', 'user');
+      addLoading();
+      const result = await apiRequest('/health/live');
+      removeLoading();
+      if (result.ok) {
+        addMessage(`Live: ${result.data.status}`, 'nova', `status: ${result.status}`);
+        updateJsonView(result.data);
+        showToast('System alive', 'success');
+      } else {
+        addMessage(`Error: ${result.error || 'Request failed'}`, 'error');
+        showToast('System not responding', 'error');
+      }
+    }
+
+    function clearChat() {
+      messagesEl.innerHTML = `
+        <div class="message message-nova">
+          <div class="bubble">Chat cleared. Ready to test.</div>
+        </div>
+      `;
+      jsonView.innerHTML = '// response will appear here';
+      updateStance(null);
+    }
+
+    // Send chat message
+    async function sendMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+
+      chatInput.value = '';
+      chatInput.style.height = 'auto';
+      sendBtn.disabled = true;
+
+      addMessage(message, 'user');
+      addLoading();
+
+      const result = await apiRequest('/api/v1/chat', {
+        method: 'POST',
+        body: JSON.stringify({ message })
+      });
+
+      removeLoading();
+      sendBtn.disabled = false;
+
+      if (result.ok) {
+        const response = result.data.response || result.data.text || result.data.message || JSON.stringify(result.data);
+        const stance = result.data.stance || result.data.metadata?.stance;
+        const model = result.data.model || result.data.metadata?.model;
+        
+        addMessage(response, 'nova', model ? `model: ${model}` : '');
+        updateJsonView(result.data);
+        
+        if (stance) {
+          updateStance(stance.toLowerCase());
+        }
+      } else {
+        addMessage(`Error: ${result.error || result.data?.error || 'Request failed'}`, 'error', `status: ${result.status}`);
+        if (result.data) updateJsonView(result.data);
+      }
+
+      chatInput.focus();
+    }
+
+    // Initial status check
+    (async function() {
+      const result = await apiRequest('/health');
+      if (result.ok) {
+        showToast('Connected to NovaOS', 'success');
+      }
+    })();
+  </script>
+</body>
+</html>
