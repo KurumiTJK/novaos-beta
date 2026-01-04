@@ -11,7 +11,7 @@ import { storeManager } from './storage/index.js';
 import { loadConfig, canVerify, isProduction } from './config/index.js';
 import { getLogger, createHealthRouter } from './observability/index.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_engine.js';
-import { initializeMemoryStore } from './gates/memory_gate/index.js';
+// NOTE: Removed initializeMemoryStore import - memory gate will use its own store
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // SECURITY MODULE
@@ -138,9 +138,10 @@ async function startServer() {
   // Global IP rate limiting (before any routes)
   app.use(ipRateLimit());
 
-  // Initialize episodic memory gate store
-  initializeMemoryStore(storeManager.getStore());
-  console.log('[MEMORY_GATE] Episodic memory store initialized');
+  // NOTE: Memory gate will initialize its own store internally
+  // The memory gate uses a simpler store interface that doesn't require
+  // all KeyValueStore methods. It will lazy-initialize when first used.
+  console.log('[MEMORY_GATE] Memory gate will initialize on first use');
 
   // Create router
   console.log('[SERVER] Creating API router...');

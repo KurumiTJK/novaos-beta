@@ -12,4 +12,5 @@ export type {
   ProviderConfig,
   ProviderName,
   Provider,
+  EvidenceItem,
 } from './types.js';

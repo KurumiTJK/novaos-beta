@@ -2,23 +2,20 @@
 // CONSTITUTION GATE — Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { ValidatedOutput } from '../../types/index.js';
+import type { ValidatedOutput, ConstitutionalCheckResult } from '../../types/index.js';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONSTITUTIONAL CHECK RESULT
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface ConstitutionalCheckResult {
-  violates: boolean;
-  reason: string | null;
-  fix: string | null;
-}
+// Re-export for convenience
+export type { ValidatedOutput, ConstitutionalCheckResult };
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // GATE OUTPUT
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface ConstitutionGateOutput extends ValidatedOutput {
+  /** Whether the response passed validation */
+  valid: boolean;
+  /** Whether the response was edited */
+  edited: boolean;
   /** Whether constitution check was run */
   checkRun: boolean;
   /** Reason for skipping (if skipped) */
@@ -27,6 +24,8 @@ export interface ConstitutionGateOutput extends ValidatedOutput {
   constitutionalCheck?: ConstitutionalCheckResult;
   /** Fix guidance for regeneration (if violation) */
   fixGuidance?: string;
+  /** List of violations found */
+  violations?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

@@ -341,8 +341,8 @@ export function initSecurity(
   initBlockStore(store);
   initVetoHistoryStore(store);
   
-  // Initialize ack token store
-  initAckTokenStore(store);
+  // Initialize ack token store (uses defaults, not the KeyValueStore)
+  initAckTokenStore();
   
   // Initialize SSRF guard
   if (options.ssrfConfig) {

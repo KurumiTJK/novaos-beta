@@ -46,6 +46,18 @@ export async function callGeminiGrounded(
     // Build messages array
     const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
+    // Add system prompt as first user message (Gemini doesn't have system role in contents)
+    if (systemPrompt) {
+      contents.push({
+        role: 'user',
+        parts: [{ text: `System: ${systemPrompt}` }],
+      });
+      contents.push({
+        role: 'model',
+        parts: [{ text: 'Understood. I will follow these instructions.' }],
+      });
+    }
+
     // Add conversation history
     if (conversationHistory?.length) {
       for (const msg of conversationHistory) {
@@ -62,15 +74,14 @@ export async function callGeminiGrounded(
       parts: [{ text: userPrompt }],
     });
 
-    // Call Gemini with grounding
+    // Call Gemini with grounding (without systemInstruction which isn't in the type)
     const response = await ai.models.generateContent({
       model: config.model,
-      systemInstruction: systemPrompt,
       contents,
       config: {
         tools: config.tools as any,
       },
-    });
+    } as any);
 
     const text = response.text ?? '';
     const metadata = response.candidates?.[0]?.groundingMetadata;

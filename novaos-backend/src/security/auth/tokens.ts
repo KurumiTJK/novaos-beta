@@ -60,7 +60,7 @@ function generateTokenId(): string {
 
 function parseExpiry(expiry: string): number {
   const match = expiry.match(/^(\d+)([smhd])$/);
-  if (!match) return 900; // Default 15 minutes
+  if (!match || !match[1] || !match[2]) return 900; // Default 15 minutes
   
   const value = parseInt(match[1], 10);
   const unit = match[2];

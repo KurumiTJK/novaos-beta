@@ -284,7 +284,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           userId,
           conversationId,
           message,
-          timestamp: new Date().toISOString(),
+          timestamp: Date.now(),
           requestId: (req as any).requestId ?? crypto.randomUUID(),
           requestedStance: stance,
           actionSource: actionSource as ActionSource,
@@ -294,8 +294,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           },
         };
 
-        // Execute pipeline
-        const result = await pipeline.execute(context);
+        // Execute pipeline (use process, not execute)
+        const result = await pipeline.process(message, context);
 
         // Log audit
         await logAudit({
@@ -305,14 +305,13 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           details: {
             conversationId,
             stance: result.stance,
-            mode: result.mode,
-            hasVeto: !!result.veto,
+            status: result.status,
           },
         });
 
-        // Track veto if present
-        if (result.veto) {
-          await trackVeto(userId, result.veto.reason);
+        // Track veto if present (trackVeto takes only userId)
+        if (result.status === 'stopped') {
+          await trackVeto(userId);
         }
 
         res.json(result);
@@ -337,17 +336,18 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           userId,
           conversationId,
           message,
-          timestamp: new Date().toISOString(),
+          timestamp: Date.now(),
           requestId: (req as any).requestId ?? crypto.randomUUID(),
           actionSource: 'command',
           metadata: {},
         };
 
-        const result = await pipeline.execute(context);
+        // Execute pipeline (use process, not execute)
+        const result = await pipeline.process(message, context);
 
         res.json({
           parsed: true,
-          intent: result.intent,
+          intent: result.gateResults.intent?.output,
           stance: result.stance,
           response: result.response,
         });
@@ -367,7 +367,8 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { limit = 50, offset = 0 } = req.query;
-        const conversations = await workingMemory.listByUser(req.userId!, Number(limit), Number(offset));
+        // Use list() instead of listByUser()
+        const conversations = await workingMemory.list(req.userId!, Number(limit), Number(offset));
         
         res.json({
           conversations,
@@ -384,7 +385,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     validateParams(ConversationIdParamSchema),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const id = req.params.id;
+        const id = req.params.id!;
         const { messagesLimit = 100 } = req.query;
 
         const conversation = await workingMemory.get(id);
@@ -413,7 +414,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     validateParams(ConversationIdParamSchema),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const id = req.params.id;
+        const id = req.params.id!;
         const { limit = 100, offset = 0 } = req.query;
 
         const conversation = await workingMemory.get(id);
@@ -440,7 +441,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     validateBody(UpdateConversationSchema),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const id = req.params.id;
+        const id = req.params.id!;
         const { title, tags } = req.body;
 
         const conversation = await workingMemory.get(id);
@@ -470,7 +471,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     validateParams(ConversationIdParamSchema),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const id = req.params.id;
+        const id = req.params.id!;
 
         const conversation = await workingMemory.get(id);
         if (!conversation || conversation.userId !== req.userId) {

@@ -15,6 +15,12 @@ export * from './common.js';
 export type Stance = 'control' | 'shield' | 'lens' | 'sword';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// ACTION SOURCE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type ActionSource = 'chat' | 'command' | 'api' | 'system';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // INTENT SUMMARY (Intent Gate Output)
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -131,9 +137,24 @@ export interface EvidenceItem {
   readonly fetchedAt: number;
 }
 
+// Provider types (from capability_gate)
+export type ProviderName = 'gemini_grounded' | 'openai';
+
+export interface ProviderConfig {
+  provider: ProviderName;
+  model: string;
+  tools?: unknown[];
+  temperature?: number;
+  maxTokens?: number;
+  topic?: string;
+}
+
+// Combined interface - supports both old and new usage
 export interface CapabilityGateOutput {
-  readonly capabilitiesUsed: string[];
-  readonly evidenceItems: EvidenceItem[];
+  readonly provider?: ProviderName;
+  readonly config?: ProviderConfig;
+  readonly capabilitiesUsed?: string[];
+  readonly evidenceItems?: EvidenceItem[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -141,9 +162,72 @@ export interface CapabilityGateOutput {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface Generation {
-  readonly text: string;
+  text: string;  // Mutable for response-gate
   readonly model: string;
   readonly tokensUsed: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// VALIDATED OUTPUT (for Constitution Gate)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ValidatedOutput {
+  text: string;
+  model?: string;
+  tokensUsed?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONSTITUTION GATE OUTPUT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ConstitutionalCheckResult {
+  violates: boolean;
+  reason: string | null;
+  fix: string | null;
+}
+
+export interface ConstitutionGateOutput extends ValidatedOutput {
+  /** Whether the response passed validation */
+  valid: boolean;
+  /** Whether the response was edited */
+  edited: boolean;
+  /** Whether constitution check was run */
+  checkRun: boolean;
+  /** Reason for skipping (if skipped) */
+  skipReason?: string;
+  /** Result of constitutional check (if run) */
+  constitutionalCheck?: ConstitutionalCheckResult;
+  /** Fix guidance for regeneration (if violation) */
+  fixGuidance?: string;
+  /** List of violations found */
+  violations?: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// MEMORY GATE OUTPUT (matches memory_gate/types.ts)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface MemoryRecord {
+  id: string;
+  userId: string;
+  userMessage: string;
+  generatedResponse: string;
+  source: 'regex' | 'llm';
+  timestamp: number;
+}
+
+export interface MemoryGateOutput {
+  /** Pass through response text */
+  text: string;
+  /** Was memory intent detected? */
+  memoryDetected: boolean;
+  /** Was memory successfully stored? */
+  memoryStored: boolean;
+  /** The stored memory record (if any) */
+  memoryRecord?: MemoryRecord;
+  /** Why gate was skipped (if skipped) */
+  skipReason?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -177,6 +261,9 @@ export interface GateResults {
   stance?: GateResult<StanceGateOutput>;
   capability?: GateResult<CapabilityGateOutput>;
   response?: GateResult<Generation>;
+  model?: GateResult<Generation>;
+  constitution?: GateResult<ConstitutionGateOutput>;
+  memory?: GateResult<MemoryGateOutput>;
   spark?: GateResult<SparkResult>;
 }
 
@@ -189,6 +276,7 @@ export interface PipelineContext {
   readonly userId?: string;
   readonly sessionId?: string;
   readonly conversationId?: string;
+  readonly message?: string;
   readonly conversationHistory?: readonly ConversationMessage[];
   readonly userPreferences?: Readonly<Record<string, unknown>>;
   ackTokenValid?: boolean;
@@ -196,7 +284,10 @@ export interface PipelineContext {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly timezone?: string;
   readonly locale?: string;
-  timestamp?: number;
+  readonly requestedStance?: Stance;
+  readonly actionSource?: ActionSource;
+  readonly actionSources?: ActionSource[];
+  timestamp?: string | number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -220,6 +311,7 @@ export interface PipelineState {
   stanceResult?: StanceGateOutput;
   capabilityResult?: CapabilityGateOutput;
   generation?: Generation;
+  validatedOutput?: ValidatedOutput;
   spark?: Spark;
   
   // For pipeline flow control
@@ -240,7 +332,7 @@ export type PipelineStatus =
 export interface PipelineResult {
   readonly status: PipelineStatus;
   readonly response: string;
-  readonly stance: Stance;
+  readonly stance?: Stance;
   readonly gateResults: GateResults;
   readonly spark?: Spark;
   readonly ackToken?: string;

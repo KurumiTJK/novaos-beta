@@ -2,29 +2,15 @@
 // CAPABILITY GATE — Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// PROVIDER TYPES
-// ─────────────────────────────────────────────────────────────────────────────────
+import type { 
+  ProviderName, 
+  ProviderConfig, 
+  CapabilityGateOutput,
+  EvidenceItem 
+} from '../../types/index.js';
 
-export type ProviderName = 'gemini_grounded' | 'openai';
-
-export interface ProviderConfig {
-  provider: ProviderName;
-  model: string;
-  tools?: unknown[];
-  temperature?: number;
-  maxTokens?: number;
-  topic?: string;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CAPABILITY GATE OUTPUT
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export interface CapabilityGateOutput {
-  provider: ProviderName;
-  config: ProviderConfig;
-}
+// Re-export from main types
+export type { ProviderName, ProviderConfig, CapabilityGateOutput, EvidenceItem };
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PROVIDER INTERFACE (for modular providers)

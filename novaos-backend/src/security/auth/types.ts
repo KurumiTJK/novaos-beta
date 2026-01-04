@@ -50,13 +50,13 @@ export interface AuthenticatedUser {
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // REQUEST EXTENSION
+// Note: We only add properties that don't conflict with Express.Request
+// requestId and startTime may already be defined via global augmentation
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUser;
   userId?: string;
-  requestId?: string;
-  startTime?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

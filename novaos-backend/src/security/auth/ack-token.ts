@@ -308,3 +308,8 @@ export async function validateAckToken(
 ): Promise<AckTokenValidation> {
   return getAckTokenStore().validateAndConsume(token, expectedUserId);
 }
+
+/**
+ * Alias for validateAckToken (for backward compatibility)
+ */
+export const verifyAckToken = validateAckToken;

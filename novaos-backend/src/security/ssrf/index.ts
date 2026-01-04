@@ -88,7 +88,8 @@ const PRIVATE_IP_RANGES = [
 
 function ipToNumber(ip: string): number {
   const parts = ip.split('.').map(Number);
-  return (parts[0] << 24) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
+  // Added non-null assertions to fix TS2532
+  return (parts[0]! << 24) + (parts[1]! << 16) + (parts[2]! << 8) + parts[3]!;
 }
 
 function isPrivateIp(ip: string): boolean {
