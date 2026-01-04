@@ -2,7 +2,7 @@
 // INTENT GATE — LLM-Powered Intent Classification
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { getOpenAIClient, pipeline_model } from '../../pipeline/llm_engine.js';
+import { getOpenAIClient, pipeline_model, extractTopicFromConversation } from '../../pipeline/llm_engine.js';
 import { INTENT_SYSTEM_PROMPT } from './prompts.js';
 import type {
   IntentSummary,
@@ -189,6 +189,16 @@ export async function executeIntentGateAsync(
     }
     
     const intent_summary = parseIntentOutput(content);
+
+    // Extract topic for contextual search
+    const topic = await extractTopicFromConversation(
+      context.conversationHistory ?? [],
+      state.userMessage
+    );
+
+    if (topic) {
+      intent_summary.topic = topic;
+    }
 
     // Log the output (always show final result)
     console.log('[INTENT]', intent_summary);

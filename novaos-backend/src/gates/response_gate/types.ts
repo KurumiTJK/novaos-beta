@@ -2,23 +2,16 @@
 // RESPONSE GATE — Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { Generation } from '../../types/index.js';
+import type { Generation, ConversationMessage } from '../../types/index.js';
+import type { ProviderConfig, ProviderName } from '../capability_gate/types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// EVIDENCE (from Capability Gate)
+// CAPABILITY GATE OUTPUT (new format)
 // ─────────────────────────────────────────────────────────────────────────────────
-
-export interface EvidenceItem {
-  type: string;
-  formatted: string;
-  source: string;
-  fetchedAt: number;
-  raw?: unknown;
-}
 
 export interface CapabilityGateOutput {
-  capabilitiesUsed: string[];
-  evidenceItems: EvidenceItem[];
+  provider: ProviderName;
+  config: ProviderConfig;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -26,13 +19,11 @@ export interface CapabilityGateOutput {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export interface ResponseGateOutput extends Generation {
-  // Inherits: text, model, tokensUsed, constraints, fallbackUsed
+  // Inherits: text, model, tokensUsed
+  sources?: Array<{ uri: string; title: string }>; // Gemini grounding sources
 }
 
 export interface ResponseGateConfig {
-  /** Override default model */
-  model?: string;
-  /** Override personality */
   personality?: Personality;
 }
 
@@ -46,3 +37,14 @@ export interface StitchedPrompt {
   system: string;
   user: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PROVIDER EXECUTOR TYPE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type ProviderExecutor = (
+  systemPrompt: string,
+  userPrompt: string,
+  config: ProviderConfig,
+  conversationHistory?: readonly ConversationMessage[]
+) => Promise<ResponseGateOutput>;

@@ -262,31 +262,35 @@ export async function generateWithModelLLM(
 // TOPIC EXTRACTION (pipeline_model) — For contextual web search
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const TOPIC_EXTRACTION_PROMPT = `You are a topic extractor. Your ONLY job is to identify the main topic or entity being discussed.
+const TOPIC_EXTRACTION_PROMPT = `You are a topic extractor. Identify the main topic for a web search.
 
 RULES:
-1. Return ONLY the topic/entity name, nothing else
-2. No explanations, no sentences, no punctuation except spaces
-3. If multiple topics, return the most recent one
-4. If no clear topic, return: general
-5. Maximum 10 words`;
+1. Look at BOTH the conversation history AND the current message
+2. If the current message introduces a NEW topic (different entity, name, ticker, subject), use the NEW topic
+3. If the current message is ambiguous (uses "her", "it", "that", "more", etc.), use conversation history to resolve it
+4. Return ONLY the topic/entity name, nothing else
+5. No explanations, no sentences, no punctuation except spaces
+6. Maximum 10 words
+7. If no clear topic, return: general`;
 
 /**
  * Extract topic from conversation history for contextual search.
  * Uses pipeline_model with strict constraints.
  */
 export async function extractTopicFromConversation(
-  conversationHistory: readonly ConversationMessage[]
+  conversationHistory: readonly ConversationMessage[],
+  currentMessage: string
 ): Promise<string | null> {
   const client = getOpenAIClient();
   if (!client) return null;
-  if (!conversationHistory?.length) return null;
 
   // Build conversation summary (truncated)
-  const historyText = conversationHistory
-    .slice(-6)
-    .map(m => `${m.role}: ${m.content.slice(0, 150)}`)
-    .join('\n');
+  const historyText = conversationHistory?.length
+    ? conversationHistory
+        .slice(-6)
+        .map(m => `${m.role}: ${m.content.slice(0, 150)}`)
+        .join('\n')
+    : '(no prior conversation)';
 
   try {
     const controller = new AbortController();
@@ -296,7 +300,7 @@ export async function extractTopicFromConversation(
       model: pipeline_model,
       messages: [
         { role: 'system', content: TOPIC_EXTRACTION_PROMPT },
-        { role: 'user', content: `Extract the topic:\n\n${historyText}\n\nTopic:` },
+        { role: 'user', content: `Conversation history:\n${historyText}\n\nCurrent message: "${currentMessage}"\n\nTopic:` },
       ],
       max_completion_tokens: 20,
     }, { signal: controller.signal });

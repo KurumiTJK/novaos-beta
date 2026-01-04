@@ -9,5 +9,7 @@ export {
 
 export type {
   CapabilityGateOutput,
-  EvidenceItem,
+  ProviderConfig,
+  ProviderName,
+  Provider,
 } from './types.js';

@@ -15,4 +15,5 @@ export interface IntentSummary {
   live_data: boolean;
   external_tool: boolean;
   learning_intent: boolean;
+  topic?: string; // Extracted topic for contextual search
 }
