@@ -3,9 +3,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { motion } from 'framer-motion';
-import { cn, stanceColors, formatTime } from '../../../shared/utils';
+import { cn, formatTime } from '../../../shared/utils';
 import { Card, StanceIndicator, Badge, LoadingDots } from '../../../shared/components';
-import type { Message, Stance } from '../../../shared/types';
+import type { Message } from '../../../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PROPS
@@ -70,7 +70,6 @@ interface AssistantBubbleProps {
 
 function AssistantBubble({ message, onOverrideShield, onExpand }: AssistantBubbleProps) {
   const stance = message.stance || 'lens';
-  const colors = stanceColors[stance];
   const gateResults = message.gateResults;
 
   // Check for Shield warnings
@@ -79,7 +78,7 @@ function AssistantBubble({ message, onOverrideShield, onExpand }: AssistantBubbl
   const conflicts = gateResults?.shield?.interest_conflicts || [];
 
   // Check for live data
-  const hasLiveData = gateResults?.tools?.tools_called?.length > 0;
+  const hasLiveData = (gateResults?.tools?.tools_called?.length ?? 0) > 0;
 
   if (message.isLoading) {
     return (

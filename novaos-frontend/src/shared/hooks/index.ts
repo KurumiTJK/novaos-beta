@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { haptic } from './utils';
+import { haptic } from '../utils';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // useDebounce

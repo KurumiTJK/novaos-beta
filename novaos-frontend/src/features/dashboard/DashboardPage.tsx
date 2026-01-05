@@ -10,12 +10,12 @@ import {
   StanceIndicator,
   Button,
   SectionHeader,
-} from '../../../shared/components';
-import { useChatStore } from '../../chat';
-import { useControlStore } from '../../control';
-import { useSwordStore } from '../../sword';
-import { cn, stanceColors, moduleColors, animations, formatRelativeTime } from '../../../shared/utils';
-import type { Stance, ModuleType } from '../../../shared/types';
+} from '../../shared/components';
+import { useChatStore } from '../chat';
+import { useControlStore } from '../control';
+import { useSwordStore } from '../sword';
+import { cn, stanceColors, moduleColors, animations, formatRelativeTime } from '../../shared/utils';
+import type { Stance, ModuleType } from '../../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // COMPONENT

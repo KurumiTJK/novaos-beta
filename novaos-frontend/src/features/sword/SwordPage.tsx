@@ -13,9 +13,9 @@ import {
   BackButton,
   ProgressBar,
   Badge,
-} from '../../../shared/components';
-import { useSwordStore, type LearningGoal, type Quest, type LessonSection } from './swordStore';
-import { cn, stanceColors } from '../../../shared/utils';
+} from '../../shared/components';
+import { useSwordStore, type LearningGoal, type Quest } from './swordStore';
+import { cn } from '../../shared/utils';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
@@ -42,7 +42,6 @@ export function SwordPage() {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 function GeneratorView() {
-  const navigate = useNavigate();
   const { generatePath, isGenerating, currentPath, setView } = useSwordStore();
 
   const [goal, setGoal] = useState('');
@@ -384,7 +383,6 @@ function LessonView() {
   const currentSection = sections[currentSectionIndex];
   const completedCount = sections.filter((s) => s.completed).length;
   const isLastSection = currentSectionIndex === sections.length - 1;
-  const canProceed = currentSection?.completed;
 
   const handleAnswer = (index: number) => {
     setSelectedAnswer(index);

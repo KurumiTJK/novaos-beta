@@ -11,11 +11,11 @@ import {
   BackButton,
   StanceIndicator,
   Button,
-} from '../../../shared/components';
+} from '../../shared/components';
 import { MessageBubble } from './components';
 import { useChatStore } from './chatStore';
-import { useControlStore } from '../../control';
-import { cn } from '../../../shared/utils';
+import { useControlStore } from '../control';
+import { cn } from '../../shared/utils';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // COMPONENT
@@ -113,7 +113,7 @@ export function ChatPage() {
         )}
 
         {/* Module suggestion */}
-        {messages.length > 0 && messages[messages.length - 1]?.gateResults?.tools?.tools_called?.length > 0 && (
+        {messages.length > 0 && (messages[messages.length - 1]?.gateResults?.tools?.tools_called?.length ?? 0) > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}

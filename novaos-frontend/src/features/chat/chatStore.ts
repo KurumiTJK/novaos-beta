@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import * as chatApi from './chatApi';
 import { generateId } from '../../shared/utils';
-import type { Message, Conversation, Stance, GateResults } from '../../shared/types';
+import type { Message, Conversation, Stance } from '../../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // STATE INTERFACE

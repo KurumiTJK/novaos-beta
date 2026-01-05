@@ -12,10 +12,10 @@ import {
   BackButton,
   Badge,
   SectionHeader,
-} from '../../../shared/components';
-import { MessageBubble } from '../../chat';
-import { cn, moduleColors, generateId } from '../../../shared/utils';
-import type { ModuleType, Message } from '../../../shared/types';
+} from '../../shared/components';
+import { MessageBubble } from '../chat';
+import { cn, moduleColors, generateId } from '../../shared/utils';
+import type { ModuleType, Message } from '../../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // MODULE CONFIGS
@@ -150,7 +150,6 @@ export function ModulePage() {
           <ModuleHome
             module={module}
             config={config}
-            colors={colors}
             onQuickAction={handleQuickAction}
           />
         ) : (
@@ -205,11 +204,10 @@ export function ModulePage() {
 interface ModuleHomeProps {
   module: ModuleType;
   config: typeof moduleConfigs[ModuleType];
-  colors: typeof moduleColors[ModuleType];
   onQuickAction: (action: string) => void;
 }
 
-function ModuleHome({ module, config, colors, onQuickAction }: ModuleHomeProps) {
+function ModuleHome({ module, config, onQuickAction }: ModuleHomeProps) {
   return (
     <div className="px-4 py-6 space-y-6">
       {/* Widget */}

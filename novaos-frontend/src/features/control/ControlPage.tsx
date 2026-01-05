@@ -5,7 +5,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { StatusBar, Button } from '../../../shared/components';
+import { StatusBar, Button } from '../../shared/components';
 import {
   VitalsCard,
   LocationCard,
@@ -13,7 +13,7 @@ import {
   ActionPlanCard,
 } from './components';
 import { useControlStore } from './controlStore';
-import { useInterval } from '../../../shared/hooks';
+import { useInterval } from '../../shared/hooks';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // COMPONENT
@@ -34,7 +34,6 @@ export function ControlPage() {
     activateCrisis,
     deactivateCrisis,
     fetchVitals,
-    refreshAllData,
     advanceToNextStep,
   } = useControlStore();
 
