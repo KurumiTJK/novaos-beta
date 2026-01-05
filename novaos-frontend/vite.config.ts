@@ -1,25 +1,28 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// VITE CONFIG — Build Configuration
+// ═══════════════════════════════════════════════════════════════════════════════
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
         name: 'NovaOS',
         short_name: 'Nova',
-        description: 'Your Constitutional AI Assistant',
+        description: 'Your Shield, Lens, and Sword',
         theme_color: '#0a0a0a',
         background_color: '#0a0a0a',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
         start_url: '/',
+        scope: '/',
         icons: [
           {
             src: '/icon-192.png',
@@ -35,12 +38,11 @@ export default defineConfig({
             src: '/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'maskable',
           },
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/api\..*/i,
@@ -48,7 +50,7 @@ export default defineConfig({
             options: {
               cacheName: 'api-cache',
               expiration: {
-                maxEntries: 100,
+                maxEntries: 50,
                 maxAgeSeconds: 60 * 60 * 24, // 24 hours
               },
               networkTimeoutSeconds: 10,
@@ -73,15 +75,12 @@ export default defineConfig({
     },
   },
   build: {
-    target: 'esnext',
-    minify: 'esbuild',
-    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
           state: ['zustand', '@tanstack/react-query'],
-          ui: ['framer-motion', 'lucide-react'],
+          ui: ['framer-motion'],
         },
       },
     },

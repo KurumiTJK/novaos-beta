@@ -1,46 +1,58 @@
-# NovaOS Frontend
+# NovaOS Frontend v2
 
-A React-based Progressive Web App (PWA) optimized for iPhone, serving as the official frontend for the NovaOS constitutional AI backend.
+A feature-based React PWA for NovaOS — Your Shield, Lens, and Sword.
 
-## Features
+## 🏗️ Architecture
 
-- **7 Core Screens**
-  - Dashboard — Home with modules grid and recent conversations
-  - Chat (Lens) — Default conversation mode with confidence/freshness indicators
-  - Shield Warning — Protection alerts with Interest Stack conflicts
-  - Control Crisis Mode — Persistent crisis resolution with vitals, location, threats
-  - Module Sessions — Finance, Health, Calendar, Weather, etc.
-  - Sword Lesson Generator — Goal → Quest → Lesson path creation
-  - Sword Daily Lesson — Active learning with progress tracking
+This project uses a **feature-based architecture** for scalability:
 
-- **Stance-Based Design System**
-  - 🔴 Control (Red) — Crisis/halt mode
-  - 🟡 Shield (Amber) — Protection warnings
-  - 🔵 Lens (Blue) — Clarity/information (default)
-  - 🟢 Sword (Green) — Action/progress
+```
+src/
+├── features/           # Feature modules (self-contained)
+│   ├── auth/           # Authentication
+│   │   ├── authApi.ts
+│   │   ├── authStore.ts
+│   │   └── index.ts
+│   ├── chat/           # Chat functionality
+│   │   ├── chatApi.ts
+│   │   ├── chatStore.ts
+│   │   ├── ChatPage.tsx
+│   │   ├── components/
+│   │   │   └── MessageBubble.tsx
+│   │   └── index.ts
+│   ├── control/        # Crisis mode
+│   │   ├── controlStore.ts
+│   │   ├── ControlPage.tsx
+│   │   ├── components/
+│   │   └── index.ts
+│   ├── sword/          # Learning mode
+│   │   ├── swordStore.ts
+│   │   ├── SwordPage.tsx
+│   │   └── index.ts
+│   ├── dashboard/      # Dashboard
+│   │   ├── DashboardPage.tsx
+│   │   └── index.ts
+│   └── modules/        # Domain modules
+│       ├── ModulePage.tsx
+│       └── index.ts
+├── shared/             # Shared code
+│   ├── api/            # HTTP client
+│   ├── components/     # UI primitives
+│   ├── hooks/          # Custom hooks
+│   ├── types/          # TypeScript types
+│   └── utils/          # Helpers & theme
+├── styles/             # Global CSS
+├── App.tsx             # Root component
+└── main.tsx            # Entry point
+```
 
-- **PWA Optimized**
-  - Installable on iOS home screen
-  - Offline-capable with service worker
-  - Native-like experience
-
-## Tech Stack
-
-- React 18 + TypeScript
-- Vite (build tool)
-- Tailwind CSS (styling)
-- Zustand (state management)
-- React Query (server state)
-- Framer Motion (animations)
-- React Router (navigation)
-
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
 # Install dependencies
 npm install
 
-# Start development server (connects to backend at localhost:3001)
+# Start development server
 npm run dev
 
 # Build for production
@@ -50,142 +62,97 @@ npm run build
 npm run preview
 ```
 
-## Environment Variables
+## 🛠️ Tech Stack
 
-Create a `.env` file:
+| Category | Technology |
+|----------|------------|
+| Framework | React 18 |
+| Language | TypeScript |
+| Build Tool | Vite |
+| Styling | Tailwind CSS |
+| State | Zustand |
+| Server State | React Query |
+| Animations | Framer Motion |
+| Routing | React Router |
+| PWA | Vite PWA Plugin |
 
-```env
-VITE_API_URL=http://localhost:3001/api/v1
-```
+## 📱 Features
 
-## Project Structure
+### Stances (Constitutional AI Modes)
 
-```
-src/
-├── api/                 # API client and endpoints
-│   ├── client.ts       # HTTP client with auth
-│   ├── auth.ts         # Auth endpoints
-│   └── chat.ts         # Chat endpoints
-├── components/
-│   ├── ui/             # Reusable UI components
-│   │   ├── Button.tsx
-│   │   ├── Card.tsx
-│   │   ├── Input.tsx
-│   │   └── StatusBar.tsx
-│   └── chat/           # Chat-specific components
-│       └── MessageBubble.tsx
-├── pages/              # Route pages
-│   ├── DashboardPage.tsx
-│   ├── ChatPage.tsx
-│   ├── ControlPage.tsx
-│   ├── SwordPage.tsx
-│   └── ModulePage.tsx
-├── stores/             # Zustand stores
-│   ├── authStore.ts
-│   ├── chatStore.ts
-│   ├── appStore.ts
-│   ├── controlStore.ts
-│   └── swordStore.ts
-├── types/              # TypeScript types
-│   └── index.ts
-├── utils/              # Utilities
-│   ├── theme.ts        # Stance colors
-│   └── index.ts
-├── styles/
-│   └── index.css       # Tailwind + custom styles
-├── App.tsx             # Main app with routing
-└── main.tsx            # Entry point
-```
+| Stance | Color | Purpose |
+|--------|-------|---------|
+| 🛑 Control | Red | Crisis stabilization |
+| 🛡️ Shield | Amber | Protection from harm |
+| 🔍 Lens | Blue | Clarity and understanding |
+| ⚔️ Sword | Green | Forward progress |
 
-## Docker Deployment
+### Screens
 
-### Full Stack (Frontend + Backend + Redis)
+1. **Dashboard** — Home screen with quick actions
+2. **Chat** — Main Nova conversation interface
+3. **Control** — Crisis mode with vitals, location, action plan
+4. **Sword** — Structured learning paths
+5. **Modules** — Domain-specific interfaces (Finance, Health, etc.)
+
+## 🐳 Docker Deployment
 
 ```bash
-# Set your OpenAI API key
-export OPENAI_API_KEY=your_key_here
+# Full stack (frontend + backend + redis)
+docker-compose up -d
 
-# Build and run
-docker-compose up --build -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-### Frontend Only
-
-```bash
-# Build image
+# Frontend only
 docker build -t novaos-frontend .
-
-# Run (assumes backend at backend:3001)
 docker run -p 80:80 novaos-frontend
 ```
 
-## API Integration
+## 📦 API Integration
 
-The frontend connects to the NovaOS backend API:
+The frontend integrates with the NovaOS backend API:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/chat` | POST | Send message (auto-manages conversations) |
-| `/api/v1/conversations` | GET | List conversations |
-| `/api/v1/conversations/:id` | GET | Get conversation with messages |
-| `/api/v1/auth/register` | POST | Register and get token |
-| `/api/v1/auth/verify` | GET | Verify token |
-| `/api/v1/health` | GET | Health check |
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/v1/chat` | Send message, get response |
+| `POST /api/v1/parse-command` | Preview intent |
+| `GET /api/v1/conversations` | List conversations |
+| `POST /api/v1/auth/register` | Auto-register user |
 
-## Constitutional Modes
+## 🎨 Design System
 
-### Control Mode (Crisis)
+### Colors
 
-Triggered when `safety_signal: 'high'` is detected in Shield Gate. Pipeline halts and enters persistent crisis resolution session with:
+- **Gray 950**: `#0a0a0a` (OLED black)
+- **Control**: `#ef4444` (Red 500)
+- **Shield**: `#f59e0b` (Amber 500)
+- **Lens**: `#3b82f6` (Blue 500)
+- **Sword**: `#10b981` (Emerald 500)
 
-- Live vitals from health devices
-- GPS location with nearby emergency services
-- Threat scan from web/news
-- Step-by-step action plan
+### Typography
 
-### Sword Mode (Learning)
+SF Pro Display / System fonts for native feel.
 
-Triggered when `learning_intent: true` + `stance: 'sword'`. Creates structured learning paths:
+## 📲 PWA Installation
 
-- **Goal** → User's learning objective
-- **Quest** → Themed collection (2-4 weeks)
-- **Lesson** → Single day's session
-- **Spark** → Minimal action for momentum
+**iOS Safari:**
+1. Open the app in Safari
+2. Tap Share → Add to Home Screen
+3. Tap Add
 
-## PWA Installation
+**Android Chrome:**
+1. Open the app in Chrome
+2. Tap menu → Install app
+3. Tap Install
 
-### iOS (iPhone)
-
-1. Open in Safari
-2. Tap Share button
-3. Select "Add to Home Screen"
-4. Name it "Nova"
-
-### Android
-
-1. Open in Chrome
-2. Tap menu (⋮)
-3. Select "Install app"
-
-## Development
+## 🔧 Development
 
 ```bash
-# Type check
+# Type checking
 npm run type-check
 
-# Lint
+# Linting
 npm run lint
-
-# Format (if prettier configured)
-npm run format
 ```
 
-## License
+## 📄 License
 
-MIT
+Private — Anthropic / NovaOS Project

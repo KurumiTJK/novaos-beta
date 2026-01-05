@@ -3,7 +3,6 @@ node_modules/
 
 # Build output
 dist/
-build/
 
 # Environment files
 .env
@@ -11,23 +10,24 @@ build/
 .env.*.local
 
 # Logs
-logs/
 *.log
 npm-debug.log*
 
 # Editor directories
-.vscode/
 .idea/
+.vscode/
+*.swp
+*.swo
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# TypeScript
-*.tsbuildinfo
+# Testing
+coverage/
 
-# Vite
-vite.config.ts.timestamp-*
+# TypeScript cache
+*.tsbuildinfo
 
 # PWA generated files
 dev-dist/

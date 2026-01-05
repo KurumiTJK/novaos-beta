@@ -1,91 +1,58 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# NOVAOS — Full Stack Docker Compose
-# Frontend + Backend + Redis
+# DOCKER COMPOSE — NovaOS Full Stack
 # ═══════════════════════════════════════════════════════════════════════════════
 
 version: '3.8'
 
 services:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # FRONTEND — React PWA
-  # ─────────────────────────────────────────────────────────────────────────────
+  # Frontend
   frontend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: novaos-frontend
-    restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
       - backend
-    networks:
-      - novaos-network
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 3s
       retries: 3
-      start_period: 10s
+    networks:
+      - novaos-network
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # BACKEND — NovaOS API
-  # ─────────────────────────────────────────────────────────────────────────────
+  # Backend (NovaOS API)
   backend:
+    image: novaos-backend:latest
     build:
       context: ../novaos-backend
       dockerfile: Dockerfile
-    container_name: novaos-backend
-    restart: unless-stopped
-    expose:
-      - "3001"
+    ports:
+      - "3001:3001"
     environment:
       - NODE_ENV=production
-      - PORT=3001
       - REDIS_URL=redis://redis:6379
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
-      redis:
-        condition: service_healthy
+      - redis
     networks:
       - novaos-network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/v1/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 30s
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # REDIS — Session & Cache Store
-  # ─────────────────────────────────────────────────────────────────────────────
+  # Redis
   redis:
-    image: redis:7-alpine
-    container_name: novaos-redis
-    restart: unless-stopped
-    expose:
-      - "6379"
+    image: redis:alpine
+    ports:
+      - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
     networks:
       - novaos-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
 
-# ─────────────────────────────────────────────────────────────────────────────────
-# NETWORKS
-# ─────────────────────────────────────────────────────────────────────────────────
 networks:
   novaos-network:
     driver: bridge
 
-# ─────────────────────────────────────────────────────────────────────────────────
-# VOLUMES
-# ─────────────────────────────────────────────────────────────────────────────────
 volumes:
   redis-data:

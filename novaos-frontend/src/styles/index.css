@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════════
-   NOVAOS FRONTEND — Main Stylesheet
+   GLOBAL STYLES — NovaOS PWA
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 @tailwind base;
@@ -11,23 +11,29 @@
    ───────────────────────────────────────────────────────────────────────────────── */
 
 @layer base {
-  * {
-    -webkit-tap-highlight-color: transparent;
+  :root {
+    color-scheme: dark;
+    
+    /* Stance Colors */
+    --color-control: 239, 68, 68;
+    --color-shield: 245, 158, 11;
+    --color-lens: 59, 130, 246;
+    --color-sword: 16, 185, 129;
   }
 
   html {
-    @apply antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body {
     @apply bg-gray-950 text-white;
-    overscroll-behavior: none;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+    overscroll-behavior-y: none;
   }
 
-  /* Custom scrollbar for webkit browsers */
+  /* Scrollbar Styling */
   ::-webkit-scrollbar {
     width: 4px;
     height: 4px;
@@ -45,14 +51,9 @@
     @apply bg-gray-600;
   }
 
-  /* Hide scrollbar but keep functionality */
-  .hide-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .hide-scrollbar::-webkit-scrollbar {
-    display: none;
+  /* Selection */
+  ::selection {
+    @apply bg-blue-500/30 text-white;
   }
 }
 
@@ -61,7 +62,7 @@
    ───────────────────────────────────────────────────────────────────────────────── */
 
 @layer components {
-  /* Safe area handling for iOS */
+  /* Safe Area Insets */
   .safe-top {
     padding-top: env(safe-area-inset-top);
   }
@@ -78,122 +79,179 @@
     padding-right: env(safe-area-inset-right);
   }
 
-  /* Glass morphism effect */
+  /* Glass Morphism */
   .glass {
-    @apply bg-gray-900/80 backdrop-blur-xl;
+    @apply bg-gray-900/80 backdrop-blur-xl border border-gray-800/50;
   }
 
-  /* Stance glow effects */
+  /* Glow Effects */
   .glow-control {
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 20px rgba(var(--color-control), 0.3);
   }
 
   .glow-shield {
-    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+    box-shadow: 0 0 20px rgba(var(--color-shield), 0.3);
   }
 
   .glow-lens {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 20px rgba(var(--color-lens), 0.3);
   }
 
   .glow-sword {
-    box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 0 20px rgba(var(--color-sword), 0.3);
   }
 
-  /* Pulse animation for alerts */
+  /* Pulse Animation (Control Mode) */
   .pulse-control {
-    animation: pulse-red 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    animation: pulse-control 2s ease-in-out infinite;
   }
 
-  @keyframes pulse-red {
+  @keyframes pulse-control {
     0%, 100% {
-      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(var(--color-control), 0.4);
     }
     50% {
-      opacity: 0.5;
+      box-shadow: 0 0 0 10px rgba(var(--color-control), 0);
     }
-  }
-
-  /* Gradient text */
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r;
-  }
-
-  /* Button press effect */
-  .btn-press {
-    @apply active:scale-95 transition-transform;
-  }
-
-  /* Card hover lift */
-  .card-hover {
-    @apply hover:-translate-y-0.5 hover:shadow-lg transition-all;
   }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────
-   UTILITIES
+   UTILITY STYLES
    ───────────────────────────────────────────────────────────────────────────────── */
 
 @layer utilities {
-  /* Text balance for headings */
-  .text-balance {
-    text-wrap: balance;
+  /* Text Gradient */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500;
   }
 
-  /* Gradient backgrounds */
-  .bg-gradient-radial {
-    background: radial-gradient(circle at center, var(--tw-gradient-stops));
+  /* Hide Scrollbar */
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 
-  /* Animation delays */
-  .animation-delay-100 {
-    animation-delay: 100ms;
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 
-  .animation-delay-200 {
-    animation-delay: 200ms;
+  /* Button Press Effect */
+  .press-effect {
+    @apply active:scale-[0.98] transition-transform;
   }
 
-  .animation-delay-300 {
-    animation-delay: 300ms;
+  /* Card Hover */
+  .card-hover {
+    @apply hover:bg-gray-800/50 transition-colors;
   }
 
-  /* No select for UI elements */
-  .no-select {
+  /* Focus Ring */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-950;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────
+   PWA SPECIFIC
+   ───────────────────────────────────────────────────────────────────────────────── */
+
+/* Standalone PWA Mode */
+@media (display-mode: standalone) {
+  body {
+    overscroll-behavior-y: none;
     -webkit-user-select: none;
     user-select: none;
   }
 
-  /* Smooth scroll */
-  .scroll-smooth {
-    scroll-behavior: smooth;
-  }
-
-  /* Touch action for mobile */
-  .touch-pan-x {
-    touch-action: pan-x;
-  }
-
-  .touch-pan-y {
-    touch-action: pan-y;
+  /* Disable text selection on interactive elements */
+  button, a, input, textarea {
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────────
-   PWA STANDALONE MODE
-   ───────────────────────────────────────────────────────────────────────────────── */
-
-@media all and (display-mode: standalone) {
+/* iOS Specific */
+@supports (-webkit-touch-callout: none) {
   body {
-    /* Prevent overscroll bounce in PWA mode */
+    /* Prevent pull-to-refresh */
     overscroll-behavior-y: none;
   }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────
-   DARK MODE (always dark for NovaOS)
+   ANIMATIONS
    ───────────────────────────────────────────────────────────────────────────────── */
 
-:root {
-  color-scheme: dark;
+/* Fade In */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Slide Up */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Slide Down */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Pulse Slow */
+@keyframes pulseSlow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 3s ease-in-out infinite;
+}
+
+/* Spin */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin 2s linear infinite;
 }

@@ -1,40 +1,40 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MAIN — Application Entry Point
+// AUTH FEATURE — API Endpoints
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
+import { api } from '../../shared/api/client';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SERVICE WORKER REGISTRATION
+// TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then((registration) => {
-        console.log('SW registered:', registration.scope);
-      })
-      .catch((error) => {
-        console.log('SW registration failed:', error);
-      });
-  });
+export interface RegisterResponse {
+  userId: string;
+  token: string;
+}
+
+export interface VerifyResponse {
+  valid: boolean;
+  userId: string;
+}
+
+export interface AuthStatusResponse {
+  authenticated: boolean;
+  userId?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// RENDER
+// ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
-const rootElement = document.getElementById('root');
-
-if (!rootElement) {
-  throw new Error('Root element not found');
+export async function register(): Promise<RegisterResponse> {
+  return api.post<RegisterResponse>('/auth/register', {}, { requiresAuth: false });
 }
 
-ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+export async function verify(): Promise<VerifyResponse> {
+  return api.get<VerifyResponse>('/auth/verify');
+}
+
+export async function getAuthStatus(): Promise<AuthStatusResponse> {
+  return api.get<AuthStatusResponse>('/auth/status');
+}

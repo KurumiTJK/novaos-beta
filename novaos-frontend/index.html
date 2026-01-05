@@ -2,11 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#0a0a0a" />
-    <meta name="background-color" content="#0a0a0a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Nova" />
@@ -17,69 +16,56 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     
-    <!-- Preconnect to API -->
-    <link rel="preconnect" href="https://api.novaos.app" crossorigin />
-    
-    <!-- Preload critical fonts -->
-    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" as="style" />
-    
-    <!-- Title & Meta -->
-    <title>NovaOS — Constitutional AI</title>
-    <meta name="description" content="Your Shield, Lens, and Sword. NovaOS is a constitutional AI system designed to protect, clarify, and enable forward motion." />
+    <!-- Preconnect -->
+    <link rel="preconnect" href="/api" />
     
     <!-- Open Graph -->
-    <meta property="og:title" content="NovaOS — Constitutional AI" />
-    <meta property="og:description" content="Your Shield, Lens, and Sword. A constitutional AI system." />
+    <meta property="og:title" content="NovaOS" />
+    <meta property="og:description" content="Your Shield, Lens, and Sword" />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/og-image.png" />
     
     <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="NovaOS — Constitutional AI" />
-    <meta name="twitter:description" content="Your Shield, Lens, and Sword." />
-    
-    <!-- Disable features that might cause issues -->
-    <meta name="format-detection" content="telephone=no" />
-    <meta name="msapplication-tap-highlight" content="no" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="NovaOS" />
+    <meta name="twitter:description" content="Your Shield, Lens, and Sword" />
     
     <!-- iOS Splash Screens -->
-    <link rel="apple-touch-startup-image" href="/splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
-    <link rel="apple-touch-startup-image" href="/splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)" />
+    <link rel="apple-touch-startup-image" href="/splash-390x844.png" media="(device-width: 390px) and (device-height: 844px)" />
+    <link rel="apple-touch-startup-image" href="/splash-428x926.png" media="(device-width: 428px) and (device-height: 926px)" />
     
+    <title>NovaOS</title>
+    
+    <!-- Critical CSS -->
     <style>
-      /* Critical CSS for fast initial render */
-      * {
+      html, body {
         margin: 0;
         padding: 0;
-        box-sizing: border-box;
-      }
-      
-      html, body, #root {
-        height: 100%;
-        width: 100%;
-        overflow: hidden;
-      }
-      
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         background-color: #0a0a0a;
-        color: #ffffff;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
       
-      /* Loading state */
-      #root:empty {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+      #root {
+        min-height: 100vh;
+        min-height: 100dvh;
       }
       
-      #root:empty::after {
-        content: '';
+      /* Loading State */
+      .loading-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        height: 100dvh;
+      }
+      
+      .loading-spinner {
         width: 40px;
         height: 40px;
-        border: 3px solid #333;
+        border: 3px solid rgba(59, 130, 246, 0.2);
         border-top-color: #3b82f6;
         border-radius: 50%;
         animation: spin 1s linear infinite;
@@ -89,9 +75,9 @@
         to { transform: rotate(360deg); }
       }
       
-      /* Safe area for iOS */
+      /* Safe Area Padding */
       @supports (padding: env(safe-area-inset-top)) {
-        body {
+        #root {
           padding-top: env(safe-area-inset-top);
           padding-bottom: env(safe-area-inset-bottom);
           padding-left: env(safe-area-inset-left);
@@ -101,7 +87,12 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Initial Loading State -->
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
