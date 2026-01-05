@@ -249,7 +249,9 @@
     .stance-pill.active { opacity: 1; }
 
     .messages {
-      height: 500px;
+      height: calc(100vh - 320px);
+      min-height: 400px;
+      max-height: 700px;
       overflow-y: auto;
       padding: 20px;
       scroll-behavior: smooth;
@@ -544,6 +546,8 @@
 
       .messages {
         height: 350px;
+        min-height: 250px;
+        max-height: 400px;
       }
 
       .config-row {
