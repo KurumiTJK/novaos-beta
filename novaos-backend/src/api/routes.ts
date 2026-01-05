@@ -2,23 +2,19 @@
 // API ROUTES — Express Endpoints for NovaOS
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// MIGRATED TO NEW SECURITY MODULE
+// CONVERSATION MANAGEMENT: Backend-Tracks-Only
 //
-// WORKING ENDPOINTS:
-// - /health, /version, /providers (public)
-// - /auth/* (authentication)
-// - /chat (main pipeline)
-// - /parse-command (action parsing)
-// - /conversations/* (working memory)
-// - /config (safe config view)
-// - /admin/* (user management)
+// Users just send messages. Backend automatically:
+//   - Finds user's most recent conversation (within 24hr timeout)
+//   - Continues it if found, creates new if not
+//   - Optional: { newConversation: true } forces fresh start
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from '../pipeline/llm_engine.js';
-import type { PipelineContext, ActionSource } from '../types/index.js';
+import type { PipelineContext, ActionSource, ConversationMessage } from '../types/index.js';
 import { storeManager } from '../storage/index.js';
 import { workingMemory } from '../core/memory/working_memory/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
@@ -62,6 +58,13 @@ import {
   logAudit,
   getAuditStore,
 } from '../security/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/** Conversation timeout — if last message was longer ago, start fresh */
+const CONVERSATION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ERROR CLASS
@@ -269,52 +272,138 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   ];
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // CHAT ENDPOINT
+  // CHAT ENDPOINT — Backend-Tracks-Only Conversation Management
   // ─────────────────────────────────────────────────────────────────────────────
 
   router.post('/chat',
     ...chatMiddleware,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        const { message, conversationId, stance, actionSource } = req.body;
+        const { message, newConversation = false, stance, actionSource } = req.body;
         const userId = req.userId ?? 'anonymous';
 
-        // Build pipeline context
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 1: Resolve conversation (backend-tracks-only logic)
+        // ═════════════════════════════════════════════════════════════════════
+        let resolvedConversationId: string;
+        let isNewConversation = false;
+
+        if (newConversation) {
+          // User explicitly wants a fresh start
+          resolvedConversationId = `conv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+          await workingMemory.getOrCreate(userId, resolvedConversationId);
+          isNewConversation = true;
+          console.log('[CHAT] New conversation requested by user:', resolvedConversationId);
+        } else {
+          // Find user's most recent conversation
+          const recentConversations = await workingMemory.list(userId, 1);
+          const lastConversation = recentConversations[0];
+          
+          const now = Date.now();
+          const isWithinTimeout = lastConversation && 
+            (now - lastConversation.updatedAt) < CONVERSATION_TIMEOUT_MS;
+
+          if (lastConversation && isWithinTimeout) {
+            // Continue existing conversation
+            resolvedConversationId = lastConversation.id;
+            console.log('[CHAT] Continuing conversation:', resolvedConversationId);
+          } else {
+            // No recent conversation or timed out — create new
+            resolvedConversationId = `conv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+            await workingMemory.getOrCreate(userId, resolvedConversationId);
+            isNewConversation = true;
+            
+            if (lastConversation) {
+              const hoursAgo = Math.round((now - lastConversation.updatedAt) / (60 * 60 * 1000));
+              console.log(`[CHAT] Last conversation was ${hoursAgo}h ago (timeout), creating new:`, resolvedConversationId);
+            } else {
+              console.log('[CHAT] No previous conversation, creating new:', resolvedConversationId);
+            }
+          }
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 2: Load conversation history
+        // ═════════════════════════════════════════════════════════════════════
+        const messages = await workingMemory.getMessages(resolvedConversationId, 20);
+        
+        const conversationHistory: ConversationMessage[] = messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant' | 'system',
+          content: msg.content,
+          timestamp: msg.timestamp,
+          metadata: msg.metadata ? { liveData: msg.metadata.liveData } : undefined,
+        }));
+
+        console.log('[CHAT] Loaded conversation history:', conversationHistory.length, 'messages');
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 3: Build pipeline context
+        // ═════════════════════════════════════════════════════════════════════
         const context: PipelineContext = {
           userId,
-          conversationId,
+          conversationId: resolvedConversationId,
           message,
           timestamp: Date.now(),
           requestId: (req as any).requestId ?? crypto.randomUUID(),
           requestedStance: stance,
           actionSource: actionSource as ActionSource,
+          conversationHistory,
           metadata: {
             userAgent: req.headers['user-agent'],
             ip: req.ip,
           },
         };
 
-        // Execute pipeline (use process, not execute)
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 4: Execute pipeline
+        // ═════════════════════════════════════════════════════════════════════
         const result = await pipeline.process(message, context);
 
-        // Log audit
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 5: Save messages to working memory
+        // ═════════════════════════════════════════════════════════════════════
+        const capabilityOutput = result.gateResults?.capability?.output;
+        const usedLiveData = capabilityOutput?.provider === 'gemini_grounded';
+
+        // Save user message
+        await workingMemory.addUserMessage(resolvedConversationId, message);
+
+        // Save assistant response with metadata
+        await workingMemory.addAssistantMessage(
+          resolvedConversationId,
+          result.response,
+          {
+            liveData: usedLiveData,
+            stance: result.stance,
+            tokensUsed: result.gateResults?.model?.output?.tokensUsed,
+          }
+        );
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 6: Audit & respond
+        // ═════════════════════════════════════════════════════════════════════
         await logAudit({
           category: 'chat',
           action: 'chat_message',
           userId,
           details: {
-            conversationId,
+            conversationId: resolvedConversationId,
             stance: result.stance,
             status: result.status,
+            usedLiveData,
+            isNewConversation,
           },
         });
 
-        // Track veto if present (trackVeto takes only userId)
         if (result.status === 'stopped') {
           await trackVeto(userId);
         }
 
-        res.json(result);
+        res.json({
+          ...result,
+          conversationId: resolvedConversationId,
+          isNewConversation,
+        });
       } catch (error) {
         next(error);
       }
@@ -332,6 +421,18 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         const { message, conversationId } = req.body;
         const userId = req.userId ?? 'anonymous';
 
+        // Load conversation history if conversationId provided
+        let conversationHistory: ConversationMessage[] = [];
+        if (conversationId) {
+          const messages = await workingMemory.getMessages(conversationId, 10);
+          conversationHistory = messages.map(msg => ({
+            role: msg.role as 'user' | 'assistant' | 'system',
+            content: msg.content,
+            timestamp: msg.timestamp,
+            metadata: msg.metadata ? { liveData: msg.metadata.liveData } : undefined,
+          }));
+        }
+
         const context: PipelineContext = {
           userId,
           conversationId,
@@ -339,10 +440,11 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           timestamp: Date.now(),
           requestId: (req as any).requestId ?? crypto.randomUUID(),
           actionSource: 'command',
+          conversationHistory,
           metadata: {},
         };
 
-        // Execute pipeline (use process, not execute)
+        // Execute pipeline
         const result = await pipeline.process(message, context);
 
         res.json({
@@ -367,7 +469,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { limit = 50, offset = 0 } = req.query;
-        // Use list() instead of listByUser()
         const conversations = await workingMemory.list(req.userId!, Number(limit), Number(offset));
         
         res.json({
@@ -389,6 +490,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         const { messagesLimit = 100 } = req.query;
 
         const conversation = await workingMemory.get(id);
+
         if (!conversation) {
           throw new ClientError('Conversation not found', 404);
         }
@@ -539,7 +641,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/admin/block-user',
     authenticate({ required: true }),
-    // TODO: Add requireAdmin() middleware
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { targetUserId, reason, durationMinutes } = req.body;
@@ -571,7 +672,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/admin/unblock-user',
     authenticate({ required: true }),
-    // TODO: Add requireAdmin() middleware
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { targetUserId } = req.body;
@@ -600,7 +700,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.get('/admin/audit-logs',
     authenticate({ required: true }),
-    // TODO: Add requireAdmin() middleware
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { userId: targetUserId, limit = 100 } = req.query;
