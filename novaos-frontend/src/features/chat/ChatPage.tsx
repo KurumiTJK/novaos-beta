@@ -158,7 +158,6 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [isInputFocused, setIsInputFocused] = useState(false);
   const [shouldScrollToUser, setShouldScrollToUser] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -312,7 +311,6 @@ export function ChatPage() {
       inputRef.current.innerText = '';
       inputRef.current.blur(); // Close keyboard
     }
-    setIsInputFocused(false);
 
     // Set flag to scroll after message is added
     setShouldScrollToUser(true);
@@ -621,11 +619,10 @@ export function ChatPage() {
           )}
           {/* Dark Card */}
           <div 
-            className="rounded-[28px] overflow-hidden transition-[margin] duration-200 ease-out"
+            className="rounded-[28px] overflow-hidden"
             style={{ 
               backgroundColor: '#1C1C1E',
-              border: '1px solid rgba(255,255,255,0.1)',
-              marginBottom: isInputFocused ? '20px' : '0'
+              border: '1px solid rgba(255,255,255,0.1)'
             }}
           >
             {/* Input area */}
@@ -635,8 +632,6 @@ export function ChatPage() {
                 contentEditable
                 onInput={handleContentEditableInput}
                 onPaste={handlePaste}
-                onFocus={() => setIsInputFocused(true)}
-                onBlur={() => setIsInputFocused(false)}
                 data-placeholder="Ask Anything"
                 className="w-full bg-transparent text-[16px] outline-none leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-white/40 break-words"
                 style={{ 
