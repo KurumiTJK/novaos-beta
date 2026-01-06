@@ -295,12 +295,13 @@ export function ChatPage() {
     }
     setIsInputFocused(false);
 
-    await sendMessage(text);
+    // Start sending (don't await - let it happen in background)
+    sendMessage(text);
     
-    // Auto-scroll to show user's message at top after sending
+    // Auto-scroll immediately to show user's message
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+    }, 50);
   };
 
   const handleNewChat = () => {
