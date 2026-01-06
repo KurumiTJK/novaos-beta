@@ -569,9 +569,8 @@ export function ChatPage() {
           className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
-            paddingBottom: isKeyboardOpen ? '54px' : 'calc(12px + env(safe-area-inset-bottom))',
-            backgroundColor: '#000000',
-            transition: 'padding-bottom 0.1s ease-out'
+            paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
+            backgroundColor: '#000000'
           }}
         >
           {/* Scroll to bottom button */}
@@ -591,7 +590,8 @@ export function ChatPage() {
             className="rounded-[28px] overflow-hidden"
             style={{ 
               backgroundColor: '#1C1C1E',
-              border: '1px solid rgba(255,255,255,0.1)'
+              border: '1px solid rgba(255,255,255,0.1)',
+              marginBottom: isKeyboardOpen ? '44px' : '0'
             }}
           >
             {/* Input area */}
