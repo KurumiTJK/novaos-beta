@@ -159,7 +159,6 @@ export function ChatPage() {
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [lastUserMessageId, setLastUserMessageId] = useState<string | null>(null);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -296,10 +295,6 @@ export function ChatPage() {
       inputRef.current.blur(); // Close keyboard
     }
     setIsInputFocused(false);
-
-    // Generate ID for user message to track it
-    const userMsgId = `msg-${Date.now()}`;
-    setLastUserMessageId(userMsgId);
 
     // Start sending (don't await - let it happen in background)
     sendMessage(text);
