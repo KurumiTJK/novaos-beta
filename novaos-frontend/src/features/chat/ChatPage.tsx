@@ -151,6 +151,7 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -161,6 +162,19 @@ export function ChatPage() {
   const userScrolledRef = useRef(false);
   // Track if this is the initial mount
   const isInitialMountRef = useRef(true);
+
+  // Detect keyboard open/close via visual viewport
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        const isOpen = window.visualViewport.height < window.innerHeight * 0.75;
+        setIsKeyboardOpen(isOpen);
+      }
+    };
+
+    window.visualViewport?.addEventListener('resize', handleResize);
+    return () => window.visualViewport?.removeEventListener('resize', handleResize);
+  }, []);
 
   // Focus input on mount and mark existing messages as seen
   useEffect(() => {
@@ -555,8 +569,9 @@ export function ChatPage() {
           className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
-            paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
-            backgroundColor: '#000000'
+            paddingBottom: isKeyboardOpen ? '54px' : 'calc(12px + env(safe-area-inset-bottom))',
+            backgroundColor: '#000000',
+            transition: 'padding-bottom 0.1s ease-out'
           }}
         >
           {/* Scroll to bottom button */}
