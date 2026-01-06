@@ -163,7 +163,7 @@ export function ChatPage() {
   // Track if this is the initial mount
   const isInitialMountRef = useRef(true);
 
-  // Focus input on mount and mark existing messages as seen
+  // Mark existing messages as seen on mount (no auto-focus to prevent keyboard popup)
   useEffect(() => {
     // Mark all existing messages as already seen on initial mount
     // This prevents re-animation when returning to chat
@@ -175,11 +175,6 @@ export function ChatPage() {
       });
       isInitialMountRef.current = false;
     }
-    
-    const timer = setTimeout(() => {
-      inputRef.current?.focus();
-    }, 350);
-    return () => clearTimeout(timer);
   }, []);
 
   // Check if scrolled to bottom
@@ -608,6 +603,8 @@ export function ChatPage() {
               {/* Attach button */}
               <button 
                 tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
                 className="w-9 h-9 flex items-center justify-center rounded-full border border-white/20"
                 style={{ color: '#FFFFFF' }}
               >
@@ -617,7 +614,8 @@ export function ChatPage() {
               {/* Incognito pill - toggleable */}
               <button 
                 tabIndex={-1}
-                onClick={handleIncognitoToggle}
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => { e.preventDefault(); handleIncognitoToggle(); }}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all ${
                   isIncognito 
                     ? 'bg-white text-black border border-white' 
@@ -631,7 +629,8 @@ export function ChatPage() {
               {/* Exit pill - goes to home */}
               <button 
                 tabIndex={-1}
-                onClick={handleExit}
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => { e.preventDefault(); handleExit(); }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium active:bg-white/10"
                 style={{ color: '#FFFFFF' }}
               >
@@ -643,7 +642,12 @@ export function ChatPage() {
               <div className="flex-1" />
 
               {/* Mic button */}
-              <button tabIndex={-1} className="w-8 h-8 flex items-center justify-center text-white/40">
+              <button 
+                tabIndex={-1} 
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
+                className="w-8 h-8 flex items-center justify-center text-white/40"
+              >
                 <MicIcon size={18} />
               </button>
 
@@ -651,6 +655,8 @@ export function ChatPage() {
               {isLoading ? (
                 <button 
                   tabIndex={-1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchStart={(e) => e.preventDefault()}
                   className="w-8 h-8 rounded-full flex items-center justify-center"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
@@ -659,7 +665,8 @@ export function ChatPage() {
               ) : hasInput ? (
                 <button
                   tabIndex={-1}
-                  onClick={handleSend}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchStart={(e) => { e.preventDefault(); handleSend(); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-black active:opacity-80"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
@@ -668,6 +675,8 @@ export function ChatPage() {
               ) : (
                 <button 
                   tabIndex={-1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchStart={(e) => e.preventDefault()}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-black"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
