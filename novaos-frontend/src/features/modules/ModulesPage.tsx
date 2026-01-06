@@ -4,7 +4,8 @@
 
 import { useUIStore } from '@/shared/stores';
 import { useHaptic } from '@/shared/hooks';
-import { ChevronRightIcon } from '@/shared/components';
+import { formatDate } from '@/shared/utils';
+import { ChevronRightIcon, SettingsIcon } from '@/shared/components';
 import type { ModuleType } from '@/shared/types';
 
 const modules: { id: ModuleType; label: string; emoji: string; description: string }[] = [
@@ -17,7 +18,7 @@ const modules: { id: ModuleType; label: string; emoji: string; description: stri
 ];
 
 export function ModulesPage() {
-  const { openModule } = useUIStore();
+  const { openModule, setActiveTab } = useUIStore();
   const haptic = useHaptic();
 
   const handleModuleClick = (id: ModuleType) => {
@@ -25,16 +26,40 @@ export function ModulesPage() {
     openModule(id);
   };
 
+  const handleSettingsClick = () => {
+    haptic('light');
+    setActiveTab('settings');
+  };
+
   return (
     <div 
-      className="flex flex-col h-full pb-[calc(70px+env(safe-area-inset-bottom))]"
-      style={{ paddingTop: 'calc(24px + env(safe-area-inset-top))' }}
+      className="flex flex-col h-full overflow-hidden"
+      style={{ paddingBottom: 'calc(70px + env(safe-area-inset-bottom))' }}
     >
-      <header className="px-5 pb-4">
-        <h1 className="text-[34px] font-light tracking-tight">Modules</h1>
+      {/* Header */}
+      <header 
+        className="px-5 flex-shrink-0 flex items-center justify-between"
+        style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}
+      >
+        {/* Settings Icon */}
+        <button 
+          onClick={handleSettingsClick}
+          className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10"
+        >
+          <SettingsIcon size={22} className="text-white/70" />
+        </button>
+
+        {/* Centered Title */}
+        <div className="text-center">
+          <p className="text-[13px] text-white/50">{formatDate(new Date())}</p>
+          <h1 className="text-[20px] font-semibold tracking-tight">Modules</h1>
+        </div>
+
+        {/* Empty spacer for balance */}
+        <div className="w-10 h-10" />
       </header>
 
-      <div className="flex-1 overflow-y-auto px-5">
+      <div className="flex-1 overflow-y-auto px-5 mt-4">
         <div className="space-y-2">
           {modules.map((module) => (
             <button

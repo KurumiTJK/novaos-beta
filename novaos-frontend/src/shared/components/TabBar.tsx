@@ -10,8 +10,8 @@ import type { TabId } from '../types';
 const tabs: { id: TabId | 'chat'; label: string; Icon: typeof HomeIcon }[] = [
   { id: 'home', label: 'Home', Icon: HomeIcon },
   { id: 'modules', label: 'Modules', Icon: ModulesIcon },
-  { id: 'skills', label: 'Skills', Icon: SkillsIcon },
   { id: 'chat', label: 'Chat', Icon: ChatIcon },
+  { id: 'skills', label: 'Actions', Icon: SkillsIcon },
 ];
 
 export function TabBar() {
