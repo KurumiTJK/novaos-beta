@@ -621,7 +621,7 @@ export function ChatPage() {
           )}
           {/* Dark Card */}
           <div 
-            className="rounded-[28px] overflow-hidden"
+            className="rounded-[28px] overflow-hidden transition-[margin] duration-200 ease-out"
             style={{ 
               backgroundColor: '#1C1C1E',
               border: '1px solid rgba(255,255,255,0.1)',
