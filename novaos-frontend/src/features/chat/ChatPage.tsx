@@ -222,21 +222,26 @@ export function ChatPage() {
 
   // Scroll to last user message when triggered
   useEffect(() => {
-    if (shouldScrollToUser && lastUserMessageRef.current && messagesContainerRef.current) {
-      const container = messagesContainerRef.current;
-      const userMessage = lastUserMessageRef.current;
-      
-      // Calculate scroll position to put user message at top of container
-      const containerRect = container.getBoundingClientRect();
-      const messageRect = userMessage.getBoundingClientRect();
-      const scrollTop = container.scrollTop + (messageRect.top - containerRect.top) - 20; // 20px padding from top
-      
-      container.scrollTo({
-        top: scrollTop,
-        behavior: 'smooth'
+    if (shouldScrollToUser) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (lastUserMessageRef.current && messagesContainerRef.current) {
+            const container = messagesContainerRef.current;
+            const userMessage = lastUserMessageRef.current;
+            
+            // Calculate scroll position to put user message at top of container
+            const messageOffsetTop = userMessage.offsetTop;
+            const scrollPosition = messageOffsetTop - 20; // 20px padding from top
+            
+            container.scrollTo({
+              top: scrollPosition,
+              behavior: 'smooth'
+            });
+          }
+          setShouldScrollToUser(false);
+        });
       });
-      
-      setShouldScrollToUser(false);
     }
   }, [shouldScrollToUser, messages]);
 
