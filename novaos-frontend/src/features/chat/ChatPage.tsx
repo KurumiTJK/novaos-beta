@@ -573,7 +573,7 @@ export function ChatPage() {
             style={{ 
               backgroundColor: '#1C1C1E',
               border: '1px solid rgba(255,255,255,0.1)',
-              marginBottom: isInputFocused ? '44px' : '0'
+              marginBottom: isInputFocused ? '8px' : '0'
             }}
           >
             {/* Input area */}
