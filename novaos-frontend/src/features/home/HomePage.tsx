@@ -5,7 +5,7 @@
 import { useUIStore } from '@/shared/stores';
 import { useHaptic } from '@/shared/hooks';
 import { formatDate } from '@/shared/utils';
-import { BellIcon, PlusIcon } from '@/shared/components';
+import { BellIcon, PlusIcon, SettingsIcon } from '@/shared/components';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // MOCK DATA (will be replaced with real API later)
@@ -23,7 +23,7 @@ const widgetData = {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export function HomePage() {
-  const { homeTab, setHomeTab, openChat, openModule } = useUIStore();
+  const { homeTab, setHomeTab, openChat, openModule, setActiveTab } = useUIStore();
   const haptic = useHaptic();
 
   const handleWidgetClick = (type: string) => {
@@ -36,6 +36,11 @@ export function HomePage() {
     openChat();
   };
 
+  const handleSettingsClick = () => {
+    haptic('light');
+    setActiveTab('settings');
+  };
+
   return (
     <div 
       className="flex flex-col h-full overflow-hidden"
@@ -43,15 +48,29 @@ export function HomePage() {
     >
       {/* Header */}
       <header 
-        className="px-5 flex-shrink-0"
+        className="px-5 flex-shrink-0 flex items-center justify-between"
         style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}
       >
-        <p className="text-[14px] text-white/50">{formatDate(new Date())}</p>
-        <h1 className="text-[32px] font-light tracking-tight">Overview</h1>
+        {/* Settings Icon */}
+        <button 
+          onClick={handleSettingsClick}
+          className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10"
+        >
+          <SettingsIcon size={22} className="text-white/70" />
+        </button>
+
+        {/* Centered Title */}
+        <div className="text-center">
+          <p className="text-[13px] text-white/50">{formatDate(new Date())}</p>
+          <h1 className="text-[20px] font-semibold tracking-tight">NovaOS Home</h1>
+        </div>
+
+        {/* Empty spacer for balance */}
+        <div className="w-10 h-10" />
       </header>
 
       {/* Overview/Lessons Tab */}
-      <div className="mx-5 mt-2 mb-4 bg-nova-dark rounded-full p-1 flex flex-shrink-0">
+      <div className="mx-5 mt-3 mb-4 bg-nova-dark rounded-full p-1 flex flex-shrink-0">
         <button
           onClick={() => { haptic('light'); setHomeTab('overview'); }}
           className={`flex-1 py-2 px-4 rounded-full text-[14px] font-medium transition-all flex items-center justify-center gap-2 ${

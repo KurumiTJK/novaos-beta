@@ -32,6 +32,7 @@ export function ChatPage() {
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Focus input on mount
   useEffect(() => {
@@ -76,6 +77,13 @@ export function ChatPage() {
     await sendMessage(text);
   };
 
+  const handleInputFocus = () => {
+    // Scroll to bottom when keyboard opens
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 300);
+  };
+
   const hasInput = inputValue.trim().length > 0;
 
   return (
@@ -83,9 +91,9 @@ export function ChatPage() {
       className="fixed inset-0 max-w-[430px] mx-auto flex flex-col z-50"
       style={{ backgroundColor: '#000000' }}
     >
-      {/* Header */}
+      {/* Header - Fixed */}
       <div 
-        className="flex items-center justify-between px-5 py-3"
+        className="flex-shrink-0 flex items-center justify-between px-5 py-3"
         style={{ 
           paddingTop: 'calc(12px + env(safe-area-inset-top))',
           backgroundColor: '#000000'
@@ -113,8 +121,11 @@ export function ChatPage() {
         </button>
       </div>
 
-      {/* Messages - scrollable area */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
+      {/* Messages - Scrollable, takes remaining space */}
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto px-5 py-5 min-h-0"
+      >
         {messages.map((message) => (
           <div key={message.id} className="mb-5">
             {message.role === 'user' ? (
@@ -147,65 +158,67 @@ export function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Container */}
+      {/* Input Container - Fixed at bottom, minimal padding */}
       <div 
-        className="px-4 pt-2"
+        className="flex-shrink-0 px-3"
         style={{ 
-          paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
+          paddingTop: '8px',
+          paddingBottom: '8px',
           backgroundColor: '#000000'
         }}
       >
         {/* Dark Card */}
         <div 
-          className="rounded-[32px] overflow-hidden"
+          className="rounded-[28px] overflow-hidden"
           style={{ 
             backgroundColor: '#1C1C1E',
             border: '1px solid rgba(255,255,255,0.1)'
           }}
         >
           {/* Textarea */}
-          <div className="px-5 pt-5 pb-3">
+          <div className="px-4 pt-3 pb-2">
             <textarea
               ref={inputRef}
               value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onFocus={handleInputFocus}
               placeholder="Ask Anything"
               rows={1}
-              className="w-full bg-transparent text-[17px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
+              className="w-full bg-transparent text-[16px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
               style={{ 
                 color: '#FFFFFF',
-                minHeight: '24px', 
-                maxHeight: '120px' 
+                minHeight: '22px', 
+                maxHeight: '80px' 
               }}
             />
           </div>
 
           {/* Bottom toolbar */}
-          <div className="flex items-center px-3 pb-3 gap-2">
+          <div className="flex items-center px-2 pb-2 gap-1.5">
             {/* Attach button */}
             <button 
-              className="w-10 h-10 flex items-center justify-center rounded-full border border-white/20"
+              className="w-9 h-9 flex items-center justify-center rounded-full border border-white/20"
               style={{ color: '#FFFFFF' }}
             >
-              <AttachIcon size={20} />
+              <AttachIcon size={18} />
             </button>
 
             {/* DeepSearch pill - outlined style */}
             <button 
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 text-sm font-medium"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium"
               style={{ color: '#FFFFFF' }}
             >
-              <SearchIcon size={16} />
+              <SearchIcon size={14} />
               <span>DeepSearch</span>
             </button>
 
             {/* Think pill - outlined style */}
             <button 
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 text-sm font-medium"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium"
               style={{ color: '#FFFFFF' }}
             >
-              <LightbulbIcon size={16} />
+              <LightbulbIcon size={14} />
               <span>Think</span>
             </button>
 
@@ -213,32 +226,32 @@ export function ChatPage() {
             <div className="flex-1" />
 
             {/* Mic button */}
-            <button className="w-10 h-10 flex items-center justify-center text-white/40">
-              <MicIcon size={22} />
+            <button className="w-9 h-9 flex items-center justify-center text-white/40">
+              <MicIcon size={20} />
             </button>
 
             {/* Voice/Send/Stop button */}
             {isLoading ? (
               <button 
-                className="w-12 h-12 rounded-full flex items-center justify-center"
+                className="w-10 h-10 rounded-full flex items-center justify-center"
                 style={{ backgroundColor: '#FFFFFF' }}
               >
-                <div className="w-4 h-4 bg-black rounded-sm" />
+                <div className="w-3.5 h-3.5 bg-black rounded-sm" />
               </button>
             ) : hasInput ? (
               <button
                 onClick={handleSend}
-                className="w-12 h-12 rounded-full flex items-center justify-center text-black active:opacity-80"
+                className="w-10 h-10 rounded-full flex items-center justify-center text-black active:opacity-80"
                 style={{ backgroundColor: '#FFFFFF' }}
               >
-                <SendIcon size={20} />
+                <SendIcon size={18} />
               </button>
             ) : (
               <button 
-                className="w-12 h-12 rounded-full flex items-center justify-center text-black"
+                className="w-10 h-10 rounded-full flex items-center justify-center text-black"
                 style={{ backgroundColor: '#FFFFFF' }}
               >
-                <VoiceWaveIcon size={22} />
+                <VoiceWaveIcon size={20} />
               </button>
             )}
           </div>

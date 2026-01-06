@@ -1,29 +1,33 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TAB BAR — Novaux
+// TAB BAR — NovaOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useUIStore } from '../stores';
 import { useHaptic } from '../hooks';
-import { HomeIcon, ModulesIcon, SkillsIcon, SettingsIcon } from './Icons';
+import { HomeIcon, ModulesIcon, SkillsIcon, ChatIcon } from './Icons';
 import type { TabId } from '../types';
 
-const tabs: { id: TabId; label: string; Icon: typeof HomeIcon }[] = [
+const tabs: { id: TabId | 'chat'; label: string; Icon: typeof HomeIcon }[] = [
   { id: 'home', label: 'Home', Icon: HomeIcon },
   { id: 'modules', label: 'Modules', Icon: ModulesIcon },
   { id: 'skills', label: 'Skills', Icon: SkillsIcon },
-  { id: 'settings', label: 'Settings', Icon: SettingsIcon },
+  { id: 'chat', label: 'Chat', Icon: ChatIcon },
 ];
 
 export function TabBar() {
-  const { activeTab, setActiveTab, isChatOpen, activeModule } = useUIStore();
+  const { activeTab, setActiveTab, isChatOpen, activeModule, openChat } = useUIStore();
   const haptic = useHaptic();
 
   // Hide tab bar when chat or module is open
   if (isChatOpen || activeModule) return null;
 
-  const handleTabClick = (id: TabId) => {
+  const handleTabClick = (id: TabId | 'chat') => {
     haptic('light');
-    setActiveTab(id);
+    if (id === 'chat') {
+      openChat();
+    } else {
+      setActiveTab(id);
+    }
   };
 
   return (
