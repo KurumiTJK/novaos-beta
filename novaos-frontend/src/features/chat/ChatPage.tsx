@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CHAT PAGE — Dark Mode with Sidebar Navigation
+// CHAT PAGE — Dark Mode with Sidebar Navigation + Typing Animation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useUIStore, useChatStore } from '@/shared/stores';
 import { useHaptic, useAutoResize } from '@/shared/hooks';
 import { LoadingDots } from '@/shared/components';
@@ -24,12 +24,120 @@ import {
   MoreIcon,
 } from '@/shared/components/Icons';
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// TYPING ANIMATION CONFIG
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const TYPING_CONFIG = {
+  // Chunk size (characters per chunk)
+  chunkSize: 3,
+  // Base delay between chunks (ms)
+  baseDelay: 20,
+  // Max animation time (ms) - prevents slow reveals for long responses
+  maxAnimationTime: 2000,
+  // Short response threshold - render instantly below this
+  instantThreshold: 50,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// TYPED MESSAGE COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+interface TypedMessageProps {
+  content: string;
+  messageId: string;
+  onTypingComplete?: () => void;
+  onChunk?: () => void;
+}
+
+function TypedMessage({ content, messageId, onTypingComplete, onChunk }: TypedMessageProps) {
+  const [displayedContent, setDisplayedContent] = useState('');
+  const [isComplete, setIsComplete] = useState(false);
+  const animationRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    // Reset when content changes
+    setDisplayedContent('');
+    setIsComplete(false);
+    startTimeRef.current = Date.now();
+
+    // Short responses: render instantly
+    if (content.length <= TYPING_CONFIG.instantThreshold) {
+      setDisplayedContent(content);
+      setIsComplete(true);
+      onTypingComplete?.();
+      return;
+    }
+
+    // Calculate delay to fit within maxAnimationTime
+    const totalChunks = Math.ceil(content.length / TYPING_CONFIG.chunkSize);
+    const calculatedDelay = Math.min(
+      TYPING_CONFIG.baseDelay,
+      TYPING_CONFIG.maxAnimationTime / totalChunks
+    );
+
+    let currentIndex = 0;
+
+    const typeNextChunk = () => {
+      if (currentIndex >= content.length) {
+        setIsComplete(true);
+        onTypingComplete?.();
+        return;
+      }
+
+      // Adaptive speed: go faster if we're behind schedule
+      const elapsed = Date.now() - startTimeRef.current;
+      const expectedProgress = elapsed / TYPING_CONFIG.maxAnimationTime;
+      const actualProgress = currentIndex / content.length;
+      
+      // If behind, catch up by increasing chunk size
+      let chunkSize = TYPING_CONFIG.chunkSize;
+      if (actualProgress < expectedProgress * 0.8) {
+        chunkSize = Math.ceil(TYPING_CONFIG.chunkSize * 2);
+      }
+
+      const nextIndex = Math.min(currentIndex + chunkSize, content.length);
+      setDisplayedContent(content.slice(0, nextIndex));
+      currentIndex = nextIndex;
+      onChunk?.();
+
+      animationRef.current = window.setTimeout(typeNextChunk, calculatedDelay);
+    };
+
+    // Start typing
+    animationRef.current = window.setTimeout(typeNextChunk, 50);
+
+    return () => {
+      if (animationRef.current) {
+        clearTimeout(animationRef.current);
+      }
+    };
+  }, [content, messageId, onTypingComplete, onChunk]);
+
+  return (
+    <div 
+      className="text-[17px] leading-[1.7]"
+      style={{ color: '#FFFFFF' }}
+    >
+      <span dangerouslySetInnerHTML={{ __html: formatResponse(displayedContent) }} />
+      {!isComplete && (
+        <span className="inline-block w-0.5 h-5 bg-white/70 ml-0.5 animate-pulse" />
+      )}
+    </div>
+  );
+}
+
 // Mock chat history data
 const chatHistory = [
   { id: '1', title: 'Investment Strategy Q4', date: 'Today' },
   { id: '2', title: 'Health Goals Review', date: 'Today' },
   { id: '3', title: 'Calendar Planning', date: 'Yesterday' },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// MAIN CHAT PAGE COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────────
 
 export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
@@ -40,9 +148,13 @@ export function ChatPage() {
   const [inputValue, setInputValue] = useState('');
   const [isIncognito, setIsIncognito] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // Track which messages are new (for typing animation)
+  const seenMessagesRef = useRef<Set<string>>(new Set());
 
   // Focus input on mount
   useEffect(() => {
@@ -52,10 +164,32 @@ export function ChatPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
+  // Scroll to bottom on new messages or during typing
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  // Track new assistant messages for typing animation
+  useEffect(() => {
+    messages.forEach(msg => {
+      if (msg.role === 'assistant' && !msg.isLoading && !seenMessagesRef.current.has(msg.id)) {
+        setTypingMessageIds(prev => new Set(prev).add(msg.id));
+      }
+    });
   }, [messages]);
+
+  const handleTypingComplete = useCallback((messageId: string) => {
+    seenMessagesRef.current.add(messageId);
+    setTypingMessageIds(prev => {
+      const next = new Set(prev);
+      next.delete(messageId);
+      return next;
+    });
+  }, []);
 
   const handleOpenSidebar = () => {
     haptic('light');
@@ -230,7 +364,10 @@ export function ChatPage() {
             <MenuIcon size={24} />
           </button>
 
-          <h1 className="text-[20px] font-semibold" style={{ color: '#FFFFFF' }}>Nova 1</h1>
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#22C55E' }} />
+            <h1 className="text-[20px] font-semibold" style={{ color: '#FFFFFF' }}>Nova 1</h1>
+          </div>
 
           <button 
             onClick={handleNewChat}
@@ -263,13 +400,22 @@ export function ChatPage() {
                 </div>
               ) : (
                 <div className="pr-10">
-                  <div 
-                    className="text-[17px] leading-[1.7]"
-                    style={{ color: '#FFFFFF' }}
-                    dangerouslySetInnerHTML={{ 
-                      __html: formatResponse(message.content) 
-                    }}
-                  />
+                  {typingMessageIds.has(message.id) ? (
+                    <TypedMessage
+                      content={message.content}
+                      messageId={message.id}
+                      onTypingComplete={() => handleTypingComplete(message.id)}
+                      onChunk={scrollToBottom}
+                    />
+                  ) : (
+                    <div 
+                      className="text-[17px] leading-[1.7]"
+                      style={{ color: '#FFFFFF' }}
+                      dangerouslySetInnerHTML={{ 
+                        __html: formatResponse(message.content) 
+                      }}
+                    />
+                  )}
                   <MessageActions />
                 </div>
               )}
