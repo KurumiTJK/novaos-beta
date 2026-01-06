@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CHAT PAGE — Grok Design (iPhone 16 Pro Optimized)
+// CHAT PAGE — Dark Mode Grok Design (iPhone 16 Pro Optimized)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect } from 'react';
@@ -81,33 +81,33 @@ export function ChatPage() {
   return (
     <div 
       className="fixed inset-0 max-w-[430px] mx-auto flex flex-col z-50"
-      style={{ backgroundColor: '#F5F3EE' }}
+      style={{ backgroundColor: '#000000' }}
     >
       {/* Header */}
       <div 
         className="flex items-center justify-between px-5 py-3"
         style={{ 
           paddingTop: 'calc(12px + env(safe-area-inset-top))',
-          backgroundColor: '#F5F3EE'
+          backgroundColor: '#000000'
         }}
       >
         <button
           onClick={handleClose}
-          className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-black/5"
-          style={{ color: '#1A1A1A' }}
+          className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
+          style={{ color: '#FFFFFF' }}
         >
           <CloseIcon size={24} />
         </button>
 
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#22C55E' }} />
-          <span className="font-semibold text-lg" style={{ color: '#1A1A1A' }}>Nova 1</span>
-          <ChevronRightIcon size={16} className="text-gray-400" />
+          <span className="font-semibold text-lg" style={{ color: '#FFFFFF' }}>Nova 1</span>
+          <ChevronRightIcon size={16} className="text-white/40" />
         </div>
 
         <button 
-          className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-black/5"
-          style={{ color: '#1A1A1A' }}
+          className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
+          style={{ color: '#FFFFFF' }}
         >
           <EditIcon size={22} />
         </button>
@@ -120,8 +120,8 @@ export function ChatPage() {
             {message.role === 'user' ? (
               <div className="flex justify-end">
                 <div 
-                  className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed shadow-sm"
-                  style={{ backgroundColor: '#FFFFFF', color: '#1A1A1A' }}
+                  className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
+                  style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
                 >
                   {message.content}
                 </div>
@@ -134,7 +134,7 @@ export function ChatPage() {
               <div className="pr-10">
                 <div 
                   className="text-[17px] leading-[1.7]"
-                  style={{ color: '#1A1A1A' }}
+                  style={{ color: '#FFFFFF' }}
                   dangerouslySetInnerHTML={{ 
                     __html: formatResponse(message.content) 
                   }}
@@ -152,15 +152,15 @@ export function ChatPage() {
         className="px-4 pt-2"
         style={{ 
           paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
-          backgroundColor: '#F5F3EE'
+          backgroundColor: '#000000'
         }}
       >
-        {/* White Card */}
+        {/* Dark Card */}
         <div 
           className="rounded-[32px] overflow-hidden"
           style={{ 
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 2px 16px rgba(0,0,0,0.06)'
+            backgroundColor: '#1C1C1E',
+            border: '1px solid rgba(255,255,255,0.1)'
           }}
         >
           {/* Textarea */}
@@ -172,9 +172,9 @@ export function ChatPage() {
               onKeyDown={handleKeyDown}
               placeholder="Ask Anything"
               rows={1}
-              className="w-full bg-transparent text-[17px] placeholder:text-gray-400 outline-none resize-none leading-relaxed"
+              className="w-full bg-transparent text-[17px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
               style={{ 
-                color: '#1A1A1A',
+                color: '#FFFFFF',
                 minHeight: '24px', 
                 maxHeight: '120px' 
               }}
@@ -185,16 +185,16 @@ export function ChatPage() {
           <div className="flex items-center px-3 pb-3 gap-2">
             {/* Attach button */}
             <button 
-              className="w-10 h-10 flex items-center justify-center rounded-full border border-gray-200"
-              style={{ color: '#1A1A1A' }}
+              className="w-10 h-10 flex items-center justify-center rounded-full border border-white/20"
+              style={{ color: '#FFFFFF' }}
             >
               <AttachIcon size={20} />
             </button>
 
             {/* DeepSearch pill - outlined style */}
             <button 
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm font-medium"
-              style={{ color: '#1A1A1A' }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 text-sm font-medium"
+              style={{ color: '#FFFFFF' }}
             >
               <SearchIcon size={16} />
               <span>DeepSearch</span>
@@ -202,8 +202,8 @@ export function ChatPage() {
 
             {/* Think pill - outlined style */}
             <button 
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm font-medium"
-              style={{ color: '#1A1A1A' }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 text-sm font-medium"
+              style={{ color: '#FFFFFF' }}
             >
               <LightbulbIcon size={16} />
               <span>Think</span>
@@ -213,7 +213,7 @@ export function ChatPage() {
             <div className="flex-1" />
 
             {/* Mic button */}
-            <button className="w-10 h-10 flex items-center justify-center text-gray-400">
+            <button className="w-10 h-10 flex items-center justify-center text-white/40">
               <MicIcon size={22} />
             </button>
 
@@ -221,22 +221,22 @@ export function ChatPage() {
             {isLoading ? (
               <button 
                 className="w-12 h-12 rounded-full flex items-center justify-center"
-                style={{ backgroundColor: '#1A1A1A' }}
+                style={{ backgroundColor: '#FFFFFF' }}
               >
-                <div className="w-4 h-4 bg-white rounded-sm" />
+                <div className="w-4 h-4 bg-black rounded-sm" />
               </button>
             ) : hasInput ? (
               <button
                 onClick={handleSend}
-                className="w-12 h-12 rounded-full flex items-center justify-center text-white active:opacity-80"
-                style={{ backgroundColor: '#1A1A1A' }}
+                className="w-12 h-12 rounded-full flex items-center justify-center text-black active:opacity-80"
+                style={{ backgroundColor: '#FFFFFF' }}
               >
                 <SendIcon size={20} />
               </button>
             ) : (
               <button 
-                className="w-12 h-12 rounded-full flex items-center justify-center text-white"
-                style={{ backgroundColor: '#1A1A1A' }}
+                className="w-12 h-12 rounded-full flex items-center justify-center text-black"
+                style={{ backgroundColor: '#FFFFFF' }}
               >
                 <VoiceWaveIcon size={22} />
               </button>
@@ -272,7 +272,7 @@ function MessageActions() {
         <button
           key={action}
           onClick={() => handleAction(action)}
-          className="w-9 h-9 flex items-center justify-center text-gray-400 rounded-lg active:bg-black/5"
+          className="w-9 h-9 flex items-center justify-center text-white/40 rounded-lg active:bg-white/10"
           title={title}
         >
           <Icon size={18} />
