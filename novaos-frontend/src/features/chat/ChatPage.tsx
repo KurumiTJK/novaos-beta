@@ -159,9 +159,11 @@ export function ChatPage() {
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [lastUserMessageId, setLastUserMessageId] = useState<string | null>(null);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const lastUserMessageRef = useRef<HTMLDivElement>(null);
 
   // Track which messages are new (for typing animation)
   const seenMessagesRef = useRef<Set<string>>(new Set());
@@ -295,13 +297,19 @@ export function ChatPage() {
     }
     setIsInputFocused(false);
 
+    // Generate ID for user message to track it
+    const userMsgId = `msg-${Date.now()}`;
+    setLastUserMessageId(userMsgId);
+
     // Start sending (don't await - let it happen in background)
     sendMessage(text);
     
-    // Auto-scroll immediately to show user's message
+    // Auto-scroll to show user's message at top after sending
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 50);
+      if (lastUserMessageRef.current) {
+        lastUserMessageRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
   };
 
   const handleNewChat = () => {
@@ -528,45 +536,55 @@ export function ChatPage() {
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto px-5 py-5 min-h-0"
         >
-          {messages.map((message) => (
-            <div key={message.id} className="mb-5">
-              {message.role === 'user' ? (
-                <div className="flex justify-end">
-                  <div 
-                    className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
-                    style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
-                  >
-                    {message.content}
+          {messages.map((message, index) => {
+            // Check if this is the last user message
+            const isLastUserMessage = message.role === 'user' && 
+              messages.slice(index + 1).every(m => m.role !== 'user');
+            
+            return (
+              <div 
+                key={message.id} 
+                className="mb-5"
+                ref={isLastUserMessage ? lastUserMessageRef : null}
+              >
+                {message.role === 'user' ? (
+                  <div className="flex justify-end">
+                    <div 
+                      className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
+                      style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
+                    >
+                      {message.content}
+                    </div>
                   </div>
-                </div>
-              ) : message.isLoading ? (
-                <div className="py-2">
-                  <LoadingDots />
-                </div>
-              ) : (
-                <div className="pr-10">
-                  {typingMessageIds.has(message.id) ? (
-                    <TypedMessage
-                      content={message.content}
-                      messageId={message.id}
-                      onTypingComplete={() => handleTypingComplete(message.id)}
-                    />
-                  ) : (
-                    <>
-                      <div 
-                        className="text-[17px] leading-[1.7]"
-                        style={{ color: '#FFFFFF' }}
-                        dangerouslySetInnerHTML={{ 
-                          __html: formatResponse(message.content) 
-                        }}
+                ) : message.isLoading ? (
+                  <div className="py-2">
+                    <LoadingDots />
+                  </div>
+                ) : (
+                  <div className="pr-10">
+                    {typingMessageIds.has(message.id) ? (
+                      <TypedMessage
+                        content={message.content}
+                        messageId={message.id}
+                        onTypingComplete={() => handleTypingComplete(message.id)}
                       />
-                      <MessageActions />
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+                    ) : (
+                      <>
+                        <div 
+                          className="text-[17px] leading-[1.7]"
+                          style={{ color: '#FFFFFF' }}
+                          dangerouslySetInnerHTML={{ 
+                            __html: formatResponse(message.content) 
+                          }}
+                        />
+                        <MessageActions />
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
