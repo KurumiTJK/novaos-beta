@@ -554,12 +554,12 @@ export function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Container - Fixed at bottom, minimal padding */}
+        {/* Input Container - Fixed at bottom */}
         <div 
           className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
-            paddingBottom: '8px',
+            paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
             backgroundColor: '#000000'
           }}
         >
@@ -593,11 +593,15 @@ export function ChatPage() {
                 onFocus={handleInputFocus}
                 placeholder="Ask Anything"
                 rows={1}
+                autoComplete="off"
+                autoCorrect="on"
+                spellCheck="true"
+                enterKeyHint="enter"
                 className="w-full bg-transparent text-[16px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
                 style={{ 
                   color: '#FFFFFF',
-                  minHeight: '22px', 
-                  maxHeight: '80px' 
+                  minHeight: '24px', 
+                  maxHeight: '120px'
                 }}
               />
             </div>
