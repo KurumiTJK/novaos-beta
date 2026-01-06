@@ -151,7 +151,7 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -162,19 +162,6 @@ export function ChatPage() {
   const userScrolledRef = useRef(false);
   // Track if this is the initial mount
   const isInitialMountRef = useRef(true);
-
-  // Detect keyboard open/close via visual viewport
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        const isOpen = window.visualViewport.height < window.innerHeight * 0.75;
-        setIsKeyboardOpen(isOpen);
-      }
-    };
-
-    window.visualViewport?.addEventListener('resize', handleResize);
-    return () => window.visualViewport?.removeEventListener('resize', handleResize);
-  }, []);
 
   // Focus input on mount and mark existing messages as seen
   useEffect(() => {
@@ -591,7 +578,7 @@ export function ChatPage() {
             style={{ 
               backgroundColor: '#1C1C1E',
               border: '1px solid rgba(255,255,255,0.1)',
-              marginBottom: isKeyboardOpen ? '44px' : '0'
+              marginBottom: isInputFocused ? '44px' : '0'
             }}
           >
             {/* Input area */}
@@ -601,6 +588,8 @@ export function ChatPage() {
                 contentEditable
                 onInput={handleContentEditableInput}
                 onPaste={handlePaste}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
                 data-placeholder="Ask Anything"
                 className="w-full bg-transparent text-[16px] outline-none leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-white/40 break-words"
                 style={{ 
