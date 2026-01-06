@@ -22,6 +22,9 @@ import {
   ThumbsDownIcon,
   SearchIcon,
   MoreIcon,
+  MoreHorizontalIcon,
+  ArchiveIcon,
+  TrashIcon,
 } from '@/shared/components/Icons';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -47,10 +50,9 @@ interface TypedMessageProps {
   content: string;
   messageId: string;
   onTypingComplete?: () => void;
-  onChunk?: () => void;
 }
 
-function TypedMessage({ content, messageId, onTypingComplete, onChunk }: TypedMessageProps) {
+function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProps) {
   const [displayedContent, setDisplayedContent] = useState('');
   const [isComplete, setIsComplete] = useState(false);
   const animationRef = useRef<number | null>(null);
@@ -100,7 +102,6 @@ function TypedMessage({ content, messageId, onTypingComplete, onChunk }: TypedMe
       const nextIndex = Math.min(currentIndex + chunkSize, content.length);
       setDisplayedContent(content.slice(0, nextIndex));
       currentIndex = nextIndex;
-      onChunk?.();
 
       animationRef.current = window.setTimeout(typeNextChunk, calculatedDelay);
     };
@@ -148,13 +149,17 @@ export function ChatPage() {
   const [inputValue, setInputValue] = useState('');
   const [isIncognito, setIsIncognito] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Track which messages are new (for typing animation)
   const seenMessagesRef = useRef<Set<string>>(new Set());
+  // Track if user has manually scrolled up
+  const userScrolledRef = useRef(false);
 
   // Focus input on mount
   useEffect(() => {
@@ -164,23 +169,50 @@ export function ChatPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Scroll to bottom on new messages or during typing
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Check if scrolled to bottom
+  const checkScrollPosition = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+    
+    setShowScrollButton(!isAtBottom);
+    userScrolledRef.current = !isAtBottom;
   }, []);
 
+  // Handle scroll events
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    container.addEventListener('scroll', checkScrollPosition);
+    return () => container.removeEventListener('scroll', checkScrollPosition);
+  }, [checkScrollPosition]);
+
+  // Check scroll position when messages change (but don't auto-scroll)
+  useEffect(() => {
+    checkScrollPosition();
+  }, [messages, checkScrollPosition]);
+
+  // Scroll to bottom function
+  const scrollToBottom = useCallback(() => {
+    haptic('light');
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowScrollButton(false);
+    userScrolledRef.current = false;
+  }, [haptic]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
     messages.forEach(msg => {
       if (msg.role === 'assistant' && !msg.isLoading && !seenMessagesRef.current.has(msg.id)) {
         setTypingMessageIds(prev => new Set(prev).add(msg.id));
+        // Show scroll button when new message arrives (if not at bottom)
+        checkScrollPosition();
       }
     });
-  }, [messages]);
+  }, [messages, checkScrollPosition]);
 
   const handleTypingComplete = useCallback((messageId: string) => {
     seenMessagesRef.current.add(messageId);
@@ -189,7 +221,9 @@ export function ChatPage() {
       next.delete(messageId);
       return next;
     });
-  }, []);
+    // Check if we should show scroll button after typing completes
+    checkScrollPosition();
+  }, [checkScrollPosition]);
 
   const handleOpenSidebar = () => {
     haptic('light');
@@ -246,7 +280,24 @@ export function ChatPage() {
   const handleNewChat = () => {
     haptic('medium');
     setIsSidebarOpen(false);
+    setIsMenuOpen(false);
     // TODO: Clear chat and start new
+  };
+
+  const handleOpenMenu = () => {
+    haptic('light');
+    setIsMenuOpen(true);
+  };
+
+  const handleCloseMenu = () => {
+    setIsMenuOpen(false);
+  };
+
+  const handleMenuAction = (action: string) => {
+    haptic('light');
+    setIsMenuOpen(false);
+    console.log('Menu action:', action);
+    // TODO: Implement menu actions
   };
 
   const hasInput = inputValue.trim().length > 0;
@@ -350,33 +401,100 @@ export function ChatPage() {
       <div className="flex-1 flex flex-col">
         {/* Header - Fixed */}
         <div 
-          className="flex-shrink-0 flex items-center justify-between px-5 py-3"
+          className="flex-shrink-0 flex items-center justify-between px-4 py-3"
           style={{ 
             paddingTop: 'calc(12px + env(safe-area-inset-top))',
             backgroundColor: '#000000'
           }}
         >
+          {/* Left: Menu button */}
           <button
             onClick={handleOpenSidebar}
-            className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
+            className="w-10 h-10 flex items-center justify-center rounded-full border border-white/20 active:bg-white/10"
             style={{ color: '#FFFFFF' }}
           >
-            <MenuIcon size={24} />
+            <MenuIcon size={20} />
           </button>
 
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#22C55E' }} />
-            <h1 className="text-[20px] font-semibold" style={{ color: '#FFFFFF' }}>Nova 1</h1>
+          {/* Center: Nova 1 pill */}
+          <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 active:bg-white/10">
+            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#22C55E' }} />
+            <span className="text-[15px] font-medium" style={{ color: '#FFFFFF' }}>Nova 1</span>
+          </button>
+
+          {/* Right: New chat + More menu */}
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={handleNewChat}
+              className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10"
+              style={{ color: '#FFFFFF' }}
+            >
+              <EditIcon size={20} />
+            </button>
+            <button 
+              onClick={handleOpenMenu}
+              className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10"
+              style={{ color: '#FFFFFF' }}
+            >
+              <MoreHorizontalIcon size={20} />
+            </button>
           </div>
-
-          <button 
-            onClick={handleNewChat}
-            className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
-            style={{ color: '#FFFFFF' }}
-          >
-            <EditIcon size={22} />
-          </button>
         </div>
+
+        {/* Dropdown Menu */}
+        {isMenuOpen && (
+          <>
+            <div 
+              className="fixed inset-0 z-50"
+              onClick={handleCloseMenu}
+            />
+            <div 
+              className="absolute right-4 z-50 w-56 rounded-2xl overflow-hidden shadow-xl"
+              style={{ 
+                top: 'calc(60px + env(safe-area-inset-top))',
+                backgroundColor: '#2C2C2E',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}
+            >
+              {/* Menu Header */}
+              <div className="px-4 py-3 border-b border-white/10">
+                <p className="text-white font-medium text-sm">Nova Chat</p>
+              </div>
+              
+              {/* Menu Items */}
+              <div className="py-1">
+                <button 
+                  onClick={() => handleMenuAction('share')}
+                  className="w-full flex items-center gap-3 px-4 py-3 active:bg-white/10"
+                >
+                  <ShareIcon size={18} className="text-white/70" />
+                  <span className="text-white text-[15px]">Share</span>
+                </button>
+                <button 
+                  onClick={() => handleMenuAction('rename')}
+                  className="w-full flex items-center gap-3 px-4 py-3 active:bg-white/10"
+                >
+                  <EditIcon size={18} className="text-white/70" />
+                  <span className="text-white text-[15px]">Rename</span>
+                </button>
+                <button 
+                  onClick={() => handleMenuAction('archive')}
+                  className="w-full flex items-center gap-3 px-4 py-3 active:bg-white/10"
+                >
+                  <ArchiveIcon size={18} className="text-white/70" />
+                  <span className="text-white text-[15px]">Archive</span>
+                </button>
+                <button 
+                  onClick={() => handleMenuAction('delete')}
+                  className="w-full flex items-center gap-3 px-4 py-3 active:bg-white/10"
+                >
+                  <TrashIcon size={18} className="text-red-400" />
+                  <span className="text-red-400 text-[15px]">Delete</span>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Messages - Scrollable, takes remaining space */}
         <div 
@@ -405,7 +523,6 @@ export function ChatPage() {
                       content={message.content}
                       messageId={message.id}
                       onTypingComplete={() => handleTypingComplete(message.id)}
-                      onChunk={scrollToBottom}
                     />
                   ) : (
                     <div 
@@ -426,13 +543,25 @@ export function ChatPage() {
 
         {/* Input Container - Fixed at bottom, minimal padding */}
         <div 
-          className="flex-shrink-0 px-3"
+          className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
             paddingBottom: '8px',
             backgroundColor: '#000000'
           }}
         >
+          {/* Scroll to bottom button */}
+          {showScrollButton && (
+            <button
+              onClick={scrollToBottom}
+              className="absolute -top-12 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full bg-[#2C2C2E] border border-white/20 flex items-center justify-center shadow-lg active:bg-[#3C3C3E] transition-all"
+              style={{ color: '#FFFFFF' }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M7 13l5 5 5-5M7 6l5 5 5-5" />
+              </svg>
+            </button>
+          )}
           {/* Dark Card */}
           <div 
             className="rounded-[28px] overflow-hidden"
