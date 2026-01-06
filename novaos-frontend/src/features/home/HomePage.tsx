@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// HOME PAGE — Pillowtalk Design
+// HOME PAGE — Pillowtalk Design (iPhone 16 Pro Optimized)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useUIStore } from '@/shared/stores';
@@ -37,18 +37,18 @@ export function HomePage() {
   };
 
   return (
-    <div className="flex flex-col h-full pb-[calc(70px+env(safe-area-inset-bottom))]">
+    <div className="flex flex-col h-full pb-[calc(80px+env(safe-area-inset-bottom))]">
       {/* Header */}
       <header 
-        className="px-5 pb-1"
-        style={{ paddingTop: 'calc(24px + env(safe-area-inset-top))' }}
+        className="px-5 pb-2"
+        style={{ paddingTop: 'calc(16px + env(safe-area-inset-top))' }}
       >
         <p className="text-[15px] text-white/50">{formatDate(new Date())}</p>
         <h1 className="text-[34px] font-light tracking-tight">Overview</h1>
       </header>
 
       {/* Overview/Lessons Tab */}
-      <div className="mx-5 mt-1.5 mb-6 bg-nova-dark rounded-full p-1 flex">
+      <div className="mx-5 mt-2 mb-5 bg-nova-dark rounded-full p-1 flex">
         <button
           onClick={() => { haptic('light'); setHomeTab('overview'); }}
           className={`flex-1 py-2.5 px-5 rounded-full text-[15px] font-medium transition-all flex items-center justify-center gap-2 ${
@@ -73,94 +73,96 @@ export function HomePage() {
         </button>
       </div>
 
-      {/* Widget Grid */}
-      {homeTab === 'overview' && (
-        <div className="px-5 grid grid-cols-2 gap-2.5" style={{ height: '260px' }}>
-          {Object.entries(widgetData).map(([key, data]) => (
-            <button
-              key={key}
-              onClick={() => handleWidgetClick(key)}
-              className="bg-cream rounded-3xl p-4 text-left flex flex-col justify-between active:scale-[0.98] transition-transform"
-            >
-              <span className="text-nova-black/60 text-sm font-medium">
-                {data.label}
-              </span>
-              <div>
-                <div className="text-nova-black text-[48px] font-light leading-none">
-                  {data.value}
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Widget Grid */}
+        {homeTab === 'overview' && (
+          <div className="px-5 grid grid-cols-2 gap-3">
+            {Object.entries(widgetData).map(([key, data]) => (
+              <button
+                key={key}
+                onClick={() => handleWidgetClick(key)}
+                className="bg-cream rounded-3xl p-5 text-left flex flex-col justify-between active:scale-[0.98] transition-transform aspect-square"
+              >
+                <span className="text-nova-black/60 text-sm font-medium">
+                  {data.label}
+                </span>
+                <div>
+                  <div className="text-nova-black text-[42px] font-light leading-none">
+                    {data.value}
+                  </div>
+                  <div className="text-nova-black/50 text-sm mt-1">
+                    {data.sublabel}
+                  </div>
                 </div>
-                <div className="text-nova-black/50 text-sm mt-1">
-                  {data.sublabel}
-                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Lessons Tab Content */}
+        {homeTab === 'lessons' && (
+          <div className="px-5 flex-1 flex items-center justify-center min-h-[300px]">
+            <div className="text-center text-white/50">
+              <span className="text-4xl mb-4 block">📚</span>
+              <p>Lessons coming soon</p>
+            </div>
+          </div>
+        )}
+
+        {/* Spark Section (Task) */}
+        {homeTab === 'overview' && (
+          <div className="mx-5 mt-5 bg-nova-spark rounded-3xl relative overflow-hidden">
+            {/* Task Badge */}
+            <div className="flex items-center gap-2 px-5 pt-5">
+              <div className="flex items-center gap-2 bg-white/10 rounded-full px-3.5 py-2">
+                <BellIcon size={14} className="text-white" />
+                <span className="text-white text-sm font-medium">task</span>
               </div>
+            </div>
+
+            {/* Task Content */}
+            <div className="px-5 pt-4 pb-20">
+              <p className="text-accent text-[15px] leading-relaxed">
+                Review your Q4 investment allocations and rebalance if equity exposure exceeds 70% threshold.
+              </p>
+            </div>
+
+            {/* Wave Background */}
+            <div className="absolute bottom-0 left-0 right-0 h-[70px] overflow-hidden pointer-events-none">
+              <svg
+                className="absolute bottom-0 w-[200%] animate-wave"
+                viewBox="0 0 1200 120"
+                preserveAspectRatio="none"
+                style={{ height: '100%' }}
+              >
+                <path
+                  d="M0,60 C150,120 350,0 600,60 C850,120 1050,0 1200,60 L1200,120 L0,120 Z"
+                  fill="rgba(167,139,250,0.15)"
+                />
+              </svg>
+              <svg
+                className="absolute bottom-0 w-[200%] animate-wave-slow"
+                viewBox="0 0 1200 120"
+                preserveAspectRatio="none"
+                style={{ height: '80%' }}
+              >
+                <path
+                  d="M0,60 C200,0 400,120 600,60 C800,0 1000,120 1200,60 L1200,120 L0,120 Z"
+                  fill="rgba(167,139,250,0.1)"
+                />
+              </svg>
+            </div>
+
+            {/* FAB Button */}
+            <button
+              onClick={handleAddClick}
+              className="absolute bottom-4 right-5 w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-transform z-10"
+            >
+              <PlusIcon size={24} className="text-nova-black" />
             </button>
-          ))}
-        </div>
-      )}
-
-      {/* Lessons Tab Content */}
-      {homeTab === 'lessons' && (
-        <div className="px-5 flex-1 flex items-center justify-center">
-          <div className="text-center text-white/50">
-            <span className="text-4xl mb-4 block">📚</span>
-            <p>Lessons coming soon</p>
           </div>
-        </div>
-      )}
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Spark Section (Task) */}
-      <div className="mx-5 mb-0 bg-nova-spark rounded-t-3xl relative overflow-hidden">
-        {/* Task Badge */}
-        <div className="flex items-center gap-2 px-5 pt-5">
-          <div className="flex items-center gap-2 bg-white/10 rounded-full px-3.5 py-2">
-            <BellIcon size={14} className="text-white" />
-            <span className="text-white text-sm font-medium">task</span>
-          </div>
-        </div>
-
-        {/* Task Content */}
-        <div className="px-5 pt-4 pb-16">
-          <p className="text-accent text-[15px] leading-relaxed">
-            Review your Q4 investment allocations and rebalance if equity exposure exceeds 70% threshold.
-          </p>
-        </div>
-
-        {/* Wave Background */}
-        <div className="absolute bottom-0 left-0 right-0 h-[60px] overflow-hidden pointer-events-none">
-          <svg
-            className="absolute bottom-0 w-[200%] animate-wave"
-            viewBox="0 0 1200 120"
-            preserveAspectRatio="none"
-            style={{ height: '100%' }}
-          >
-            <path
-              d="M0,60 C150,120 350,0 600,60 C850,120 1050,0 1200,60 L1200,120 L0,120 Z"
-              fill="rgba(167,139,250,0.15)"
-            />
-          </svg>
-          <svg
-            className="absolute bottom-0 w-[200%] animate-wave-slow"
-            viewBox="0 0 1200 120"
-            preserveAspectRatio="none"
-            style={{ height: '80%' }}
-          >
-            <path
-              d="M0,60 C200,0 400,120 600,60 C800,0 1000,120 1200,60 L1200,120 L0,120 Z"
-              fill="rgba(167,139,250,0.1)"
-            />
-          </svg>
-        </div>
-
-        {/* FAB Button */}
-        <button
-          onClick={handleAddClick}
-          className="absolute bottom-3 right-5 w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-transform z-10"
-        >
-          <PlusIcon size={24} className="text-nova-black" />
-        </button>
+        )}
       </div>
     </div>
   );
