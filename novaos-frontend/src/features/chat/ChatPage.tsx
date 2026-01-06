@@ -265,10 +265,8 @@ export function ChatPage() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    // Allow Enter to create new lines (default behavior)
+    // User must tap Send button to submit
   };
 
   const handleSend = async () => {
