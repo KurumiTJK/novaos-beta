@@ -296,6 +296,11 @@ export function ChatPage() {
     setIsInputFocused(false);
 
     await sendMessage(text);
+    
+    // Auto-scroll to show user's message at top after sending
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
   };
 
   const handleNewChat = () => {
