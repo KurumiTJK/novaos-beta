@@ -114,7 +114,7 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
         clearTimeout(animationRef.current);
       }
     };
-  }, [content, messageId, onTypingComplete, onChunk]);
+  }, [content, messageId, onTypingComplete]);
 
   return (
     <div 
