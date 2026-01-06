@@ -57,9 +57,18 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
   const [isComplete, setIsComplete] = useState(false);
   const animationRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
+  const hasStartedRef = useRef(false);
+  const onTypingCompleteRef = useRef(onTypingComplete);
+  
+  // Keep callback ref updated
+  onTypingCompleteRef.current = onTypingComplete;
 
   useEffect(() => {
-    // Reset when content changes
+    // Prevent re-running if already started for this message
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+    
+    // Reset state
     setDisplayedContent('');
     setIsComplete(false);
     startTimeRef.current = Date.now();
@@ -68,7 +77,7 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
     if (content.length <= TYPING_CONFIG.instantThreshold) {
       setDisplayedContent(content);
       setIsComplete(true);
-      onTypingComplete?.();
+      onTypingCompleteRef.current?.();
       return;
     }
 
@@ -84,7 +93,7 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
     const typeNextChunk = () => {
       if (currentIndex >= content.length) {
         setIsComplete(true);
-        onTypingComplete?.();
+        onTypingCompleteRef.current?.();
         return;
       }
 
@@ -114,7 +123,7 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
         clearTimeout(animationRef.current);
       }
     };
-  }, [content, messageId, onTypingComplete]);
+  }, [content, messageId]);
 
   return (
     <div 
@@ -275,7 +284,9 @@ export function ChatPage() {
     setInputValue('');
     if (inputRef.current) {
       inputRef.current.innerText = '';
+      inputRef.current.blur(); // Close keyboard
     }
+    setIsInputFocused(false);
 
     await sendMessage(text);
   };
