@@ -52,7 +52,7 @@ interface TypedMessageProps {
   onTypingComplete?: () => void;
 }
 
-function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProps) {
+function TypedMessage({ content, messageId: _messageId, onTypingComplete }: TypedMessageProps) {
   const [displayedContent, setDisplayedContent] = useState('');
   const [isComplete, setIsComplete] = useState(false);
   const animationRef = useRef<number | null>(null);
