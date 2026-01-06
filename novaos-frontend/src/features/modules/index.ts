@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MODULES FEATURE — Public Exports
+// MODULES FEATURE — Exports
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { ModulePage } from './ModulePage';
+export { ModulesPage } from './ModulesPage';
+export { ModuleDetailPage } from './ModuleDetailPage';

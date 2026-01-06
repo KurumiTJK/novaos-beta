@@ -1,194 +1,72 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SHARED HOOKS — Reusable Custom Hooks
+// CUSTOM HOOKS — Novaux
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { haptic } from '../utils';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// useDebounce
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// useLocalStorage
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function useLocalStorage<T>(
-  key: string,
-  initialValue: T
-): [T, (value: T | ((prev: T) => T)) => void] {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch {
-      return initialValue;
-    }
-  });
-
-  const setValue = useCallback(
-    (value: T | ((prev: T) => T)) => {
-      try {
-        const valueToStore = value instanceof Function ? value(storedValue) : value;
-        setStoredValue(valueToStore);
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
-      } catch (error) {
-        console.error(`Error setting localStorage key "${key}":`, error);
-      }
-    },
-    [key, storedValue]
-  );
-
-  return [storedValue, setValue];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// useHaptic
-// ─────────────────────────────────────────────────────────────────────────────────
-
-type HapticStyle = 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error';
-
+/**
+ * Haptic feedback hook
+ */
 export function useHaptic() {
-  return useCallback((style: HapticStyle = 'light') => {
+  return useCallback((style: 'light' | 'medium' | 'heavy' = 'light') => {
     haptic(style);
   }, []);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// useInterval
-// ─────────────────────────────────────────────────────────────────────────────────
+/**
+ * Auto-resize textarea hook
+ */
+export function useAutoResize(maxHeight = 120) {
+  const resize = useCallback((element: HTMLTextAreaElement) => {
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, maxHeight)}px`;
+  }, [maxHeight]);
 
-export function useInterval(callback: () => void, delay: number | null) {
-  const savedCallback = useRef(callback);
-
-  useEffect(() => {
-    savedCallback.current = callback;
-  }, [callback]);
-
-  useEffect(() => {
-    if (delay === null) return;
-
-    const id = setInterval(() => savedCallback.current(), delay);
-    return () => clearInterval(id);
-  }, [delay]);
+  return resize;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// useOnScreen (Intersection Observer)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function useOnScreen<T extends Element>(
-  options?: IntersectionObserverInit
-): [React.RefObject<T>, boolean] {
-  const ref = useRef<T>(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-
-    const observer = new IntersectionObserver(([entry]) => {
-      setIsVisible(entry.isIntersecting);
-    }, options);
-
-    observer.observe(element);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [options]);
-
-  return [ref, isVisible];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// useMediaQuery
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.matchMedia(query).matches;
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(query);
-    const handler = (event: MediaQueryListEvent) => setMatches(event.matches);
-
-    mediaQuery.addEventListener('change', handler);
-    return () => mediaQuery.removeEventListener('change', handler);
-  }, [query]);
-
-  return matches;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// usePrevious
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function usePrevious<T>(value: T): T | undefined {
-  const ref = useRef<T>();
-
-  useEffect(() => {
-    ref.current = value;
-  }, [value]);
-
-  return ref.current;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// useScrollToBottom
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function useScrollToBottom<T extends HTMLElement>(): [
-  React.RefObject<T>,
-  () => void
-] {
+/**
+ * Click outside hook
+ */
+export function useClickOutside<T extends HTMLElement>(
+  callback: () => void
+) {
   const ref = useRef<T>(null);
 
-  const scrollToBottom = useCallback(() => {
-    if (ref.current) {
-      ref.current.scrollTo({
-        top: ref.current.scrollHeight,
-        behavior: 'smooth',
-      });
-    }
-  }, []);
-
-  return [ref, scrollToBottom];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// useKeyPress
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export function useKeyPress(targetKey: string, callback: () => void) {
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === targetKey) {
+    const handleClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
         callback();
       }
     };
 
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [targetKey, callback]);
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [callback]);
+
+  return ref;
+}
+
+/**
+ * Keyboard shortcut hook
+ */
+export function useKeyboard(key: string, callback: () => void, modifier?: 'ctrl' | 'shift' | 'alt') {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const modifierPressed = modifier
+        ? (modifier === 'ctrl' && event.ctrlKey) ||
+          (modifier === 'shift' && event.shiftKey) ||
+          (modifier === 'alt' && event.altKey)
+        : true;
+
+      if (event.key === key && modifierPressed) {
+        event.preventDefault();
+        callback();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [key, callback, modifier]);
 }

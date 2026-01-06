@@ -1,50 +1,12 @@
-# NovaOS Frontend v2
+# Novaux Frontend
 
-A feature-based React PWA for NovaOS — Your Shield, Lens, and Sword.
+A production-grade React PWA for NovaOS — Your Shield, Lens, and Sword.
 
-## 🏗️ Architecture
+## 🎨 Design
 
-This project uses a **feature-based architecture** for scalability:
-
-```
-src/
-├── features/           # Feature modules (self-contained)
-│   ├── auth/           # Authentication
-│   │   ├── authApi.ts
-│   │   ├── authStore.ts
-│   │   └── index.ts
-│   ├── chat/           # Chat functionality
-│   │   ├── chatApi.ts
-│   │   ├── chatStore.ts
-│   │   ├── ChatPage.tsx
-│   │   ├── components/
-│   │   │   └── MessageBubble.tsx
-│   │   └── index.ts
-│   ├── control/        # Crisis mode
-│   │   ├── controlStore.ts
-│   │   ├── ControlPage.tsx
-│   │   ├── components/
-│   │   └── index.ts
-│   ├── sword/          # Learning mode
-│   │   ├── swordStore.ts
-│   │   ├── SwordPage.tsx
-│   │   └── index.ts
-│   ├── dashboard/      # Dashboard
-│   │   ├── DashboardPage.tsx
-│   │   └── index.ts
-│   └── modules/        # Domain modules
-│       ├── ModulePage.tsx
-│       └── index.ts
-├── shared/             # Shared code
-│   ├── api/            # HTTP client
-│   ├── components/     # UI primitives
-│   ├── hooks/          # Custom hooks
-│   ├── types/          # TypeScript types
-│   └── utils/          # Helpers & theme
-├── styles/             # Global CSS
-├── App.tsx             # Root component
-└── main.tsx            # Entry point
-```
+- **Home**: Pillowtalk-inspired dashboard with Overview/Lessons tabs
+- **Chat**: Grok-style chat interface (Novaux 1)
+- **Modules**: Finance, Health, Calendar, Reminders, Weather, Email
 
 ## 🚀 Quick Start
 
@@ -57,102 +19,53 @@ npm run dev
 
 # Build for production
 npm run build
-
-# Preview production build
-npm run preview
 ```
 
-## 🛠️ Tech Stack
+## 🔗 Backend
 
-| Category | Technology |
-|----------|------------|
-| Framework | React 18 |
-| Language | TypeScript |
-| Build Tool | Vite |
-| Styling | Tailwind CSS |
-| State | Zustand |
-| Server State | React Query |
-| Animations | Framer Motion |
-| Routing | React Router |
-| PWA | Vite PWA Plugin |
+The frontend connects to your NovaOS backend at `http://localhost:3000`.
 
-## 📱 Features
+API endpoints used:
+- `POST /api/v1/auth/register` — Auto-register on first load
+- `GET /api/v1/auth/status` — Check auth status
+- `POST /api/v1/chat` — Send messages
 
-### Stances (Constitutional AI Modes)
+## 📁 Project Structure
 
-| Stance | Color | Purpose |
-|--------|-------|---------|
-| 🛑 Control | Red | Crisis stabilization |
-| 🛡️ Shield | Amber | Protection from harm |
-| 🔍 Lens | Blue | Clarity and understanding |
-| ⚔️ Sword | Green | Forward progress |
-
-### Screens
-
-1. **Dashboard** — Home screen with quick actions
-2. **Chat** — Main Nova conversation interface
-3. **Control** — Crisis mode with vitals, location, action plan
-4. **Sword** — Structured learning paths
-5. **Modules** — Domain-specific interfaces (Finance, Health, etc.)
-
-## 🐳 Docker Deployment
-
-```bash
-# Full stack (frontend + backend + redis)
-docker-compose up -d
-
-# Frontend only
-docker build -t novaos-frontend .
-docker run -p 80:80 novaos-frontend
+```
+src/
+├── app/                    # App shell
+├── features/
+│   ├── home/               # Pillowtalk dashboard
+│   ├── chat/               # Grok-style chat
+│   ├── modules/            # Module screens
+│   ├── skills/             # Skills (placeholder)
+│   └── settings/           # Settings page
+├── shared/
+│   ├── api/                # HTTP client
+│   ├── components/         # UI components
+│   ├── hooks/              # Custom hooks
+│   ├── stores/             # Zustand stores
+│   ├── types/              # TypeScript types
+│   └── utils/              # Utilities
+└── styles/                 # Global CSS
 ```
 
-## 📦 API Integration
+## 🛠 Tech Stack
 
-The frontend integrates with the NovaOS backend API:
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- Zustand
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/v1/chat` | Send message, get response |
-| `POST /api/v1/parse-command` | Preview intent |
-| `GET /api/v1/conversations` | List conversations |
-| `POST /api/v1/auth/register` | Auto-register user |
+## 📲 PWA
 
-## 🎨 Design System
-
-### Colors
-
-- **Gray 950**: `#0a0a0a` (OLED black)
-- **Control**: `#ef4444` (Red 500)
-- **Shield**: `#f59e0b` (Amber 500)
-- **Lens**: `#3b82f6` (Blue 500)
-- **Sword**: `#10b981` (Emerald 500)
-
-### Typography
-
-SF Pro Display / System fonts for native feel.
-
-## 📲 PWA Installation
-
-**iOS Safari:**
-1. Open the app in Safari
+Install on iPhone:
+1. Open in Safari
 2. Tap Share → Add to Home Screen
 3. Tap Add
 
-**Android Chrome:**
-1. Open the app in Chrome
-2. Tap menu → Install app
-3. Tap Install
-
-## 🔧 Development
-
-```bash
-# Type checking
-npm run type-check
-
-# Linting
-npm run lint
-```
-
 ## 📄 License
 
-Private — Anthropic / NovaOS Project
+Private — NovaOS Project

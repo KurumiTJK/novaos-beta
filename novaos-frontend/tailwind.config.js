@@ -1,56 +1,57 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        gray: {
-          950: '#0a0a0a',
+        // Core backgrounds
+        nova: {
+          black: '#000000',
+          dark: '#1C1C1E',
+          spark: '#1A1625',
         },
-        control: '#ef4444',
-        shield: '#f59e0b',
-        lens: '#3b82f6',
-        sword: '#10b981',
+        // Light cards (Pillowtalk cream)
+        cream: {
+          DEFAULT: '#F2F2F0',
+          dark: '#E8E6E1',
+        },
+        // Chat background (Grok beige)
+        beige: {
+          DEFAULT: '#F5F3EE',
+          dark: '#E8E6E1',
+        },
+        // Accent purple
+        accent: {
+          DEFAULT: '#C4B5FD',
+          dim: 'rgba(196,181,253,0.7)',
+          purple: '#A78BFA',
+          dark: '#5B4B82',
+        },
       },
       fontFamily: {
         sans: [
           '-apple-system',
           'BlinkMacSystemFont',
           'SF Pro Display',
-          'Segoe UI',
-          'Roboto',
+          'system-ui',
           'sans-serif',
         ],
       },
-      borderRadius: {
-        '4xl': '2rem',
-        '5xl': '2.5rem',
+      spacing: {
+        'safe-top': 'env(safe-area-inset-top)',
+        'safe-bottom': 'env(safe-area-inset-bottom)',
+        'safe-left': 'env(safe-area-inset-left)',
+        'safe-right': 'env(safe-area-inset-right)',
       },
       animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'fade-in': 'fadeIn 0.3s ease-out',
-        'slide-up': 'slideUp 0.3s ease-out',
-        'slide-down': 'slideDown 0.3s ease-out',
+        'bounce-dots': 'bounce-dots 1.4s infinite ease-in-out',
+        'pulse-slow': 'pulse 3s infinite',
       },
       keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
+        'bounce-dots': {
+          '0%, 80%, 100%': { transform: 'scale(0.6)', opacity: '0.4' },
+          '40%': { transform: 'scale(1)', opacity: '1' },
         },
-        slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(20px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        slideDown: {
-          '0%': { opacity: '0', transform: 'translateY(-20px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-      },
-      boxShadow: {
-        'glow-sm': '0 0 10px rgba(59, 130, 246, 0.3)',
-        'glow-md': '0 0 20px rgba(59, 130, 246, 0.4)',
-        'glow-lg': '0 0 30px rgba(59, 130, 246, 0.5)',
       },
     },
   },

@@ -2,97 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-    
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Nova" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    
-    <!-- Icons -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    
-    <!-- Preconnect -->
-    <link rel="preconnect" href="/api" />
-    
-    <!-- Open Graph -->
-    <meta property="og:title" content="NovaOS" />
-    <meta property="og:description" content="Your Shield, Lens, and Sword" />
-    <meta property="og:type" content="website" />
-    
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="NovaOS" />
-    <meta name="twitter:description" content="Your Shield, Lens, and Sword" />
-    
-    <!-- iOS Splash Screens -->
-    <link rel="apple-touch-startup-image" href="/splash-390x844.png" media="(device-width: 390px) and (device-height: 844px)" />
-    <link rel="apple-touch-startup-image" href="/splash-428x926.png" media="(device-width: 428px) and (device-height: 926px)" />
-    
+    <meta name="apple-mobile-web-app-title" content="NovaOS" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>NovaOS</title>
-    
-    <!-- Critical CSS -->
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        background-color: #0a0a0a;
-        color: #fff;
-        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-      }
-      
-      #root {
-        min-height: 100vh;
-        min-height: 100dvh;
-      }
-      
-      /* Loading State */
-      .loading-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        height: 100dvh;
-      }
-      
-      .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid rgba(59, 130, 246, 0.2);
-        border-top-color: #3b82f6;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-      }
-      
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-      
-      /* Safe Area Padding */
-      @supports (padding: env(safe-area-inset-top)) {
-        #root {
-          padding-top: env(safe-area-inset-top);
-          padding-bottom: env(safe-area-inset-bottom);
-          padding-left: env(safe-area-inset-left);
-          padding-right: env(safe-area-inset-right);
-        }
-      }
-    </style>
   </head>
   <body>
-    <div id="root">
-      <!-- Initial Loading State -->
-      <div class="loading-container">
-        <div class="loading-spinner"></div>
-      </div>
-    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
