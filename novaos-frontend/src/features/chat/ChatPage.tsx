@@ -220,20 +220,19 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Scroll to bottom when new message sent - the flex spacer will keep user message visible at top
+  // Scroll to position user message at top of viewport
   useEffect(() => {
-    if (shouldScrollToUser && messagesContainerRef.current) {
+    if (shouldScrollToUser) {
       requestAnimationFrame(() => {
         setTimeout(() => {
-          const container = messagesContainerRef.current;
-          if (container) {
-            container.scrollTo({
-              top: container.scrollHeight,
-              behavior: 'smooth'
+          if (lastUserMessageRef.current) {
+            lastUserMessageRef.current.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'start' 
             });
           }
           setShouldScrollToUser(false);
-        }, 50);
+        }, 100);
       });
     }
   }, [shouldScrollToUser, messages]);
@@ -544,24 +543,20 @@ export function ChatPage() {
         {/* Messages - Scrollable, takes remaining space */}
         <div 
           ref={messagesContainerRef}
-          className="flex-1 overflow-y-auto px-5 py-5 min-h-0 flex flex-col"
+          className="flex-1 overflow-y-auto px-5 pt-5 min-h-0"
+          style={{ paddingBottom: '60vh' }}
         >
-          {/* Spacer to push content down when there's little content */}
-          <div className="flex-1 min-h-0" />
-          
-          {/* Messages container */}
-          <div>
-            {messages.map((message, index) => {
-              // Check if this is the last user message in the array
-              const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
-              const isLastUserMessage = message.role === 'user' && index === lastUserIndex;
-              
-              return (
-                <div 
-                  key={message.id} 
-                  className="mb-5"
-                  ref={isLastUserMessage ? lastUserMessageRef : null}
-                >
+          {messages.map((message, index) => {
+            // Check if this is the last user message in the array
+            const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
+            const isLastUserMessage = message.role === 'user' && index === lastUserIndex;
+            
+            return (
+              <div 
+                key={message.id} 
+                className="mb-5"
+                ref={isLastUserMessage ? lastUserMessageRef : null}
+              >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
                     <div 
@@ -601,7 +596,6 @@ export function ChatPage() {
             );
           })}
           <div ref={messagesEndRef} />
-          </div>
         </div>
 
         {/* Input Container - Fixed at bottom */}
