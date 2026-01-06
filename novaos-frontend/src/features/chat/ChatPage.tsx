@@ -159,6 +159,7 @@ export function ChatPage() {
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [shouldScrollToUser, setShouldScrollToUser] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -218,6 +219,14 @@ export function ChatPage() {
     setShowScrollButton(false);
     userScrolledRef.current = false;
   }, [haptic]);
+
+  // Scroll to last user message when triggered
+  useEffect(() => {
+    if (shouldScrollToUser && lastUserMessageRef.current) {
+      lastUserMessageRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setShouldScrollToUser(false);
+    }
+  }, [shouldScrollToUser, messages]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
@@ -296,15 +305,11 @@ export function ChatPage() {
     }
     setIsInputFocused(false);
 
+    // Set flag to scroll after message is added
+    setShouldScrollToUser(true);
+
     // Start sending (don't await - let it happen in background)
     sendMessage(text);
-    
-    // Auto-scroll to show user's message at top after sending
-    setTimeout(() => {
-      if (lastUserMessageRef.current) {
-        lastUserMessageRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 100);
   };
 
   const handleNewChat = () => {
