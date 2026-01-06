@@ -228,15 +228,21 @@ export function ChatPage() {
           const container = messagesContainerRef.current;
           const userMessage = lastUserMessageRef.current;
           
+          console.log('Scroll triggered');
+          console.log('Container:', container);
+          console.log('User message ref:', userMessage);
+          
           if (container && userMessage) {
-            // Get the user message's position relative to the container's scroll
             const userMessageTop = userMessage.offsetTop;
+            console.log('User message offsetTop:', userMessageTop);
+            console.log('Scrolling to:', userMessageTop - 20);
             
-            // Scroll so the user message is about 20px from the top of the container
             container.scrollTo({
               top: userMessageTop - 20,
               behavior: 'smooth'
             });
+          } else {
+            console.log('Missing ref - container:', !!container, 'userMessage:', !!userMessage);
           }
           setShouldScrollToUser(false);
         }, 50);
