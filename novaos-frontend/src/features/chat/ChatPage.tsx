@@ -220,27 +220,26 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Scroll to last user message when triggered
+  // Scroll to last user message when triggered - position it near top of viewport
   useEffect(() => {
-    if (shouldScrollToUser) {
-      // Use requestAnimationFrame to ensure DOM has updated
+    if (shouldScrollToUser && messagesContainerRef.current) {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (lastUserMessageRef.current && messagesContainerRef.current) {
-            const container = messagesContainerRef.current;
-            const userMessage = lastUserMessageRef.current;
+        setTimeout(() => {
+          const container = messagesContainerRef.current;
+          const userMessage = lastUserMessageRef.current;
+          
+          if (container && userMessage) {
+            // Get the user message's position relative to the container's scroll
+            const userMessageTop = userMessage.offsetTop;
             
-            // Calculate scroll position to put user message at top of container
-            const messageOffsetTop = userMessage.offsetTop;
-            const scrollPosition = messageOffsetTop - 20; // 20px padding from top
-            
+            // Scroll so the user message is about 20px from the top of the container
             container.scrollTo({
-              top: scrollPosition,
+              top: userMessageTop - 20,
               behavior: 'smooth'
             });
           }
           setShouldScrollToUser(false);
-        });
+        }, 50);
       });
     }
   }, [shouldScrollToUser, messages]);
