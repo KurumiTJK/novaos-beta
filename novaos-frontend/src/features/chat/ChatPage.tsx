@@ -56,51 +56,47 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
   const [displayedContent, setDisplayedContent] = useState('');
   const [isComplete, setIsComplete] = useState(false);
   const animationRef = useRef<number | null>(null);
-  const startTimeRef = useRef<number>(0);
-  const hasStartedRef = useRef(false);
-  const onTypingCompleteRef = useRef(onTypingComplete);
-  
-  // Keep callback ref updated
-  onTypingCompleteRef.current = onTypingComplete;
+  const initialContentRef = useRef(content);
+  const hasCompletedRef = useRef(false);
 
   useEffect(() => {
-    // Prevent re-running if already started for this message
-    if (hasStartedRef.current) return;
-    hasStartedRef.current = true;
+    // Use the initial content only - ignore any updates
+    const textToType = initialContentRef.current;
     
-    // Reset state
-    setDisplayedContent('');
-    setIsComplete(false);
-    startTimeRef.current = Date.now();
+    // Already completed, don't restart
+    if (hasCompletedRef.current) return;
 
     // Short responses: render instantly
-    if (content.length <= TYPING_CONFIG.instantThreshold) {
-      setDisplayedContent(content);
+    if (textToType.length <= TYPING_CONFIG.instantThreshold) {
+      setDisplayedContent(textToType);
       setIsComplete(true);
-      onTypingCompleteRef.current?.();
+      hasCompletedRef.current = true;
+      onTypingComplete?.();
       return;
     }
 
     // Calculate delay to fit within maxAnimationTime
-    const totalChunks = Math.ceil(content.length / TYPING_CONFIG.chunkSize);
+    const totalChunks = Math.ceil(textToType.length / TYPING_CONFIG.chunkSize);
     const calculatedDelay = Math.min(
       TYPING_CONFIG.baseDelay,
       TYPING_CONFIG.maxAnimationTime / totalChunks
     );
 
     let currentIndex = 0;
+    const startTime = Date.now();
 
     const typeNextChunk = () => {
-      if (currentIndex >= content.length) {
+      if (currentIndex >= textToType.length) {
         setIsComplete(true);
-        onTypingCompleteRef.current?.();
+        hasCompletedRef.current = true;
+        onTypingComplete?.();
         return;
       }
 
       // Adaptive speed: go faster if we're behind schedule
-      const elapsed = Date.now() - startTimeRef.current;
+      const elapsed = Date.now() - startTime;
       const expectedProgress = elapsed / TYPING_CONFIG.maxAnimationTime;
-      const actualProgress = currentIndex / content.length;
+      const actualProgress = currentIndex / textToType.length;
       
       // If behind, catch up by increasing chunk size
       let chunkSize = TYPING_CONFIG.chunkSize;
@@ -108,14 +104,14 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
         chunkSize = Math.ceil(TYPING_CONFIG.chunkSize * 2);
       }
 
-      const nextIndex = Math.min(currentIndex + chunkSize, content.length);
-      setDisplayedContent(content.slice(0, nextIndex));
+      const nextIndex = Math.min(currentIndex + chunkSize, textToType.length);
+      setDisplayedContent(textToType.slice(0, nextIndex));
       currentIndex = nextIndex;
 
       animationRef.current = window.setTimeout(typeNextChunk, calculatedDelay);
     };
 
-    // Start typing
+    // Start typing after a small delay
     animationRef.current = window.setTimeout(typeNextChunk, 50);
 
     return () => {
@@ -123,7 +119,9 @@ function TypedMessage({ content, messageId, onTypingComplete }: TypedMessageProp
         clearTimeout(animationRef.current);
       }
     };
-  }, [content, messageId]);
+  // Only run once on mount - ignore all prop changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div 
@@ -223,22 +221,31 @@ export function ChatPage() {
   // Track new assistant messages for typing animation
   useEffect(() => {
     messages.forEach(msg => {
-      if (msg.role === 'assistant' && !msg.isLoading && !seenMessagesRef.current.has(msg.id)) {
+      // Only add to typing if:
+      // 1. It's an assistant message
+      // 2. Not loading
+      // 3. Not already seen
+      // 4. Not already in typing queue
+      if (
+        msg.role === 'assistant' && 
+        !msg.isLoading && 
+        !seenMessagesRef.current.has(msg.id) &&
+        !typingMessageIds.has(msg.id)
+      ) {
+        // Mark as seen immediately to prevent double-adding
+        seenMessagesRef.current.add(msg.id);
         setTypingMessageIds(prev => new Set(prev).add(msg.id));
-        // Show scroll button when new message arrives (if not at bottom)
         checkScrollPosition();
       }
     });
-  }, [messages, checkScrollPosition]);
+  }, [messages, checkScrollPosition, typingMessageIds]);
 
   const handleTypingComplete = useCallback((messageId: string) => {
-    seenMessagesRef.current.add(messageId);
     setTypingMessageIds(prev => {
       const next = new Set(prev);
       next.delete(messageId);
       return next;
     });
-    // Check if we should show scroll button after typing completes
     checkScrollPosition();
   }, [checkScrollPosition]);
 
