@@ -151,20 +151,20 @@ export function ChatPage() {
       <div 
         className="px-4 pt-2"
         style={{ 
-          paddingBottom: 'calc(20px + env(safe-area-inset-bottom))',
+          paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
           backgroundColor: '#F5F3EE'
         }}
       >
         {/* White Card */}
         <div 
-          className="rounded-[28px] overflow-hidden"
+          className="rounded-[32px] overflow-hidden"
           style={{ 
             backgroundColor: '#FFFFFF',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
+            boxShadow: '0 2px 16px rgba(0,0,0,0.06)'
           }}
         >
           {/* Textarea */}
-          <div className="px-5 pt-4 pb-2">
+          <div className="px-5 pt-5 pb-3">
             <textarea
               ref={inputRef}
               value={inputValue}
@@ -185,25 +185,25 @@ export function ChatPage() {
           <div className="flex items-center px-3 pb-3 gap-2">
             {/* Attach button */}
             <button 
-              className="w-10 h-10 flex items-center justify-center rounded-full"
-              style={{ backgroundColor: '#F5F3EE', color: '#1A1A1A' }}
+              className="w-10 h-10 flex items-center justify-center rounded-full border border-gray-200"
+              style={{ color: '#1A1A1A' }}
             >
               <AttachIcon size={20} />
             </button>
 
-            {/* DeepSearch pill */}
+            {/* DeepSearch pill - outlined style */}
             <button 
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium"
-              style={{ backgroundColor: '#F5F3EE', color: '#1A1A1A' }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm font-medium"
+              style={{ color: '#1A1A1A' }}
             >
               <SearchIcon size={16} />
               <span>DeepSearch</span>
             </button>
 
-            {/* Think pill */}
+            {/* Think pill - outlined style */}
             <button 
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium"
-              style={{ backgroundColor: '#F5F3EE', color: '#1A1A1A' }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm font-medium"
+              style={{ color: '#1A1A1A' }}
             >
               <LightbulbIcon size={16} />
               <span>Think</span>
@@ -214,13 +214,13 @@ export function ChatPage() {
 
             {/* Mic button */}
             <button className="w-10 h-10 flex items-center justify-center text-gray-400">
-              <MicIcon size={20} />
+              <MicIcon size={22} />
             </button>
 
             {/* Voice/Send/Stop button */}
             {isLoading ? (
               <button 
-                className="w-11 h-11 rounded-full flex items-center justify-center"
+                className="w-12 h-12 rounded-full flex items-center justify-center"
                 style={{ backgroundColor: '#1A1A1A' }}
               >
                 <div className="w-4 h-4 bg-white rounded-sm" />
@@ -228,17 +228,17 @@ export function ChatPage() {
             ) : hasInput ? (
               <button
                 onClick={handleSend}
-                className="w-11 h-11 rounded-full flex items-center justify-center text-white active:opacity-80"
+                className="w-12 h-12 rounded-full flex items-center justify-center text-white active:opacity-80"
                 style={{ backgroundColor: '#1A1A1A' }}
               >
                 <SendIcon size={20} />
               </button>
             ) : (
               <button 
-                className="w-11 h-11 rounded-full flex items-center justify-center text-white"
+                className="w-12 h-12 rounded-full flex items-center justify-center text-white"
                 style={{ backgroundColor: '#1A1A1A' }}
               >
-                <VoiceWaveIcon size={20} />
+                <VoiceWaveIcon size={22} />
               </button>
             )}
           </div>
