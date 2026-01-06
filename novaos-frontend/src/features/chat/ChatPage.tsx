@@ -264,7 +264,7 @@ export function ChatPage() {
     autoResize(e.target);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (_e: React.KeyboardEvent) => {
     // Allow Enter to create new lines (default behavior)
     // User must tap Send button to submit
   };
