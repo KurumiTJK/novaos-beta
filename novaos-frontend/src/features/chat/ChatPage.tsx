@@ -636,7 +636,10 @@ export function ChatPage() {
                 contentEditable
                 onInput={handleContentEditableInput}
                 onPaste={handlePaste}
-                onFocus={() => setIsInputFocused(true)}
+                onFocus={() => {
+                  // Delay to sync with iOS keyboard animation
+                  setTimeout(() => setIsInputFocused(true), 50);
+                }}
                 onBlur={() => setIsInputFocused(false)}
                 data-placeholder="Ask Anything"
                 className="w-full bg-transparent text-[16px] outline-none leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-white/40 break-words"
