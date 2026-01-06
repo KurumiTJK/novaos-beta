@@ -124,7 +124,7 @@ export const LLMProviderSchema = z.enum(['openai', 'gemini', 'mock']);
 
 export const LLMConfigSchema = z.object({
   provider: LLMProviderSchema.default('openai'),
-  model: z.string().default('gpt-4o'),
+  model: z.string().default('gpt-5.2'),
   timeoutMs: z.number().int().min(1000).default(30000),
   maxTokens: z.number().int().min(1).default(4000),
   maxInputTokens: z.number().int().min(1).default(8000),
