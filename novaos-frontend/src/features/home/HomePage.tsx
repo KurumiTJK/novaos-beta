@@ -4,7 +4,6 @@
 
 import { useUIStore } from '@/shared/stores';
 import { useHaptic } from '@/shared/hooks';
-import { formatDate } from '@/shared/utils';
 import { BellIcon, PlusIcon, SettingsIcon } from '@/shared/components';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -60,10 +59,7 @@ export function HomePage() {
         </button>
 
         {/* Centered Title */}
-        <div className="text-center">
-          <p className="text-[13px] text-white/50">{formatDate(new Date())}</p>
-          <h1 className="text-[20px] font-semibold tracking-tight">NovaOS Home</h1>
-        </div>
+        <h1 className="text-[20px] font-semibold tracking-tight">NovaOS Home</h1>
 
         {/* Empty spacer for balance */}
         <div className="w-10 h-10" />

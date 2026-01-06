@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CHAT PAGE — Dark Mode Grok Design (iPhone 16 Pro Optimized)
+// CHAT PAGE — Dark Mode with Sidebar Navigation
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect } from 'react';
@@ -7,12 +7,11 @@ import { useUIStore, useChatStore } from '@/shared/stores';
 import { useHaptic, useAutoResize } from '@/shared/hooks';
 import { LoadingDots } from '@/shared/components';
 import {
-  CloseIcon,
-  ChevronRightIcon,
+  MenuIcon,
   EditIcon,
   AttachIcon,
-  SearchIcon,
-  LightbulbIcon,
+  HomeIcon,
+  LockIcon,
   MicIcon,
   VoiceWaveIcon,
   SendIcon,
@@ -21,15 +20,26 @@ import {
   ShareIcon,
   ThumbsUpIcon,
   ThumbsDownIcon,
+  SearchIcon,
+  MoreIcon,
 } from '@/shared/components/Icons';
 
+// Mock chat history data
+const chatHistory = [
+  { id: '1', title: 'Investment Strategy Q4', date: 'Today' },
+  { id: '2', title: 'Health Goals Review', date: 'Today' },
+  { id: '3', title: 'Calendar Planning', date: 'Yesterday' },
+];
+
 export function ChatPage() {
-  const { closeChat } = useUIStore();
+  const { closeChat, setActiveTab } = useUIStore();
   const { messages, isLoading, sendMessage } = useChatStore();
   const haptic = useHaptic();
   const autoResize = useAutoResize();
   
   const [inputValue, setInputValue] = useState('');
+  const [isIncognito, setIsIncognito] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -47,9 +57,25 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleClose = () => {
+  const handleOpenSidebar = () => {
+    haptic('light');
+    setIsSidebarOpen(true);
+  };
+
+  const handleCloseSidebar = () => {
+    haptic('light');
+    setIsSidebarOpen(false);
+  };
+
+  const handleExit = () => {
     haptic('light');
     closeChat();
+    setActiveTab('home');
+  };
+
+  const handleIncognitoToggle = () => {
+    haptic('light');
+    setIsIncognito(!isIncognito);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -78,182 +104,282 @@ export function ChatPage() {
   };
 
   const handleInputFocus = () => {
-    // Scroll to bottom when keyboard opens
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 300);
+  };
+
+  const handleNewChat = () => {
+    haptic('medium');
+    setIsSidebarOpen(false);
+    // TODO: Clear chat and start new
   };
 
   const hasInput = inputValue.trim().length > 0;
 
   return (
     <div 
-      className="fixed inset-0 max-w-[430px] mx-auto flex flex-col z-50"
+      className="fixed inset-0 max-w-[430px] mx-auto flex z-50"
       style={{ backgroundColor: '#000000' }}
     >
-      {/* Header - Fixed */}
-      <div 
-        className="flex-shrink-0 flex items-center justify-between px-5 py-3"
-        style={{ 
-          paddingTop: 'calc(12px + env(safe-area-inset-top))',
-          backgroundColor: '#000000'
-        }}
-      >
-        <button
-          onClick={handleClose}
-          className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
-          style={{ color: '#FFFFFF' }}
-        >
-          <CloseIcon size={24} />
-        </button>
-
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#22C55E' }} />
-          <span className="font-semibold text-lg" style={{ color: '#FFFFFF' }}>Nova 1</span>
-          <ChevronRightIcon size={16} className="text-white/40" />
-        </div>
-
-        <button 
-          className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
-          style={{ color: '#FFFFFF' }}
-        >
-          <EditIcon size={22} />
-        </button>
-      </div>
-
-      {/* Messages - Scrollable, takes remaining space */}
-      <div 
-        ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto px-5 py-5 min-h-0"
-      >
-        {messages.map((message) => (
-          <div key={message.id} className="mb-5">
-            {message.role === 'user' ? (
-              <div className="flex justify-end">
-                <div 
-                  className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
-                  style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
-                >
-                  {message.content}
-                </div>
-              </div>
-            ) : message.isLoading ? (
-              <div className="py-2">
-                <LoadingDots />
-              </div>
-            ) : (
-              <div className="pr-10">
-                <div 
-                  className="text-[17px] leading-[1.7]"
-                  style={{ color: '#FFFFFF' }}
-                  dangerouslySetInnerHTML={{ 
-                    __html: formatResponse(message.content) 
-                  }}
-                />
-                <MessageActions />
-              </div>
-            )}
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input Container - Fixed at bottom, minimal padding */}
-      <div 
-        className="flex-shrink-0 px-3"
-        style={{ 
-          paddingTop: '8px',
-          paddingBottom: '8px',
-          backgroundColor: '#000000'
-        }}
-      >
-        {/* Dark Card */}
+      {/* Sidebar Overlay */}
+      {isSidebarOpen && (
         <div 
-          className="rounded-[28px] overflow-hidden"
+          className="absolute inset-0 bg-black/50 z-40"
+          onClick={handleCloseSidebar}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div 
+        className={`absolute top-0 left-0 h-full w-[85%] max-w-[320px] z-50 transform transition-transform duration-300 ease-out ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        style={{ backgroundColor: '#FFFFFF' }}
+      >
+        <div 
+          className="flex flex-col h-full"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        >
+          {/* Search Bar */}
+          <div className="px-4 pt-4 pb-2">
+            <div className="flex items-center gap-3 px-4 py-3 bg-gray-100 rounded-xl">
+              <SearchIcon size={18} className="text-gray-400" />
+              <span className="text-gray-400 text-[15px]">Search</span>
+            </div>
+          </div>
+
+          {/* Nova Option */}
+          <div className="px-4 py-2">
+            <button className="w-full flex items-center gap-3 px-4 py-3 bg-gray-100 rounded-xl">
+              <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center">
+                <span className="text-white text-xs font-bold">N</span>
+              </div>
+              <span className="text-black font-medium">Nova 1</span>
+            </button>
+          </div>
+
+          {/* Explore / Modules */}
+          <div className="px-4 py-2">
+            <button 
+              onClick={() => { handleCloseSidebar(); closeChat(); setActiveTab('modules'); }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl active:bg-gray-100"
+            >
+              <div className="w-8 h-8 flex items-center justify-center">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="7" height="7" />
+                  <rect x="14" y="3" width="7" height="7" />
+                  <rect x="14" y="14" width="7" height="7" />
+                  <rect x="3" y="14" width="7" height="7" />
+                </svg>
+              </div>
+              <span className="text-black">Explore Modules</span>
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div className="mx-4 my-2 border-t border-gray-200" />
+
+          {/* Chat History */}
+          <div className="flex-1 overflow-y-auto px-4">
+            {chatHistory.map((chat, index) => (
+              <div key={chat.id}>
+                {(index === 0 || chatHistory[index - 1].date !== chat.date) && (
+                  <p className="text-xs text-gray-400 mt-4 mb-2 px-2">{chat.date}</p>
+                )}
+                <button className="w-full text-left px-4 py-3 rounded-xl active:bg-gray-100">
+                  <span className="text-black text-[15px]">{chat.title}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* User Profile */}
+          <div 
+            className="px-4 py-4 border-t border-gray-200"
+            style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+          >
+            <button className="w-full flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+                  <span className="text-white font-semibold">V</span>
+                </div>
+                <span className="text-black font-medium">Vant</span>
+              </div>
+              <MoreIcon size={20} className="text-gray-400" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header - Fixed */}
+        <div 
+          className="flex-shrink-0 flex items-center justify-between px-5 py-3"
           style={{ 
-            backgroundColor: '#1C1C1E',
-            border: '1px solid rgba(255,255,255,0.1)'
+            paddingTop: 'calc(12px + env(safe-area-inset-top))',
+            backgroundColor: '#000000'
           }}
         >
-          {/* Textarea */}
-          <div className="px-4 pt-3 pb-2">
-            <textarea
-              ref={inputRef}
-              value={inputValue}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              onFocus={handleInputFocus}
-              placeholder="Ask Anything"
-              rows={1}
-              className="w-full bg-transparent text-[16px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
-              style={{ 
-                color: '#FFFFFF',
-                minHeight: '22px', 
-                maxHeight: '80px' 
-              }}
-            />
-          </div>
+          <button
+            onClick={handleOpenSidebar}
+            className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
+            style={{ color: '#FFFFFF' }}
+          >
+            <MenuIcon size={24} />
+          </button>
 
-          {/* Bottom toolbar */}
-          <div className="flex items-center px-2 pb-2 gap-1.5">
-            {/* Attach button */}
-            <button 
-              className="w-9 h-9 flex items-center justify-center rounded-full border border-white/20"
-              style={{ color: '#FFFFFF' }}
-            >
-              <AttachIcon size={18} />
-            </button>
+          <h1 className="text-[20px] font-semibold" style={{ color: '#FFFFFF' }}>Nova 1</h1>
 
-            {/* DeepSearch pill - outlined style */}
-            <button 
-              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium"
-              style={{ color: '#FFFFFF' }}
-            >
-              <SearchIcon size={14} />
-              <span>DeepSearch</span>
-            </button>
+          <button 
+            onClick={handleNewChat}
+            className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10"
+            style={{ color: '#FFFFFF' }}
+          >
+            <EditIcon size={22} />
+          </button>
+        </div>
 
-            {/* Think pill - outlined style */}
-            <button 
-              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium"
-              style={{ color: '#FFFFFF' }}
-            >
-              <LightbulbIcon size={14} />
-              <span>Think</span>
-            </button>
+        {/* Messages - Scrollable, takes remaining space */}
+        <div 
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto px-5 py-5 min-h-0"
+        >
+          {messages.map((message) => (
+            <div key={message.id} className="mb-5">
+              {message.role === 'user' ? (
+                <div className="flex justify-end">
+                  <div 
+                    className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
+                    style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
+                  >
+                    {message.content}
+                  </div>
+                </div>
+              ) : message.isLoading ? (
+                <div className="py-2">
+                  <LoadingDots />
+                </div>
+              ) : (
+                <div className="pr-10">
+                  <div 
+                    className="text-[17px] leading-[1.7]"
+                    style={{ color: '#FFFFFF' }}
+                    dangerouslySetInnerHTML={{ 
+                      __html: formatResponse(message.content) 
+                    }}
+                  />
+                  <MessageActions />
+                </div>
+              )}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
 
-            {/* Spacer */}
-            <div className="flex-1" />
+        {/* Input Container - Fixed at bottom, minimal padding */}
+        <div 
+          className="flex-shrink-0 px-3"
+          style={{ 
+            paddingTop: '8px',
+            paddingBottom: '8px',
+            backgroundColor: '#000000'
+          }}
+        >
+          {/* Dark Card */}
+          <div 
+            className="rounded-[28px] overflow-hidden"
+            style={{ 
+              backgroundColor: '#1C1C1E',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}
+          >
+            {/* Textarea */}
+            <div className="px-4 pt-3 pb-2">
+              <textarea
+                ref={inputRef}
+                value={inputValue}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onFocus={handleInputFocus}
+                placeholder="Ask Anything"
+                rows={1}
+                className="w-full bg-transparent text-[16px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
+                style={{ 
+                  color: '#FFFFFF',
+                  minHeight: '22px', 
+                  maxHeight: '80px' 
+                }}
+              />
+            </div>
 
-            {/* Mic button */}
-            <button className="w-9 h-9 flex items-center justify-center text-white/40">
-              <MicIcon size={20} />
-            </button>
-
-            {/* Voice/Send/Stop button */}
-            {isLoading ? (
+            {/* Bottom toolbar */}
+            <div className="flex items-center px-2 pb-2 gap-1.5">
+              {/* Attach button */}
               <button 
-                className="w-10 h-10 rounded-full flex items-center justify-center"
-                style={{ backgroundColor: '#FFFFFF' }}
+                className="w-9 h-9 flex items-center justify-center rounded-full border border-white/20"
+                style={{ color: '#FFFFFF' }}
               >
-                <div className="w-3.5 h-3.5 bg-black rounded-sm" />
+                <AttachIcon size={18} />
               </button>
-            ) : hasInput ? (
-              <button
-                onClick={handleSend}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-black active:opacity-80"
-                style={{ backgroundColor: '#FFFFFF' }}
-              >
-                <SendIcon size={18} />
-              </button>
-            ) : (
+
+              {/* Incognito pill - toggleable */}
               <button 
-                className="w-10 h-10 rounded-full flex items-center justify-center text-black"
-                style={{ backgroundColor: '#FFFFFF' }}
+                onClick={handleIncognitoToggle}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all ${
+                  isIncognito 
+                    ? 'bg-white text-black border border-white' 
+                    : 'border border-white/20 text-white'
+                }`}
               >
-                <VoiceWaveIcon size={20} />
+                <LockIcon size={14} />
+                <span>Incognito</span>
               </button>
-            )}
+
+              {/* Exit pill - goes to home */}
+              <button 
+                onClick={handleExit}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium active:bg-white/10"
+                style={{ color: '#FFFFFF' }}
+              >
+                <HomeIcon size={14} />
+                <span>Exit</span>
+              </button>
+
+              {/* Spacer */}
+              <div className="flex-1" />
+
+              {/* Mic button */}
+              <button className="w-9 h-9 flex items-center justify-center text-white/40">
+                <MicIcon size={20} />
+              </button>
+
+              {/* Voice/Send/Stop button */}
+              {isLoading ? (
+                <button 
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: '#FFFFFF' }}
+                >
+                  <div className="w-3.5 h-3.5 bg-black rounded-sm" />
+                </button>
+              ) : hasInput ? (
+                <button
+                  onClick={handleSend}
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-black active:opacity-80"
+                  style={{ backgroundColor: '#FFFFFF' }}
+                >
+                  <SendIcon size={18} />
+                </button>
+              ) : (
+                <button 
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-black"
+                  style={{ backgroundColor: '#FFFFFF' }}
+                >
+                  <VoiceWaveIcon size={20} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
