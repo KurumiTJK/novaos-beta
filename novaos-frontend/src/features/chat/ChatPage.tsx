@@ -538,15 +538,17 @@ export function ChatPage() {
                       onTypingComplete={() => handleTypingComplete(message.id)}
                     />
                   ) : (
-                    <div 
-                      className="text-[17px] leading-[1.7]"
-                      style={{ color: '#FFFFFF' }}
-                      dangerouslySetInnerHTML={{ 
-                        __html: formatResponse(message.content) 
-                      }}
-                    />
+                    <>
+                      <div 
+                        className="text-[17px] leading-[1.7]"
+                        style={{ color: '#FFFFFF' }}
+                        dangerouslySetInnerHTML={{ 
+                          __html: formatResponse(message.content) 
+                        }}
+                      />
+                      <MessageActions />
+                    </>
                   )}
-                  <MessageActions />
                 </div>
               )}
             </div>
@@ -681,6 +683,13 @@ export function ChatPage() {
 
 function MessageActions() {
   const haptic = useHaptic();
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    // Fade in animation after mount
+    const timer = setTimeout(() => setIsVisible(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleAction = (action: string) => {
     haptic('light');
@@ -688,7 +697,11 @@ function MessageActions() {
   };
 
   return (
-    <div className="flex gap-1 mt-5">
+    <div 
+      className={`flex gap-1 mt-4 transition-opacity duration-300 ${
+        isVisible ? 'opacity-100' : 'opacity-0'
+      }`}
+    >
       {[
         { action: 'regenerate', Icon: RefreshIcon, title: 'Regenerate' },
         { action: 'copy', Icon: CopyIcon, title: 'Copy' },
@@ -699,10 +712,10 @@ function MessageActions() {
         <button
           key={action}
           onClick={() => handleAction(action)}
-          className="w-9 h-9 flex items-center justify-center text-white/40 rounded-lg active:bg-white/10"
+          className="w-8 h-8 flex items-center justify-center text-white/50 rounded-lg active:bg-white/10 hover:text-white/70 transition-colors"
           title={title}
         >
-          <Icon size={18} />
+          <Icon size={16} />
         </button>
       ))}
     </div>
