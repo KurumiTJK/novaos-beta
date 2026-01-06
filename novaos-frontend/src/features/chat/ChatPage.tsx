@@ -4,7 +4,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useUIStore, useChatStore } from '@/shared/stores';
-import { useHaptic, useAutoResize } from '@/shared/hooks';
+import { useHaptic } from '@/shared/hooks';
 import { LoadingDots } from '@/shared/components';
 import {
   MenuIcon,
@@ -144,7 +144,6 @@ export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
   const { messages, isLoading, sendMessage } = useChatStore();
   const haptic = useHaptic();
-  const autoResize = useAutoResize();
   
   const [inputValue, setInputValue] = useState('');
   const [isIncognito, setIsIncognito] = useState(false);
@@ -152,7 +151,7 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -259,9 +258,17 @@ export function ChatPage() {
     setIsIncognito(!isIncognito);
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
-    autoResize(e.target);
+  const handleContentEditableInput = () => {
+    if (inputRef.current) {
+      const text = inputRef.current.innerText || '';
+      setInputValue(text);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
   };
 
   const handleSend = async () => {
@@ -271,7 +278,7 @@ export function ChatPage() {
     haptic('medium');
     setInputValue('');
     if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
+      inputRef.current.innerText = '';
     }
 
     await sendMessage(text);
@@ -572,24 +579,22 @@ export function ChatPage() {
               border: '1px solid rgba(255,255,255,0.1)'
             }}
           >
-            {/* Textarea */}
+            {/* Input area */}
             <div className="px-4 pt-3 pb-2">
-              <textarea
+              <div
                 ref={inputRef}
-                value={inputValue}
-                onChange={handleInputChange}
-                placeholder="Ask Anything"
-                rows={1}
-                autoComplete="off"
-                autoCapitalize="sentences"
-                data-gramm="false"
-                data-gramm_editor="false"
-                data-enable-grammarly="false"
-                className="w-full bg-transparent text-[16px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
+                contentEditable
+                onInput={handleContentEditableInput}
+                onPaste={handlePaste}
+                data-placeholder="Ask Anything"
+                className="w-full bg-transparent text-[16px] outline-none leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-white/40 break-words"
                 style={{ 
                   color: '#FFFFFF',
                   minHeight: '24px', 
-                  maxHeight: '120px'
+                  maxHeight: '120px',
+                  overflowY: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word'
                 }}
               />
             </div>
