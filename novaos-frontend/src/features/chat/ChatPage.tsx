@@ -264,11 +264,6 @@ export function ChatPage() {
     autoResize(e.target);
   };
 
-  const handleKeyDown = (_e: React.KeyboardEvent) => {
-    // Allow Enter to create new lines (default behavior)
-    // User must tap Send button to submit
-  };
-
   const handleSend = async () => {
     const text = inputValue.trim();
     if (!text || isLoading) return;
@@ -280,12 +275,6 @@ export function ChatPage() {
     }
 
     await sendMessage(text);
-  };
-
-  const handleInputFocus = () => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 300);
   };
 
   const handleNewChat = () => {
@@ -589,14 +578,13 @@ export function ChatPage() {
                 ref={inputRef}
                 value={inputValue}
                 onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                onFocus={handleInputFocus}
                 placeholder="Ask Anything"
                 rows={1}
                 autoComplete="off"
-                autoCorrect="on"
-                spellCheck="true"
-                enterKeyHint="enter"
+                autoCapitalize="sentences"
+                data-gramm="false"
+                data-gramm_editor="false"
+                data-enable-grammarly="false"
                 className="w-full bg-transparent text-[16px] placeholder:text-white/40 outline-none resize-none leading-relaxed"
                 style={{ 
                   color: '#FFFFFF',
@@ -610,6 +598,7 @@ export function ChatPage() {
             <div className="flex items-center px-2 pb-2 gap-1.5">
               {/* Attach button */}
               <button 
+                tabIndex={-1}
                 className="w-9 h-9 flex items-center justify-center rounded-full border border-white/20"
                 style={{ color: '#FFFFFF' }}
               >
@@ -618,6 +607,7 @@ export function ChatPage() {
 
               {/* Incognito pill - toggleable */}
               <button 
+                tabIndex={-1}
                 onClick={handleIncognitoToggle}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all ${
                   isIncognito 
@@ -631,6 +621,7 @@ export function ChatPage() {
 
               {/* Exit pill - goes to home */}
               <button 
+                tabIndex={-1}
                 onClick={handleExit}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-white/20 text-xs font-medium active:bg-white/10"
                 style={{ color: '#FFFFFF' }}
@@ -643,13 +634,14 @@ export function ChatPage() {
               <div className="flex-1" />
 
               {/* Mic button */}
-              <button className="w-8 h-8 flex items-center justify-center text-white/40">
+              <button tabIndex={-1} className="w-8 h-8 flex items-center justify-center text-white/40">
                 <MicIcon size={18} />
               </button>
 
               {/* Voice/Send/Stop button */}
               {isLoading ? (
                 <button 
+                  tabIndex={-1}
                   className="w-8 h-8 rounded-full flex items-center justify-center"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
@@ -657,6 +649,7 @@ export function ChatPage() {
                 </button>
               ) : hasInput ? (
                 <button
+                  tabIndex={-1}
                   onClick={handleSend}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-black active:opacity-80"
                   style={{ backgroundColor: '#FFFFFF' }}
@@ -665,6 +658,7 @@ export function ChatPage() {
                 </button>
               ) : (
                 <button 
+                  tabIndex={-1}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-black"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >

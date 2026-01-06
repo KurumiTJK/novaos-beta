@@ -42,6 +42,19 @@ input,
 textarea {
   -webkit-user-select: text;
   user-select: text;
+  /* Prevent iOS zoom on focus */
+  font-size: 16px !important;
+}
+
+/* Hide iOS input accessory bar */
+textarea {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Prevent iOS from adding input accessory view */
+textarea:focus {
+  outline: none;
 }
 
 /* Scrollbar styling */
