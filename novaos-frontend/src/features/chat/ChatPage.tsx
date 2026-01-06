@@ -158,7 +158,6 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [isInputFocused, setIsInputFocused] = useState(false);
   const [shouldScrollToUser, setShouldScrollToUser] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -312,7 +311,6 @@ export function ChatPage() {
       inputRef.current.innerText = '';
       inputRef.current.blur(); // Close keyboard
     }
-    setIsInputFocused(false);
 
     // Set flag to scroll after message is added
     setShouldScrollToUser(true);
@@ -634,8 +632,6 @@ export function ChatPage() {
                 contentEditable
                 onInput={handleContentEditableInput}
                 onPaste={handlePaste}
-                onFocus={() => setIsInputFocused(true)}
-                onBlur={() => setIsInputFocused(false)}
                 data-placeholder="Ask Anything"
                 className="w-full bg-transparent text-[16px] outline-none leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-white/40 break-words"
                 style={{ 
