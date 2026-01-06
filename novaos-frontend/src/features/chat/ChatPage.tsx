@@ -160,9 +160,22 @@ export function ChatPage() {
   const seenMessagesRef = useRef<Set<string>>(new Set());
   // Track if user has manually scrolled up
   const userScrolledRef = useRef(false);
+  // Track if this is the initial mount
+  const isInitialMountRef = useRef(true);
 
-  // Focus input on mount
+  // Focus input on mount and mark existing messages as seen
   useEffect(() => {
+    // Mark all existing messages as already seen on initial mount
+    // This prevents re-animation when returning to chat
+    if (isInitialMountRef.current) {
+      messages.forEach(msg => {
+        if (msg.role === 'assistant' && !msg.isLoading) {
+          seenMessagesRef.current.add(msg.id);
+        }
+      });
+      isInitialMountRef.current = false;
+    }
+    
     const timer = setTimeout(() => {
       inputRef.current?.focus();
     }, 350);
@@ -407,23 +420,23 @@ export function ChatPage() {
             backgroundColor: '#000000'
           }}
         >
-          {/* Left: Menu button */}
-          <button
-            onClick={handleOpenSidebar}
-            className="w-10 h-10 flex items-center justify-center rounded-full border border-white/20 active:bg-white/10"
-            style={{ color: '#FFFFFF' }}
-          >
-            <MenuIcon size={20} />
-          </button>
+          {/* Left: Menu button + Nova 1 pill */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleOpenSidebar}
+              className="w-10 h-10 flex items-center justify-center rounded-full border border-white/20 active:bg-white/10"
+              style={{ color: '#FFFFFF' }}
+            >
+              <MenuIcon size={20} />
+            </button>
 
-          {/* Center: Nova 1 pill */}
-          <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 active:bg-white/10">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#22C55E' }} />
-            <span className="text-[15px] font-medium" style={{ color: '#FFFFFF' }}>Nova 1</span>
-          </button>
+            <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 active:bg-white/10">
+              <span className="text-[15px] font-medium" style={{ color: '#FFFFFF' }}>Nova 1</span>
+            </button>
+          </div>
 
           {/* Right: New chat + More menu */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             <button 
               onClick={handleNewChat}
               className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10"
@@ -626,32 +639,32 @@ export function ChatPage() {
               <div className="flex-1" />
 
               {/* Mic button */}
-              <button className="w-9 h-9 flex items-center justify-center text-white/40">
-                <MicIcon size={20} />
+              <button className="w-8 h-8 flex items-center justify-center text-white/40">
+                <MicIcon size={18} />
               </button>
 
               {/* Voice/Send/Stop button */}
               {isLoading ? (
                 <button 
-                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  className="w-8 h-8 rounded-full flex items-center justify-center"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
-                  <div className="w-3.5 h-3.5 bg-black rounded-sm" />
+                  <div className="w-3 h-3 bg-black rounded-sm" />
                 </button>
               ) : hasInput ? (
                 <button
                   onClick={handleSend}
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-black active:opacity-80"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-black active:opacity-80"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
-                  <SendIcon size={18} />
+                  <SendIcon size={16} />
                 </button>
               ) : (
                 <button 
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-black"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-black"
                   style={{ backgroundColor: '#FFFFFF' }}
                 >
-                  <VoiceWaveIcon size={20} />
+                  <VoiceWaveIcon size={16} />
                 </button>
               )}
             </div>
