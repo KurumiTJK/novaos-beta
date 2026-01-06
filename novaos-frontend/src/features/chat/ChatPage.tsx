@@ -158,31 +158,12 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [shouldScrollToUser, setShouldScrollToUser] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastUserMessageRef = useRef<HTMLDivElement>(null);
-
-  // Use visualViewport to smoothly track keyboard
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-
-    const onResize = () => {
-      const keyboardHeight = window.innerHeight - viewport.height;
-      // Only add offset if keyboard is open (height > 100px threshold)
-      if (keyboardHeight > 100) {
-        setKeyboardOffset(20); // Space for iOS accessory bar
-      } else {
-        setKeyboardOffset(0);
-      }
-    };
-
-    viewport.addEventListener('resize', onResize);
-    return () => viewport.removeEventListener('resize', onResize);
-  }, []);
 
   // Track which messages are new (for typing animation)
   const seenMessagesRef = useRef<Set<string>>(new Set());
@@ -331,6 +312,7 @@ export function ChatPage() {
       inputRef.current.innerText = '';
       inputRef.current.blur(); // Close keyboard
     }
+    setIsInputFocused(false);
 
     // Set flag to scroll after message is added
     setShouldScrollToUser(true);
@@ -642,9 +624,7 @@ export function ChatPage() {
             className="rounded-[28px] overflow-hidden"
             style={{ 
               backgroundColor: '#1C1C1E',
-              border: '1px solid rgba(255,255,255,0.1)',
-              transform: `translateY(-${keyboardOffset}px)`,
-              transition: 'transform 0.1s ease-out'
+              border: '1px solid rgba(255,255,255,0.1)'
             }}
           >
             {/* Input area */}
@@ -654,6 +634,8 @@ export function ChatPage() {
                 contentEditable
                 onInput={handleContentEditableInput}
                 onPaste={handlePaste}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
                 data-placeholder="Ask Anything"
                 className="w-full bg-transparent text-[16px] outline-none leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-white/40 break-words"
                 style={{ 
