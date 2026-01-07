@@ -68,7 +68,7 @@ const DEVELOPMENT_DEFAULTS: Partial<AppConfig> = {
   
   llm: {
     provider: 'openai',
-    model: 'gpt-5.2', // Cheaper model for dev
+    model: 'gpt-4o-mini', // Cheaper model for dev
     timeoutMs: 60000, // Longer timeout for debugging
     maxTokens: 4000,
     maxInputTokens: 8000,
@@ -205,7 +205,7 @@ const STAGING_DEFAULTS: Partial<AppConfig> = {
   
   llm: {
     provider: 'openai',
-    model: 'gpt-5.2', // Cheaper model for staging
+    model: 'gpt-4o-mini', // Cheaper model for staging
     timeoutMs: 30000,
     maxTokens: 2000, // Reduced for cost
     maxInputTokens: 4000,
@@ -279,7 +279,7 @@ const STAGING_DEFAULTS: Partial<AppConfig> = {
   },
   
   stagingOverrides: {
-    openaiModel: 'gpt-5.2',
+    openaiModel: 'gpt-4o-mini',
     geminiModel: 'gemini-1.5-flash',
     maxRequestsPerMinute: 30,
     maxTokensPerRequest: 1000,
@@ -359,7 +359,7 @@ const PRODUCTION_DEFAULTS: Partial<AppConfig> = {
   
   llm: {
     provider: 'openai',
-    model: 'gpt-5.2',
+    model: 'gpt-4o',
     timeoutMs: 30000,
     maxTokens: 4000,
     maxInputTokens: 8000,
@@ -487,7 +487,7 @@ export function isProductionLike(environment: Environment): boolean {
  */
 export function getDefaultLLMModel(environment: Environment): string {
   const defaults = DEFAULTS_BY_ENVIRONMENT[environment];
-  return defaults.llm?.model ?? 'gpt-5.2';
+  return defaults.llm?.model ?? 'gpt-4o-mini';
 }
 
 /**

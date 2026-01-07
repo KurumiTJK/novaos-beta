@@ -41,9 +41,12 @@ vi.mock('../../core/memory/working_memory/index.js', () => ({
   workingMemory: {
     create: vi.fn().mockResolvedValue({ id: 'conv-123', userId: 'user-123' }),
     get: vi.fn().mockResolvedValue({ id: 'conv-123', userId: 'user-123' }),
+    getOrCreate: vi.fn().mockResolvedValue({ id: 'conv-123', userId: 'user-123' }),
     list: vi.fn().mockResolvedValue([]),
     getMessages: vi.fn().mockResolvedValue([]),
     addMessage: vi.fn().mockResolvedValue(undefined),
+    addUserMessage: vi.fn().mockResolvedValue(undefined),
+    addAssistantMessage: vi.fn().mockResolvedValue(undefined),
     updateTitle: vi.fn().mockResolvedValue({ id: 'conv-123' }),
     addTag: vi.fn().mockResolvedValue({ id: 'conv-123' }),
     delete: vi.fn().mockResolvedValue(undefined),
@@ -61,9 +64,38 @@ vi.mock('../../config/index.js', () => ({
   canVerify: vi.fn(() => false),
 }));
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE MOCK (NEW)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+vi.mock('../../db/index.js', () => ({
+  isSupabaseInitialized: vi.fn(() => false),
+}));
+
+vi.mock('../../services/settings.js', () => ({
+  createUser: vi.fn().mockResolvedValue({ id: 'user-123', externalId: 'user-123', email: 'test@example.com' }),
+  getSettings: vi.fn().mockResolvedValue({
+    theme: 'dark',
+    defaultStance: 'lens',
+    hapticFeedback: true,
+    notifications: { sparkReminders: true, dailySummary: false },
+    isDefault: true,
+  }),
+  updateSettings: vi.fn().mockResolvedValue({
+    theme: 'dark',
+    defaultStance: 'lens',
+    hapticFeedback: true,
+    notifications: { sparkReminders: true, dailySummary: false },
+  }),
+}));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECURITY MOCK (UPDATED)
+// ═══════════════════════════════════════════════════════════════════════════════
+
 vi.mock('../../security/index.js', () => ({
   authenticate: vi.fn(() => (req: any, _res: any, next: any) => {
-    req.user = { userId: 'user-123', tier: 'free' };
+    req.user = { userId: 'user-123', tier: 'free', email: 'test@example.com' };
     req.userId = 'user-123';
     next();
   }),
@@ -86,9 +118,24 @@ vi.mock('../../security/index.js', () => ({
     getUserLogs: vi.fn().mockResolvedValue([]),
     getGlobalLogs: vi.fn().mockResolvedValue([]),
   })),
+  // Token management (NEW)
+  refreshAccessToken: vi.fn().mockResolvedValue({
+    accessToken: { token: 'new-access-token', expiresAt: Date.now() + 900000 },
+    refreshToken: { token: 'new-refresh-token', expiresAt: Date.now() + 604800000 },
+  }),
+  verifyToken: vi.fn().mockResolvedValue({ valid: true, user: { userId: 'user-123', tokenId: 'token-123' } }),
+  revokeToken: vi.fn().mockResolvedValue(true),
+  revokeAllUserTokens: vi.fn().mockResolvedValue(true),
+  // Brute force (NEW)
+  checkBruteForce: vi.fn().mockResolvedValue({ locked: false }),
+  recordFailedAttempt: vi.fn().mockResolvedValue({ locked: false }),
+  clearFailedAttempts: vi.fn().mockResolvedValue(undefined),
+  // Schemas
   ChatMessageSchema: {},
   ParseCommandSchema: {},
   RegisterSchema: {},
+  RefreshTokenSchema: {},
+  UpdateSettingsSchema: {},
   ConversationIdParamSchema: {},
   UpdateConversationSchema: {},
   ConversationQuerySchema: {},
@@ -179,6 +226,27 @@ describe('Auth Endpoints', () => {
       const res = await request(app).get('/api/v1/auth/status');
       expect(res.status).toBe(200);
       expect(res.body.userId).toBeDefined();
+    });
+  });
+
+  describe('POST /api/v1/auth/refresh', () => {
+    it('should refresh tokens', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: 'valid-refresh-token' });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+  });
+
+  describe('POST /api/v1/auth/logout', () => {
+    it('should logout successfully', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/logout')
+        .set('Authorization', 'Bearer test-token')
+        .send({});
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
     });
   });
 });

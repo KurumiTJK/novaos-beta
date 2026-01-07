@@ -20,7 +20,7 @@ import { workingMemory } from '../core/memory/working_memory/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NEW SECURITY MODULE IMPORTS
+// SECURITY MODULE IMPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -32,6 +32,17 @@ import {
   getAckTokenStore,
   generateAckToken,
   
+  // Token management
+  refreshAccessToken,
+  revokeToken,
+  revokeAllUserTokens,
+  verifyToken,
+  
+  // Brute force protection
+  checkBruteForce,
+  recordFailedAttempt,
+  clearFailedAttempts,
+  
   // Rate limiting
   rateLimit,
   
@@ -42,6 +53,8 @@ import {
   ChatMessageSchema,
   ParseCommandSchema,
   RegisterSchema,
+  RefreshTokenSchema,
+  UpdateSettingsSchema,
   ConversationIdParamSchema,
   UpdateConversationSchema,
   ConversationQuerySchema,
@@ -58,6 +71,17 @@ import {
   logAudit,
   getAuditStore,
 } from '../security/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// DATABASE IMPORTS (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { isSupabaseInitialized } from '../db/index.js';
+import {
+  createUser,
+  getSettings,
+  updateSettings,
+} from '../services/settings.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -88,50 +112,6 @@ export interface RouterConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// SESSION STORE (simple in-memory, replace with Redis if needed)
-// ─────────────────────────────────────────────────────────────────────────────────
-
-const sessions = new Map<string, {
-  userId: string;
-  conversationId: string;
-  createdAt: number;
-  lastActivity: number;
-  messageCount: number;
-  tokenCount: number;
-}>();
-
-const sessionManager = {
-  async create(userId: string, conversationId: string) {
-    const session = {
-      userId,
-      conversationId,
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-      messageCount: 0,
-      tokenCount: 0,
-    };
-    sessions.set(conversationId, session);
-    return session;
-  },
-  async get(conversationId: string) {
-    return sessions.get(conversationId) ?? null;
-  },
-  async update(conversationId: string, updates: { messageCount?: number; tokenCount?: number }) {
-    const session = sessions.get(conversationId);
-    if (session) {
-      session.lastActivity = Date.now();
-      if (updates.messageCount) session.messageCount += updates.messageCount;
-      if (updates.tokenCount) session.tokenCount += updates.tokenCount;
-      sessions.set(conversationId, session);
-    }
-    return session;
-  },
-  async delete(conversationId: string) {
-    sessions.delete(conversationId);
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────────
 // ROUTER FACTORY
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -156,6 +136,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
+      database: isSupabaseInitialized() ? 'connected' : 'not configured',
       verification: canVerify() ? 'enabled' : 'disabled',
     });
   });
@@ -179,6 +160,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'conversation-history',
         'structured-logging',
         'pipeline-integration',
+        isSupabaseInitialized() ? 'supabase' : null,
         appConfig.verification.enabled ? 'verification' : null,
         appConfig.webFetch.enabled ? 'web-fetch' : null,
       ].filter(Boolean),
@@ -201,13 +183,25 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
 
   router.post('/auth/register',
     validateBody(RegisterSchema),
-    (req: Request, res: Response, next: NextFunction) => {
+    async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { email, tier = 'free' } = req.body;
         const userId = `user_${Buffer.from(email).toString('base64').slice(0, 16)}`;
 
         const accessToken = generateAccessToken(userId, tier, { email });
         const apiKey = generateApiKey(userId, tier, { email });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // NEW: Sync user to Supabase
+        // ═══════════════════════════════════════════════════════════════════════
+        if (isSupabaseInitialized()) {
+          try {
+            await createUser(userId, email, tier);
+          } catch (err) {
+            // Log but don't fail registration if Supabase sync fails
+            console.error('[AUTH] Failed to sync user to Supabase:', err);
+          }
+        }
 
         res.json({
           userId,
@@ -248,7 +242,188 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         blockedUntil: blocked.until,
         recentVetos,
         storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
+        database: isSupabaseInitialized() ? 'connected' : 'not configured',
       });
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // AUTH: REFRESH TOKEN
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  router.post('/auth/refresh',
+    rateLimit({ category: 'auth' }),
+    validateBody(RefreshTokenSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { refreshToken } = req.body;
+
+        const result = await refreshAccessToken(refreshToken);
+
+        if (!result) {
+          res.status(401).json({
+            success: false,
+            error: {
+              code: 'AUTH_REFRESH_INVALID',
+              message: 'Invalid or expired refresh token',
+            },
+          });
+          return;
+        }
+
+        // Decode the new access token to get userId for audit
+        const decoded = await verifyToken(result.accessToken.token);
+        await logAudit({
+          category: 'auth',
+          action: 'token_refresh',
+          userId: decoded.valid ? decoded.user.userId : 'unknown',
+          details: { success: true },
+        });
+
+        res.json({
+          success: true,
+          data: {
+            tokens: {
+              accessToken: result.accessToken.token,
+              refreshToken: result.refreshToken.token,
+              accessExpiresAt: new Date(result.accessToken.expiresAt).toISOString(),
+              refreshExpiresAt: new Date(result.refreshToken.expiresAt).toISOString(),
+            },
+          },
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // AUTH: LOGOUT
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  router.post('/auth/logout',
+    authenticate({ required: true }),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { refreshToken, allDevices = false } = req.body;
+
+        if (allDevices) {
+          // Revoke all tokens for this user
+          await revokeAllUserTokens(req.userId!);
+          
+          await logAudit({
+            category: 'auth',
+            action: 'logout_all_devices',
+            userId: req.userId!,
+            details: {},
+          });
+
+          res.json({
+            success: true,
+            message: 'Logged out from all devices',
+          });
+          return;
+        }
+
+        if (refreshToken) {
+          // Revoke specific refresh token by verifying it first
+          const tokenResult = await verifyToken(refreshToken);
+          
+          if (tokenResult.valid && tokenResult.user.tokenId) {
+            await revokeToken(tokenResult.user.tokenId);
+          }
+
+          await logAudit({
+            category: 'auth',
+            action: 'logout',
+            userId: req.userId!,
+            details: { revokedRefreshToken: true },
+          });
+        } else if (req.user?.tokenId) {
+          // Revoke current access token
+          await revokeToken(req.user.tokenId);
+
+          await logAudit({
+            category: 'auth',
+            action: 'logout',
+            userId: req.userId!,
+            details: { revokedAccessToken: true },
+          });
+        }
+
+        res.json({
+          success: true,
+          message: 'Logged out successfully',
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SETTINGS ENDPOINTS (NEW)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  router.get('/settings',
+    authenticate({ required: true }),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        if (!isSupabaseInitialized()) {
+          throw new ClientError('Database not configured', 503);
+        }
+
+        const settings = await getSettings(req.userId!);
+
+        res.json({
+          success: true,
+          data: {
+            theme: settings.theme,
+            defaultStance: settings.defaultStance,
+            hapticFeedback: settings.hapticFeedback,
+            notifications: settings.notifications,
+            isDefault: settings.isDefault,
+          },
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  router.patch('/settings',
+    authenticate({ required: true }),
+    validateBody(UpdateSettingsSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        if (!isSupabaseInitialized()) {
+          throw new ClientError('Database not configured', 503);
+        }
+
+        const updates = req.body;
+        const email = req.user?.email ?? `${req.userId}@novaos.local`;
+
+        const settings = await updateSettings(req.userId!, email, updates);
+
+        await logAudit({
+          category: 'auth',
+          action: 'update_settings',
+          userId: req.userId!,
+          details: { updates: Object.keys(updates) },
+        });
+
+        res.json({
+          success: true,
+          data: {
+            theme: settings.theme,
+            defaultStance: settings.defaultStance,
+            hapticFeedback: settings.hapticFeedback,
+            notifications: settings.notifications,
+          },
+        });
+      } catch (error) {
+        next(error);
+      }
     }
   );
 
@@ -460,6 +635,37 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // VETO ENDPOINT (for constitution gate feedback)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  router.post('/veto',
+    authenticate({ required: true }),
+    rateLimit({ category: 'chat' }),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { conversationId, messageIndex, reason } = req.body;
+        const userId = req.userId!;
+
+        // Track the veto (only takes userId)
+        await trackVeto(userId);
+
+        // Log the veto with reason in audit
+        await logAudit({
+          category: 'abuse',
+          severity: 'warning',
+          action: 'user_veto',
+          userId,
+          details: { conversationId, messageIndex, reason },
+        });
+
+        res.json({ success: true });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // CONVERSATION ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -470,7 +676,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
       try {
         const { limit = 50, offset = 0 } = req.query;
         const conversations = await workingMemory.list(req.userId!, Number(limit), Number(offset));
-        
+
         res.json({
           conversations,
           count: conversations.length,
@@ -490,7 +696,6 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         const { messagesLimit = 100 } = req.query;
 
         const conversation = await workingMemory.get(id);
-
         if (!conversation) {
           throw new ClientError('Conversation not found', 404);
         }
@@ -614,6 +819,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
             authRequired: appConfig.auth.required,
             debugMode: appConfig.observability.debugMode,
             redactPII: appConfig.observability.redactPII,
+            supabase: isSupabaseInitialized(),
           },
           verification: {
             enabled: appConfig.verification.enabled,

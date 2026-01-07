@@ -51,3 +51,15 @@ export {
   type RefreshTokenInput,
   type CreateApiKeyInput,
 } from './auth.js';
+
+// Settings (NEW)
+export {
+  ThemeSchema,
+  DefaultStanceSchema,
+  NotificationSettingsSchema,
+  UpdateSettingsSchema,
+  type Theme,
+  type DefaultStance,
+  type NotificationSettingsInput,
+  type UpdateSettingsInput,
+} from './settings.js';

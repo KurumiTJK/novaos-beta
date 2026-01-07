@@ -151,7 +151,7 @@ function buildConfigFromEnvironment(): Record<string, unknown> {
     
     llm: {
       provider: envString('PREFERRED_PROVIDER', defaults.llm?.provider ?? 'openai'),
-      model: envString('OPENAI_MODEL', defaults.llm?.model ?? 'gpt-5.2'),
+      model: envString('OPENAI_MODEL', defaults.llm?.model ?? 'gpt-4o'),
       timeoutMs: envNumber('LLM_TIMEOUT_MS', defaults.llm?.timeoutMs ?? 30000),
       maxTokens: envNumber('LLM_MAX_TOKENS', defaults.llm?.maxTokens ?? 4000),
       maxInputTokens: envNumber('LLM_MAX_INPUT_TOKENS', defaults.llm?.maxInputTokens ?? 8000),

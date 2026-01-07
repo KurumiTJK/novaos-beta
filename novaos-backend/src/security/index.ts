@@ -12,6 +12,8 @@
 // - Abuse Detection: Prompt injection, harassment, blocking
 // - SSRF Protection: Prevent internal network access
 // - Audit Logging: Security event tracking
+// - Brute Force Protection: Login attempt limiting (NEW)
+// - Idempotency: Duplicate request prevention (NEW)
 //
 // Usage:
 //
@@ -21,6 +23,8 @@
 //     rateLimit, 
 //     validateBody,
 //     abuseProtection,
+//     idempotency,
+//     checkBruteForce,
 //   } from './security/index.js';
 //
 //   // Initialize on startup
@@ -30,6 +34,7 @@
 //   router.post('/chat',
 //     authenticate(),
 //     rateLimit({ category: 'chat' }),
+//     idempotency(),
 //     validateBody(ChatMessageSchema),
 //     abuseProtection(),
 //     chatHandler
@@ -189,6 +194,11 @@ export {
   LoginSchema,
   RefreshTokenSchema,
   CreateApiKeySchema,
+  // Settings (NEW)
+  ThemeSchema,
+  DefaultStanceSchema,
+  NotificationSettingsSchema,
+  UpdateSettingsSchema,
 } from './validation/index.js';
 
 export type {
@@ -205,6 +215,11 @@ export type {
   LoginInput,
   RefreshTokenInput,
   CreateApiKeyInput,
+  // Settings types (NEW)
+  Theme,
+  DefaultStance,
+  NotificationSettingsInput,
+  UpdateSettingsInput,
 } from './validation/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -294,6 +309,44 @@ export {
 } from './audit/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// RE-EXPORTS: BRUTE FORCE PROTECTION (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  BruteForceConfig,
+  BruteForceStatus,
+} from './brute-force.js';
+
+export {
+  initBruteForceStore,
+  getBruteForceConfig,
+  checkBruteForce,
+  recordFailedAttempt,
+  clearFailedAttempts,
+  forceUnlock,
+  getRemainingLockoutTime,
+} from './brute-force.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// RE-EXPORTS: IDEMPOTENCY (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type {
+  IdempotencyConfig,
+  IdempotencyMiddlewareOptions,
+} from './idempotency.js';
+
+export {
+  initIdempotencyStore,
+  getIdempotencyConfig,
+  idempotency,
+  invalidateIdempotencyKey,
+  hasIdempotencyKey,
+  getIdempotencyResponse,
+  generateIdempotencyKey,
+} from './idempotency.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // INITIALIZATION
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -306,6 +359,12 @@ export interface SecurityInitOptions {
   
   /** SSRF protection configuration */
   ssrfConfig?: Partial<import('./ssrf/index.js').SSRFConfig>;
+  
+  /** Brute force protection configuration (NEW) */
+  bruteForceConfig?: Partial<import('./brute-force.js').BruteForceConfig>;
+  
+  /** Idempotency configuration (NEW) */
+  idempotencyConfig?: Partial<import('./idempotency.js').IdempotencyConfig>;
 }
 
 /**
@@ -352,6 +411,12 @@ export function initSecurity(
   // Initialize audit store
   initAuditStore(store);
   
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Initialize brute force and idempotency stores
+  // ═══════════════════════════════════════════════════════════════════════════
+  initBruteForceStore(store, options.bruteForceConfig);
+  initIdempotencyStore(store, options.idempotencyConfig);
+  
   console.log('[SECURITY] All security modules initialized');
 }
 
@@ -362,3 +427,5 @@ import { initAbuseDetector, initBlockStore, initVetoHistoryStore } from './abuse
 import { initAckTokenStore } from './auth/index.js';
 import { initSSRFGuard } from './ssrf/index.js';
 import { initAuditStore } from './audit/index.js';
+import { initBruteForceStore } from './brute-force.js';
+import { initIdempotencyStore } from './idempotency.js';

@@ -16,6 +16,12 @@ import { pipeline_model, model_llm, isOpenAIAvailable } from './pipeline/llm_eng
 import { initSecurity, ipRateLimit } from './security/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// DATABASE IMPORTS (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { initSupabase, testConnection, isSupabaseInitialized } from './db/index.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -82,6 +88,7 @@ const healthRouter = createHealthRouter({
     webFetch: config.webFetch.enabled,
     auth: REQUIRE_AUTH,
     debug: config.observability.debugMode,
+    supabase: isSupabaseInitialized(),
   }),
   criticalChecks: [],
 });
@@ -93,6 +100,7 @@ app.get('/', (_req, res) => {
     service: 'novaos-backend',
     version: '1.0.0',
     storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
+    database: isSupabaseInitialized() ? 'connected' : 'not configured',
   });
 });
 
@@ -123,6 +131,33 @@ async function startServer() {
     },
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // NEW: Initialize Supabase (optional - only if env vars are set)
+  // ═══════════════════════════════════════════════════════════════════════════════
+  let supabaseStatus = 'not configured';
+  
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+    try {
+      initSupabase({
+        url: process.env.SUPABASE_URL,
+        serviceKey: process.env.SUPABASE_SERVICE_KEY,
+      });
+      
+      // Test the connection
+      const connected = await testConnection();
+      supabaseStatus = connected ? 'connected' : 'connection failed';
+      
+      if (!connected) {
+        logger.warn('Supabase connection test failed - settings endpoints will be unavailable');
+      }
+    } catch (error) {
+      logger.error('Failed to initialize Supabase', error instanceof Error ? error : new Error(String(error)));
+      supabaseStatus = 'initialization failed';
+    }
+  } else {
+    logger.info('Supabase not configured - settings endpoints will be unavailable');
+  }
+
   // Rate limiting
   app.use(ipRateLimit());
 
@@ -140,6 +175,7 @@ async function startServer() {
       port: PORT,
       environment: NODE_ENV,
       storage: storeManager.isUsingRedis() ? 'redis' : 'memory',
+      database: supabaseStatus,
       verification: canVerify() ? 'enabled' : 'disabled',
       pipelineModel: pipeline_model,
       generationModel: model_llm,
@@ -157,6 +193,7 @@ async function startServer() {
 ║  Generation:   ${model_llm.padEnd(53)}║
 ║  Auth:         ${(REQUIRE_AUTH ? 'required' : 'optional').padEnd(53)}║
 ║  Storage:      ${(storeManager.isUsingRedis() ? 'redis' : 'memory').padEnd(53)}║
+║  Database:     ${supabaseStatus.padEnd(53)}║
 ║  Verification: ${(canVerify() ? 'enabled' : 'disabled').padEnd(53)}║
 ╚═══════════════════════════════════════════════════════════════════════╝
 
@@ -175,6 +212,12 @@ async function startServer() {
     POST /api/v1/auth/register             Get token
     GET  /api/v1/auth/verify               Verify token
     GET  /api/v1/auth/status               Auth status
+    POST /api/v1/auth/refresh              Refresh tokens
+    POST /api/v1/auth/logout               Logout
+
+  SETTINGS
+    GET  /api/v1/settings                  Get user settings
+    PATCH /api/v1/settings                 Update settings
 
   CHAT
     POST /api/v1/chat                      Main chat endpoint
