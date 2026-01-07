@@ -5,6 +5,7 @@
 import { useUIStore } from '@/shared/stores';
 import { useHaptic } from '@/shared/hooks';
 import { BellIcon, PlusIcon, SettingsIcon } from '@/shared/components';
+import { LessonsTab } from './components';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // MOCK DATA (will be replaced with real API later)
@@ -172,15 +173,8 @@ export function HomePage() {
           </>
         )}
 
-        {/* Lessons Tab Content */}
-        {homeTab === 'lessons' && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-white/50">
-              <span className="text-4xl mb-4 block">📚</span>
-              <p>Lessons coming soon</p>
-            </div>
-          </div>
-        )}
+        {/* Lessons Tab Content - Now with real component */}
+        {homeTab === 'lessons' && <LessonsTab />}
       </div>
     </div>
   );

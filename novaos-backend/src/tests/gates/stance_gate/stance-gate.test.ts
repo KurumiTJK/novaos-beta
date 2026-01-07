@@ -8,7 +8,7 @@ import {
   executeStanceGate,
   executeStanceGateAsync,
 } from '../../../gates/stance_gate/stance-gate.js';
-import type { StanceGateOutput } from '../../../gates/stance_gate/types.js';
+import type { StanceGateOutput, SwordRedirect } from '../../../gates/stance_gate/types.js';
 import type { PipelineState, PipelineContext, IntentSummary, PrimaryRoute } from '../../../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -451,7 +451,34 @@ describe('Stance Gate', () => {
   // ─────────────────────────────────────────────────────────────────────────────
 
   describe('executeStanceGateAsync', () => {
-    it('should return same result as sync version', async () => {
+    // NOTE: Async and sync now behave differently for SWORD mode
+    // - Sync: Always returns action='continue' (backwards compatibility)
+    // - Async: Returns action='redirect' for SWORD mode with LLM classification
+
+    it('should return same result as sync version for LENS mode', async () => {
+      // LENS mode behaves identically in sync and async
+      const state = createMockState({
+        intent_summary: createIntentSummary({
+          stance: 'LENS',
+          learning_intent: false,
+          primary_route: 'SAY',
+        }),
+      });
+      const context = createMockContext();
+
+      const syncResult = executeStanceGate(state, context);
+      const asyncResult = await executeStanceGateAsync(state, context);
+
+      expect(asyncResult.gateId).toBe(syncResult.gateId);
+      expect(asyncResult.status).toBe(syncResult.status);
+      expect(asyncResult.action).toBe(syncResult.action); // Both 'continue'
+      expect(asyncResult.output.route).toBe(syncResult.output.route);
+      expect(asyncResult.output.primary_route).toBe(syncResult.output.primary_route);
+      expect(asyncResult.output.learning_intent).toBe(syncResult.output.learning_intent);
+    });
+
+    it('should return redirect for SWORD mode (async behavior differs from sync)', async () => {
+      // SWORD async mode returns redirect instead of continue
       const state = createMockState({
         intent_summary: createIntentSummary({
           stance: 'SWORD',
@@ -464,12 +491,16 @@ describe('Stance Gate', () => {
       const syncResult = executeStanceGate(state, context);
       const asyncResult = await executeStanceGateAsync(state, context);
 
-      expect(asyncResult.gateId).toBe(syncResult.gateId);
-      expect(asyncResult.status).toBe(syncResult.status);
-      expect(asyncResult.action).toBe(syncResult.action);
-      expect(asyncResult.output.route).toBe(syncResult.output.route);
-      expect(asyncResult.output.primary_route).toBe(syncResult.output.primary_route);
-      expect(asyncResult.output.learning_intent).toBe(syncResult.output.learning_intent);
+      // Sync still returns continue (backwards compatibility)
+      expect(syncResult.action).toBe('continue');
+      expect(syncResult.output.route).toBe('sword');
+
+      // Async now returns redirect with classification
+      expect(asyncResult.action).toBe('redirect');
+      expect(asyncResult.output.route).toBe('sword');
+      expect(asyncResult.output.redirect).toBeDefined();
+      expect(asyncResult.output.redirect?.target).toBe('swordgate');
+      expect(asyncResult.output.redirect?.mode).toMatch(/^(designer|runner)$/);
     });
 
     it('should return a Promise', () => {
@@ -481,7 +512,7 @@ describe('Stance Gate', () => {
       expect(result).toBeInstanceOf(Promise);
     });
 
-    it('should route to sword when conditions are met', async () => {
+    it('should route to sword with redirect when conditions are met', async () => {
       const state = createMockState({
         intent_summary: createIntentSummary({
           stance: 'SWORD',
@@ -493,9 +524,11 @@ describe('Stance Gate', () => {
       const result = await executeStanceGateAsync(state, context);
 
       expect(result.output.route).toBe('sword');
+      expect(result.action).toBe('redirect');
+      expect(result.output.redirect).toBeDefined();
     });
 
-    it('should route to lens when conditions are not met', async () => {
+    it('should route to lens with continue when conditions are not met', async () => {
       const state = createMockState({
         intent_summary: createIntentSummary({
           stance: 'LENS',
@@ -507,6 +540,26 @@ describe('Stance Gate', () => {
       const result = await executeStanceGateAsync(state, context);
 
       expect(result.output.route).toBe('lens');
+      expect(result.action).toBe('continue');
+      expect(result.output.redirect).toBeUndefined();
+    });
+
+    it('should include topic in redirect for designer mode', async () => {
+      const state = createMockState({
+        userMessage: 'I want to learn guitar',
+        intent_summary: createIntentSummary({
+          stance: 'SWORD',
+          learning_intent: true,
+        }),
+      });
+      // No userId = defaults to designer mode with topic extraction
+      const context = createMockContext({ userId: undefined });
+
+      const result = await executeStanceGateAsync(state, context);
+
+      expect(result.action).toBe('redirect');
+      expect(result.output.redirect?.mode).toBe('designer');
+      // Topic may be extracted from message
     });
   });
 

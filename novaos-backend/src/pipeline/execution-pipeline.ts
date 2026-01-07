@@ -12,7 +12,7 @@ import {
   executeIntentGateAsync,
   executeShieldGate,
   executeToolsGate,
-  executeStanceGate,
+  executeStanceGateAsync,
   executeCapabilityGate,
   executeResponseGateAsync,
   executeConstitutionGateAsync,
@@ -111,10 +111,37 @@ export class ExecutionPipeline {
     state.gateResults.tools = executeToolsGate(state, context);
     state.toolsResult = state.gateResults.tools.output;
 
-    // ─── STAGE 4: STANCE (Router) ───
-    state.gateResults.stance = executeStanceGate(state, context);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STAGE 4: STANCE (Router) — LLM Classification + Redirect
+    // ═══════════════════════════════════════════════════════════════════════════
+    // When learning_intent=true AND stance=SWORD:
+    // 1. Fetches user's lesson plans from Supabase
+    // 2. Uses LLM to classify: designer (new plan) vs runner (existing plan)
+    // 3. Returns action='redirect' to short-circuit the pipeline
+    
+    state.gateResults.stance = await executeStanceGateAsync(state, context);
     state.stanceResult = state.gateResults.stance.output;
     state.stance = state.stanceResult.route as any;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CHECK FOR REDIRECT — Skip remaining gates, return immediately
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    if (state.gateResults.stance.action === 'redirect') {
+      console.log(`[PIPELINE] Redirect to SwordGate: ${state.stanceResult.redirect?.mode}`);
+      
+      return {
+        status: 'redirect',
+        response: '', // No response generated - frontend navigates to SwordGate
+        stance: 'sword',
+        redirect: state.stanceResult.redirect,
+        gateResults: state.gateResults,
+        metadata: {
+          requestId: context.requestId,
+          totalTimeMs: Date.now() - pipelineStart,
+        },
+      };
+    }
 
     // ─── STAGE 5: CAPABILITY (Live Data Fetching) ───
     state.gateResults.capability = await executeCapabilityGate(state, context);
@@ -128,7 +155,6 @@ export class ExecutionPipeline {
 
     while (regenerationCount <= MAX_REGENERATIONS) {
       // ─── STAGE 6: RESPONSE (The Stitcher) ───
-      // Gate calls llm_engine directly - no callback needed
       state.gateResults.model = await executeResponseGateAsync(
         { ...state, userMessage: currentUserMessage },
         context
@@ -136,7 +162,6 @@ export class ExecutionPipeline {
       state.generation = state.gateResults.model.output;
 
       // ─── STAGE 7: CONSTITUTION (Constitutional Check) ───
-      // Gate calls llm_engine directly - no callback needed
       state.gateResults.constitution = await executeConstitutionGateAsync(
         state,
         context
@@ -168,7 +193,6 @@ export class ExecutionPipeline {
     }
 
     // ─── STAGE 8: MEMORY (Memory Detection and Storage) ───
-    // Gate calls llm_engine directly - no callback needed
     state.gateResults.memory = await executeMemoryGateAsync(
       state,
       context

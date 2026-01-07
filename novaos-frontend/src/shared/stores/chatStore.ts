@@ -1,10 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT STORE — Novaux
+// With SwordGate confirmation handling
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
 import { sendMessage as sendMessageApi } from '../api/chat';
-import type { Message } from '../types';
+import { useUIStore } from './uiStore';
+import type { Message, PendingAction } from '../types';
 
 interface ChatStore {
   messages: Message[];
@@ -16,6 +18,10 @@ interface ChatStore {
   sendMessage: (content: string) => Promise<void>;
   clearMessages: () => void;
   startNewConversation: () => void;
+  
+  // Confirmation actions
+  confirmPendingAction: (messageId: string) => void;
+  cancelPendingAction: (messageId: string) => void;
 }
 
 function generateId(): string {
@@ -60,17 +66,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         newConversation: !conversationId,
       });
 
+      // Create assistant message
+      const assistantMessage: Message = {
+        id: generateId(),
+        role: 'assistant',
+        content: response.response,
+        timestamp: new Date(),
+        stance: response.stance,
+      };
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // HANDLE PENDING CONFIRMATION
+      // When backend detects learning intent, it returns a pending action
+      // that requires user confirmation before navigating
+      // ─────────────────────────────────────────────────────────────────────────
+      if (response.status === 'pending_confirmation' && response.pendingAction) {
+        assistantMessage.pendingAction = response.pendingAction;
+      }
+
       // Remove loading message and add real response
       set((state) => ({
         messages: state.messages
           .filter((m) => !m.isLoading)
-          .concat({
-            id: generateId(),
-            role: 'assistant',
-            content: response.response,
-            timestamp: new Date(),
-            stance: response.stance,
-          }),
+          .concat(assistantMessage),
         isLoading: false,
         conversationId: response.conversationId,
       }));
@@ -82,6 +100,49 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         error: error instanceof Error ? error.message : 'Failed to send message',
       }));
     }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CONFIRMATION ACTIONS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * User clicked "Yes" - execute the pending action
+   */
+  confirmPendingAction: (messageId: string) => {
+    const { messages } = get();
+    const message = messages.find(m => m.id === messageId);
+    
+    if (!message?.pendingAction) return;
+    
+    const { pendingAction } = message;
+    
+    // Clear the pending action from the message
+    set((state) => ({
+      messages: state.messages.map(m => 
+        m.id === messageId 
+          ? { ...m, pendingAction: undefined, actionTaken: 'confirmed' as const }
+          : m
+      ),
+    }));
+    
+    // Execute the action based on type
+    if (pendingAction.type === 'sword_redirect') {
+      useUIStore.getState().openSword(pendingAction.redirect);
+    }
+  },
+
+  /**
+   * User clicked "No" - dismiss the pending action
+   */
+  cancelPendingAction: (messageId: string) => {
+    set((state) => ({
+      messages: state.messages.map(m => 
+        m.id === messageId 
+          ? { ...m, pendingAction: undefined, actionTaken: 'cancelled' as const }
+          : m
+      ),
+    }));
   },
 
   clearMessages: () => {

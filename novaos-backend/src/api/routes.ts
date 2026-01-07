@@ -84,6 +84,12 @@ import {
 } from '../services/settings.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// SWORDGATE ROUTES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { swordRoutes } from './sword-routes.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -160,6 +166,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'conversation-history',
         'structured-logging',
         'pipeline-integration',
+        'swordgate-v2',
         isSupabaseInitialized() ? 'supabase' : null,
         appConfig.verification.enabled ? 'verification' : null,
         appConfig.webFetch.enabled ? 'web-fetch' : null,
@@ -427,6 +434,14 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
     }
   );
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SWORDGATE ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Entry B: Direct API access from frontend
+  // All sword endpoints require authentication
+  
+  router.use('/sword', authenticate({ required: true }), swordRoutes);
+
   // ─────────────────────────────────────────────────────────────────────────────
   // PROTECTED MIDDLEWARE STACK
   // ─────────────────────────────────────────────────────────────────────────────
@@ -570,8 +585,46 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           },
         });
 
+
         if (result.status === 'stopped') {
           await trackVeto(userId);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SWORDGATE REDIRECT → PENDING CONFIRMATION
+        // When pipeline detects learning intent and returns redirect,
+        // convert to pending_confirmation with button text for frontend
+        // ═══════════════════════════════════════════════════════════════════════
+        if (result.status === 'redirect' && result.redirect) {
+          const { redirect } = result;
+          
+          // Generate contextual response and button text
+          const topicText = redirect.topic 
+            ? `learn ${redirect.topic}` 
+            : 'start learning';
+          
+          const confirmationResponse = redirect.mode === 'designer'
+            ? `I'd love to help you ${topicText}! Would you like me to create a personalized learning plan?`
+            : `Ready to continue your learning session? Let's pick up where you left off.`;
+          
+          const confirmText = redirect.mode === 'designer'
+            ? "Yes, let's learn"
+            : "Continue learning";
+          
+          res.json({
+            response: confirmationResponse,
+            stance: result.stance ?? 'sword',
+            status: 'pending_confirmation',
+            conversationId: resolvedConversationId,
+            isNewConversation,
+            pendingAction: {
+              type: 'sword_redirect',
+              redirect,
+              confirmText,
+              cancelText: 'No thanks',
+            },
+          });
+          return;
         }
 
         res.json({
@@ -820,6 +873,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
             debugMode: appConfig.observability.debugMode,
             redactPII: appConfig.observability.redactPII,
             supabase: isSupabaseInitialized(),
+            swordgate: true,
           },
           verification: {
             enabled: appConfig.verification.enabled,

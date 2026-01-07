@@ -47,7 +47,7 @@ export interface ConversationMessage {
 // GATE TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
-export type GateAction = 'continue' | 'stop' | 'halt' | 'await_ack' | 'regenerate' | 'degrade';
+export type GateAction = 'continue' | 'stop' | 'halt' | 'await_ack' | 'regenerate' | 'degrade' | 'redirect';
 export type GateStatus = 'pass' | 'passed' | 'blocked' | 'awaiting' | 'warning' | 'soft_fail' | 'hard_fail';
 
 export interface GateResult<T = unknown> {
@@ -81,10 +81,68 @@ export interface ToolsGateOutput {
 }
 
 export type StanceRoute = 'sword' | 'lens';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SWORDGATE REDIRECT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * SwordRedirect signals the frontend to navigate to the SwordGate UI
+ * instead of receiving a chat response.
+ */
+export interface SwordRedirect {
+  /** Always 'swordgate' */
+  target: 'swordgate';
+  
+  /** 
+   * designer: User wants to create a new learning plan
+   * runner: User wants to continue an existing plan
+   */
+  mode: 'designer' | 'runner';
+  
+  /** If runner mode, which plan to resume */
+  planId?: string;
+  
+  /** If designer mode, the extracted topic */
+  topic?: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SWORDGATE CONTEXT (Entry A Enrichment - DEPRECATED)
+// Now using redirect instead of enrichment
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface SwordContext {
+  hasActivePlan: boolean;
+  currentNode?: {
+    id: string;
+    title: string;
+    route: string;
+    sessionNumber: number;
+    totalSessions: number;
+  };
+  currentSpark?: {
+    id: string;
+    task: string;
+    estimatedMinutes: number;
+  };
+  completedNodes?: number;
+  totalNodes?: number;
+}
+
 export interface StanceGateOutput {
   route: StanceRoute;
   primary_route: PrimaryRoute;
   learning_intent: boolean;
+  
+  /** 
+   * SwordGate redirect - present when route='sword'
+   * Frontend should navigate to SwordGate UI instead of showing chat response
+   */
+  redirect?: SwordRedirect;
+  
+  /** @deprecated Use redirect instead */
+  swordContext?: SwordContext;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -229,7 +287,7 @@ export interface PipelineState {
   stance?: Stance;
 }
 
-export type PipelineStatus = 'success' | 'stopped' | 'await_ack' | 'degraded' | 'error';
+export type PipelineStatus = 'success' | 'stopped' | 'await_ack' | 'degraded' | 'error' | 'redirect';
 
 export interface PipelineResult {
   readonly status: PipelineStatus;
@@ -238,6 +296,10 @@ export interface PipelineResult {
   readonly gateResults: GateResults;
   readonly ackToken?: string;
   readonly ackMessage?: string;
+  
+  /** Present when status='redirect' - frontend should navigate to SwordGate */
+  readonly redirect?: SwordRedirect;
+  
   readonly metadata: {
     readonly requestId?: string;
     readonly totalTimeMs: number;

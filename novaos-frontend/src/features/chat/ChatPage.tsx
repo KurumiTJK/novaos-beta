@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT PAGE — Dark Mode with Sidebar Navigation + Typing Animation
+// With SwordGate Confirmation Buttons
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -26,7 +27,7 @@ import {
   ArchiveIcon,
   TrashIcon,
 } from '@/shared/components/Icons';
-
+import { ConfirmationButtons, ActionTakenIndicator } from './components';
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPING ANIMATION CONFIG
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -586,7 +587,24 @@ export function ChatPage() {
                             __html: formatResponse(message.content) 
                           }}
                         />
-                        <MessageActions />
+                        
+                        {/* Confirmation Buttons for Pending Actions */}
+                        {message.pendingAction && (
+                          <ConfirmationButtons 
+                            messageId={message.id} 
+                            pendingAction={message.pendingAction} 
+                          />
+                        )}
+                        
+                        {/* Show indicator after action taken */}
+                        {message.actionTaken && (
+                          <ActionTakenIndicator action={message.actionTaken} />
+                        )}
+                        
+                        {/* Normal message actions (only if no pending action) */}
+                        {!message.pendingAction && !message.actionTaken && (
+                          <MessageActions />
+                        )}
                       </>
                     )}
                   </div>

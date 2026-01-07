@@ -41,8 +41,11 @@ export {
 
 export {
   executeStanceGate,
+  executeStanceGateAsync,  // Async version with LLM classification + redirect
   type StanceGateOutput,
   type StanceRoute,
+  type SwordContext,
+  type SwordRedirect,      // NEW: Redirect signal for frontend navigation
 } from './stance_gate/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────

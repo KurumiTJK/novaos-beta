@@ -8,6 +8,8 @@ import { ChevronRightIcon } from '@/shared/components';
 import type { ModuleType } from '@/shared/types';
 
 const modules: { id: ModuleType; label: string; emoji: string; description: string }[] = [
+  // Learning module at the top for visibility
+  { id: 'learning', label: 'Learning', emoji: '📚', description: 'Skills & lesson progress' },
   { id: 'finance', label: 'Finance', emoji: '💰', description: 'Portfolio & investments' },
   { id: 'health', label: 'Health', emoji: '❤️', description: 'Recovery & vitals' },
   { id: 'calendar', label: 'Calendar', emoji: '📅', description: 'Events & schedule' },

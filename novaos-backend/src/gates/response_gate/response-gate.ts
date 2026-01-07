@@ -9,6 +9,7 @@ import type {
   PipelineState,
   PipelineContext,
   GateResult,
+  SwordContext,
 } from '../../types/index.js';
 
 import { PERSONALITY_DESCRIPTORS } from './personality_descriptor.js';
@@ -64,7 +65,7 @@ For lists, use simple dashes on new lines.`,
 /**
  * Build the system prompt with personality.
  */
-function buildSystemPrompt(personality: Personality): string {
+function buildSystemPrompt(personality: Personality, swordContext?: SwordContext): string {
   const parts: string[] = [];
 
   parts.push('Given the following personality:');
@@ -76,6 +77,43 @@ function buildSystemPrompt(personality: Personality): string {
   parts.push('Your previous responses in this conversation that contain specific data (prices, statistics, facts, dates) were based on verified real-time sources at that moment.');
   parts.push('Do not contradict or disclaim your own previous statements with phrases like "I don\'t have access to real-time data."');
   parts.push('If asked follow-up questions, build on what you already provided. The data may be slightly stale, but it was accurate when you stated it.');
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SWORDGATE CONTEXT INJECTION (Entry A)
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // When the user has an active learning plan and sends a learning-related message,
+  // inject their current context so responses can be personalized.
+  
+  if (swordContext?.hasActivePlan && swordContext.currentNode) {
+    parts.push('');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+    parts.push('USER\'S LEARNING CONTEXT (SwordGate):');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+    parts.push(`Current Lesson: "${swordContext.currentNode.title}"`);
+    parts.push(`Session: ${swordContext.currentNode.sessionNumber} of ${swordContext.currentNode.totalSessions}`);
+    parts.push(`Learning Route: ${swordContext.currentNode.route}`);
+    
+    if (swordContext.currentSpark) {
+      parts.push('');
+      parts.push('Today\'s Spark (micro-action):');
+      parts.push(`  Task: "${swordContext.currentSpark.task}"`);
+      parts.push(`  Estimated time: ~${swordContext.currentSpark.estimatedMinutes} minutes`);
+    }
+    
+    if (swordContext.completedNodes !== undefined && swordContext.totalNodes !== undefined) {
+      const progress = Math.round((swordContext.completedNodes / swordContext.totalNodes) * 100);
+      parts.push('');
+      parts.push(`Overall Progress: ${swordContext.completedNodes}/${swordContext.totalNodes} lessons complete (${progress}%)`);
+    }
+    
+    parts.push('');
+    parts.push('INSTRUCTIONS FOR LEARNING CONTEXT:');
+    parts.push('- Reference the user\'s current lesson naturally when relevant');
+    parts.push('- If they ask about their progress, use the concrete numbers above');
+    parts.push('- Encourage completion of today\'s spark if appropriate');
+    parts.push('- Keep responses focused on their learning journey');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+  }
 
   return parts.join('\n');
 }
@@ -100,8 +138,11 @@ export function stitchPrompt(
   const personality = config?.personality ?? DEFAULT_PERSONALITY;
   const capOutput = state.capabilityResult as CapabilityGateOutput | undefined;
   const topic = capOutput?.config?.topic;
+  
+  // Get SwordContext from stance gate output (Entry A enrichment)
+  const swordContext = state.stanceResult?.swordContext;
 
-  const system = buildSystemPrompt(personality);
+  const system = buildSystemPrompt(personality, swordContext);
   const user = buildUserPrompt(state.userMessage, topic);
 
   return { system, user };
@@ -150,13 +191,19 @@ export async function executeResponseGateAsync(
     };
   }
 
-  // Build prompts
+  // Build prompts (now includes SwordContext if present)
   const { system, user } = stitchPrompt(state, config);
 
   if (DEBUG) {
     console.log(`[RESPONSE] provider: ${provider}`);
     console.log(`[RESPONSE] SYSTEM PROMPT:\n${system}`);
     console.log(`[RESPONSE] USER PROMPT:\n${user}`);
+  }
+
+  // Log if SwordContext is being used
+  if (state.stanceResult?.swordContext?.hasActivePlan) {
+    console.log(`[RESPONSE] SwordContext injected: "${state.stanceResult.swordContext.currentNode?.title}" ` +
+      `(session ${state.stanceResult.swordContext.currentNode?.sessionNumber})`);
   }
 
   console.log(`[RESPONSE] provider: ${provider}`);

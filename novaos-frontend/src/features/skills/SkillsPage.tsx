@@ -1,8 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// ACTIONS PAGE — Quick Actions
+// SKILLS PAGE — SwordGate Learning Hub
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { useUIStore } from '@/shared/stores';
+import { SwordDesigner } from './components/SwordDesigner';
+import { SwordRunner } from './components/SwordRunner';
+import { SwordHome } from './components/SwordHome';
+
 export function SkillsPage() {
+  const { swordState, closeSword } = useUIStore();
+
   return (
     <div 
       className="flex flex-col h-full overflow-hidden"
@@ -10,20 +17,29 @@ export function SkillsPage() {
     >
       {/* Header */}
       <header 
-        className="px-5 flex-shrink-0 flex items-center justify-center"
+        className="px-5 flex-shrink-0 flex items-center justify-between"
         style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}
       >
-        <h1 className="text-[20px] font-semibold tracking-tight">Actions</h1>
+        <h1 className="text-[20px] font-semibold tracking-tight">Learn</h1>
+        {swordState.isActive && (
+          <button
+            onClick={closeSword}
+            className="text-sm text-white/50 hover:text-white active:text-white/70 transition-colors"
+          >
+            Exit
+          </button>
+        )}
       </header>
 
-      <div className="flex-1 flex items-center justify-center px-5">
-        <div className="text-center text-white/50">
-          <span className="text-5xl mb-4 block">⚡</span>
-          <h2 className="text-xl font-medium text-white mb-2">Coming Soon</h2>
-          <p className="text-sm">
-            Quick actions and automations
-          </p>
-        </div>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {!swordState.isActive && <SwordHome />}
+        {swordState.isActive && swordState.mode === 'designer' && (
+          <SwordDesigner topic={swordState.topic} />
+        )}
+        {swordState.isActive && swordState.mode === 'runner' && (
+          <SwordRunner planId={swordState.planId} />
+        )}
       </div>
     </div>
   );

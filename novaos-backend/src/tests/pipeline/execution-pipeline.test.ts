@@ -15,7 +15,7 @@ import type { PipelineContext, PipelineResult, GateResult } from '../../types/in
 const mockExecuteIntentGateAsync = vi.fn();
 const mockExecuteShieldGate = vi.fn();
 const mockExecuteToolsGate = vi.fn();
-const mockExecuteStanceGate = vi.fn();
+const mockExecuteStanceGateAsync = vi.fn();
 const mockExecuteCapabilityGate = vi.fn();
 const mockExecuteResponseGateAsync = vi.fn();
 const mockExecuteConstitutionGateAsync = vi.fn();
@@ -26,7 +26,7 @@ vi.mock('../../gates/index.js', () => ({
   executeIntentGateAsync: (...args: unknown[]) => mockExecuteIntentGateAsync(...args),
   executeShieldGate: (...args: unknown[]) => mockExecuteShieldGate(...args),
   executeToolsGate: (...args: unknown[]) => mockExecuteToolsGate(...args),
-  executeStanceGate: (...args: unknown[]) => mockExecuteStanceGate(...args),
+  executeStanceGateAsync: (...args: unknown[]) => mockExecuteStanceGateAsync(...args),
   executeCapabilityGate: (...args: unknown[]) => mockExecuteCapabilityGate(...args),
   executeResponseGateAsync: (...args: unknown[]) => mockExecuteResponseGateAsync(...args),
   executeConstitutionGateAsync: (...args: unknown[]) => mockExecuteConstitutionGateAsync(...args),
@@ -87,14 +87,15 @@ function createMockToolsResult(): GateResult<any> {
   };
 }
 
-function createMockStanceResult(route: string = 'lens'): GateResult<any> {
+function createMockStanceResult(route: string = 'lens', redirect?: any): GateResult<any> {
   return {
     gateId: 'stance',
     status: 'pass',
-    action: 'continue',
+    action: redirect ? 'redirect' : 'continue',
     executionTimeMs: 5,
     output: {
       route,
+      redirect,
     },
   };
 }
@@ -171,7 +172,7 @@ function setupDefaultMocks(): void {
   mockExecuteIntentGateAsync.mockResolvedValue(createMockIntentResult());
   mockExecuteShieldGate.mockReturnValue(createMockShieldResult());
   mockExecuteToolsGate.mockReturnValue(createMockToolsResult());
-  mockExecuteStanceGate.mockReturnValue(createMockStanceResult());
+  mockExecuteStanceGateAsync.mockResolvedValue(createMockStanceResult());
   mockExecuteCapabilityGate.mockReturnValue(createMockCapabilityResult());
   mockExecuteResponseGateAsync.mockResolvedValue(createMockResponseResult());
   mockExecuteConstitutionGateAsync.mockResolvedValue(createMockConstitutionResult());
@@ -263,7 +264,7 @@ describe('ExecutionPipeline', () => {
       });
 
       it('should include stance in result', async () => {
-        mockExecuteStanceGate.mockReturnValue(createMockStanceResult('sword'));
+        mockExecuteStanceGateAsync.mockResolvedValue(createMockStanceResult('sword'));
 
         const result = await pipeline.process('I want to learn Python');
 
@@ -323,7 +324,7 @@ describe('ExecutionPipeline', () => {
           callOrder.push('tools');
           return createMockToolsResult();
         });
-        mockExecuteStanceGate.mockImplementation(() => {
+        mockExecuteStanceGateAsync.mockImplementation(async () => {
           callOrder.push('stance');
           return createMockStanceResult();
         });
@@ -633,12 +634,20 @@ describe('ExecutionPipeline', () => {
           learning_intent: true,
         },
       });
-      mockExecuteStanceGate.mockReturnValue(createMockStanceResult('sword'));
+      // SWORD mode now returns redirect
+      mockExecuteStanceGateAsync.mockResolvedValue(createMockStanceResult('sword', {
+        target: 'swordgate',
+        mode: 'designer',
+        topic: 'Python',
+      }));
 
       const result = await pipeline.process('I want to learn Python');
 
-      expect(result.status).toBe('success');
+      expect(result.status).toBe('redirect');
       expect(result.stance).toBe('sword');
+      expect(result.redirect).toBeDefined();
+      expect(result.redirect?.mode).toBe('designer');
+      expect(result.redirect?.topic).toBe('Python');
     });
 
     it('should handle safety concern (SHIELD stance)', async () => {
