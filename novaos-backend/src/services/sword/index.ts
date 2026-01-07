@@ -25,6 +25,64 @@ import type { LessonPlan, LessonPlanRow, TodayResponse, DesignerSession } from '
 import { mapLessonPlan } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// USER ID HELPER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get internal UUID from external user ID (JWT user ID like "user_xxx")
+ * Creates user if not exists
+ */
+async function getInternalUserId(externalId: string): Promise<string> {
+  if (!isSupabaseInitialized()) {
+    throw new Error('Database not initialized');
+  }
+
+  const supabase = getSupabase();
+
+  // Try to find existing user by external_id
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('external_id', externalId)
+    .single();
+
+  if (existing) {
+    return existing.id;
+  }
+
+  // User doesn't exist - create them with placeholder email
+  const placeholderEmail = `${externalId}@novaos.local`;
+  
+  const { data: newUser, error: createError } = await supabase
+    .from('users')
+    .insert({
+      external_id: externalId,
+      email: placeholderEmail,
+      tier: 'free',
+    } as any)
+    .select('id')
+    .single();
+
+  if (createError) {
+    // Handle race condition
+    if (createError.code === '23505') {
+      const { data: retryUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('external_id', externalId)
+        .single();
+      
+      if (retryUser) {
+        return retryUser.id;
+      }
+    }
+    throw new Error(`Failed to create user: ${createError.message}`);
+  }
+
+  return newUser.id;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONSOLIDATED API
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -59,17 +117,26 @@ export async function getSwordState(userId: string): Promise<{
 
 /**
  * Get all plans for a user
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
-export async function getUserPlans(userId: string): Promise<LessonPlan[]> {
+export async function getUserPlans(externalUserId: string): Promise<LessonPlan[]> {
   if (!isSupabaseInitialized()) {
     return [];
+  }
+
+  // Get internal UUID from external ID
+  let internalUserId: string;
+  try {
+    internalUserId = await getInternalUserId(externalUserId);
+  } catch {
+    return []; // User doesn't exist
   }
 
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('lesson_plans')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', internalUserId)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -81,14 +148,18 @@ export async function getUserPlans(userId: string): Promise<LessonPlan[]> {
 
 /**
  * Activate a plan
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
 export async function activatePlan(
-  userId: string,
+  externalUserId: string,
   planId: string
 ): Promise<LessonPlan> {
   if (!isSupabaseInitialized()) {
     throw new Error('Database not initialized');
   }
+
+  // Get internal UUID from external ID
+  const internalUserId = await getInternalUserId(externalUserId);
 
   const supabase = getSupabase();
 
@@ -96,7 +167,7 @@ export async function activatePlan(
   await supabase
     .from('lesson_plans')
     .update({ status: 'abandoned', abandoned_at: new Date().toISOString() } as any)
-    .eq('user_id', userId)
+    .eq('user_id', internalUserId)
     .eq('status', 'active');
 
   // Activate the requested plan
@@ -108,7 +179,7 @@ export async function activatePlan(
       abandoned_at: null,
     } as any)
     .eq('id', planId)
-    .eq('user_id', userId)
+    .eq('user_id', internalUserId)
     .select()
     .single();
 
@@ -118,7 +189,7 @@ export async function activatePlan(
 
   // Initialize node progress for the plan
   await supabase.rpc('initialize_node_progress', {
-    p_user_id: userId,
+    p_user_id: internalUserId,
     p_plan_id: planId,
   });
 
@@ -127,13 +198,22 @@ export async function activatePlan(
 
 /**
  * Abandon a plan
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
 export async function abandonPlan(
-  userId: string,
+  externalUserId: string,
   planId: string
 ): Promise<void> {
   if (!isSupabaseInitialized()) {
     return;
+  }
+
+  // Get internal UUID from external ID
+  let internalUserId: string;
+  try {
+    internalUserId = await getInternalUserId(externalUserId);
+  } catch {
+    return; // User doesn't exist
   }
 
   const supabase = getSupabase();
@@ -144,7 +224,7 @@ export async function abandonPlan(
       abandoned_at: new Date().toISOString() 
     } as any)
     .eq('id', planId)
-    .eq('user_id', userId);
+    .eq('user_id', internalUserId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

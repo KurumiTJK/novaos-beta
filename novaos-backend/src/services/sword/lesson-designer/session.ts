@@ -18,22 +18,105 @@ import {
 } from '../types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// PHASE TO COLUMN MAPPING
+// Maps internal phase names to database column names
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const PHASE_TO_COLUMN: Record<string, string> = {
+  exploration: 'exploration_data',
+  capstone: 'capstone_data',
+  subskills: 'subskills_data',
+  routing: 'routing_data',
+  research: 'research_data',
+  node_generation: 'nodes_data',  // Note: column is nodes_data, not node_generation_data
+  sequencing: 'sequencing_data',
+  method_nodes: 'method_nodes_data',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// USER ID HELPER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get internal UUID from external user ID (JWT user ID like "user_xxx")
+ * Creates user if not exists
+ */
+async function getInternalUserId(externalId: string): Promise<string> {
+  if (!isSupabaseInitialized()) {
+    throw new Error('Database not initialized');
+  }
+
+  const supabase = getSupabase();
+
+  // Try to find existing user by external_id
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('external_id', externalId)
+    .single();
+
+  if (existing) {
+    return existing.id;
+  }
+
+  // User doesn't exist - create them with placeholder email
+  const placeholderEmail = `${externalId}@novaos.local`;
+  
+  const { data: newUser, error: createError } = await supabase
+    .from('users')
+    .insert({
+      external_id: externalId,
+      email: placeholderEmail,
+      tier: 'free',
+    } as any)
+    .select('id')
+    .single();
+
+  if (createError) {
+    // Handle race condition - another request may have created the user
+    if (createError.code === '23505') { // unique_violation
+      const { data: retryUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('external_id', externalId)
+        .single();
+      
+      if (retryUser) {
+        return retryUser.id;
+      }
+    }
+    throw new Error(`Failed to create user: ${createError.message}`);
+  }
+
+  return newUser.id;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // SESSION CRUD
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Get active designer session for user
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
-export async function getActiveSession(userId: string): Promise<DesignerSession | null> {
+export async function getActiveSession(externalUserId: string): Promise<DesignerSession | null> {
   if (!isSupabaseInitialized()) {
     return null;
+  }
+
+  // Get internal UUID from external ID
+  let internalUserId: string;
+  try {
+    internalUserId = await getInternalUserId(externalUserId);
+  } catch {
+    return null; // User doesn't exist yet, no session possible
   }
 
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('designer_sessions')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', internalUserId)
     .is('completed_at', null)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -74,29 +157,46 @@ export async function getSessionById(sessionId: string): Promise<DesignerSession
 
 /**
  * Start a new designer session
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
+ * @param topicOrConversationId - Topic string or conversation ID
  */
 export async function startSession(
-  userId: string,
-  conversationId?: string
+  externalUserId: string,
+  topicOrConversationId?: string
 ): Promise<DesignerSession> {
   if (!isSupabaseInitialized()) {
     throw new Error('Database not initialized');
   }
 
+  // Get internal UUID from external ID (creates user if needed)
+  const internalUserId = await getInternalUserId(externalUserId);
+
   // Check for existing active session
-  const existing = await getActiveSession(userId);
+  const existing = await getActiveSession(externalUserId);
   if (existing) {
     throw new Error('An active designer session already exists. Cancel it first.');
   }
+
+  // Determine if this is a topic or conversation ID
+  const isTopic = topicOrConversationId && !topicOrConversationId.startsWith('conv-');
+  const topic = isTopic ? topicOrConversationId : undefined;
+  const conversationId = !isTopic ? topicOrConversationId : undefined;
+
+  // Create initial exploration data if topic provided
+  const explorationData = topic ? {
+    learningGoal: topic,
+    readyForCapstone: true,
+  } : null;
 
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('designer_sessions')
     .insert({
-      user_id: userId,
+      user_id: internalUserId,
       conversation_id: conversationId,
       visible_phase: 'exploration',
       internal_phase: 'exploration',
+      exploration_data: explorationData,
     } as any)
     .select()
     .single();
@@ -132,7 +232,7 @@ export async function updateSessionPhase(
 
   // Add phase-specific data
   if (phaseData) {
-    const dataKey = `${internalPhase}_data`;
+    const dataKey = PHASE_TO_COLUMN[internalPhase] || `${internalPhase}_data`;
     updates[dataKey] = phaseData;
   }
 
@@ -162,11 +262,14 @@ export async function updatePhaseData(
     throw new Error('Database not initialized');
   }
 
+  // Map phase key to column name
+  const columnName = PHASE_TO_COLUMN[phaseKey] || `${phaseKey}_data`;
+
   const supabase = getSupabase();
   const { data: result, error } = await supabase
     .from('designer_sessions')
     .update({
-      [`${phaseKey}_data`]: data,
+      [columnName]: data,
       updated_at: new Date().toISOString(),
     } as any)
     .eq('id', sessionId)
@@ -237,17 +340,26 @@ export async function completeSession(sessionId: string): Promise<DesignerSessio
 
 /**
  * Cancel session
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
-export async function cancelSession(userId: string): Promise<void> {
+export async function cancelSession(externalUserId: string): Promise<void> {
   if (!isSupabaseInitialized()) {
     return;
+  }
+
+  // Get internal UUID from external ID
+  let internalUserId: string;
+  try {
+    internalUserId = await getInternalUserId(externalUserId);
+  } catch {
+    return; // User doesn't exist, nothing to cancel
   }
 
   const supabase = getSupabase();
   await supabase
     .from('designer_sessions')
     .delete()
-    .eq('user_id', userId)
+    .eq('user_id', internalUserId)
     .is('completed_at', null);
 }
 

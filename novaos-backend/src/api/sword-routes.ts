@@ -221,7 +221,7 @@ router.delete('/designer', async (req: Request, res: Response, next: NextFunctio
     
     const session = await LessonDesigner.getActiveSession(userId);
     if (session) {
-      await LessonDesigner.cancelSession(session.id);
+      await LessonDesigner.cancelSession(userId);
     }
     
     res.json({ success: true });

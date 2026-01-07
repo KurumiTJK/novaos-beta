@@ -44,6 +44,7 @@ export const MethodNodeTypeSchema = z.enum([
 
 export const StartDesignerSchema = z.object({
   conversationId: z.string().optional(),
+  topic: z.string().optional(),
 });
 
 export const ExplorationMessageSchema = z.object({
@@ -51,6 +52,9 @@ export const ExplorationMessageSchema = z.object({
 });
 
 export const GoalDefinitionSchema = z.object({
+  goal: z.string().optional(),
+  topic: z.string().optional(),
+  context: z.string().optional(),
   difficulty: DifficultySchema,
   dailyMinutes: z.number().int().min(10).max(180),
   weeklyCadence: z.number().int().min(1).max(7),

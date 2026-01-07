@@ -318,6 +318,40 @@ async function createPlanFromSession(sessionId: string): Promise<LessonPlan> {
     if (nodesError) {
       throw new Error(`Failed to create nodes: ${nodesError.message}`);
     }
+
+    // Fetch the inserted nodes to get their IDs
+    const { data: insertedNodes, error: fetchError } = await supabase
+      .from('nodes')
+      .select('id, sequence_order')
+      .eq('plan_id', plan.id)
+      .order('sequence_order', { ascending: true });
+
+    if (fetchError) {
+      throw new Error(`Failed to fetch nodes: ${fetchError.message}`);
+    }
+
+    // Create node_progress records for each node
+    // First node is 'available', rest are 'locked'
+    if (insertedNodes && insertedNodes.length > 0) {
+      const progressInserts = insertedNodes.map((node: any) => ({
+        user_id: session.userId,
+        node_id: node.id,
+        status: node.sequence_order === 1 ? 'available' : 'locked',
+        sessions_completed: 0,
+        current_session: 0,
+        all_assets: false,
+        mastery_achieved: false,
+      }));
+
+      const { error: progressError } = await supabase
+        .from('node_progress')
+        .insert(progressInserts as any);
+
+      if (progressError) {
+        console.error('[DESIGNER] Failed to create node_progress:', progressError.message);
+        // Don't throw - plan is still usable, we can recover
+      }
+    }
   }
 
   // Link session to plan and complete it

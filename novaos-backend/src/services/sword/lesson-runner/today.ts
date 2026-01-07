@@ -30,25 +30,60 @@ import { checkRuntimeMethodNodeTrigger } from '../lesson-designer/method-nodes.j
 import { generateDailyPlan } from './daily-plan.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// USER ID HELPER
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get internal UUID from external user ID (JWT user ID like "user_xxx")
+ */
+async function getInternalUserId(externalId: string): Promise<string | null> {
+  if (!isSupabaseInitialized()) {
+    return null;
+  }
+
+  const supabase = getSupabase();
+
+  // Try to find existing user by external_id
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('external_id', externalId)
+    .single();
+
+  if (existing) {
+    return existing.id;
+  }
+
+  return null; // User doesn't exist
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // MAIN TODAY FUNCTION
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Get today's learning content
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
-export async function getToday(userId: string): Promise<TodayResponse | null> {
+export async function getToday(externalUserId: string): Promise<TodayResponse | null> {
   if (!isSupabaseInitialized()) {
     throw new Error('Database not initialized');
   }
 
+  // Get internal UUID from external ID
+  const internalUserId = await getInternalUserId(externalUserId);
+  if (!internalUserId) {
+    return null; // User doesn't exist
+  }
+
   // Step 1: Get active plan
-  const plan = await getActivePlan(userId);
+  const plan = await getActivePlan(internalUserId);
   if (!plan) {
     return null; // No active plan
   }
 
   // Step 2: Get current node (in-progress or next available)
-  const { node, progress } = await getCurrentNode(userId, plan.id);
+  const { node, progress } = await getCurrentNode(internalUserId, plan.id);
   if (!node || !progress) {
     return null; // Plan complete or no available nodes
   }
@@ -61,16 +96,16 @@ export async function getToday(userId: string): Promise<TodayResponse | null> {
 
   if (refreshCheck.needsRefresh) {
     // Generate refresh session
-    dailyPlan = await generateRefreshSession(userId, node, progress, refreshCheck.gapDays!);
+    dailyPlan = await generateRefreshSession(internalUserId, node, progress, refreshCheck.gapDays!);
     isRefreshSession = true;
     refreshReason = `${refreshCheck.gapDays} days since last session`;
   } else {
     // Get or generate regular daily plan
-    const timezone = await getUserTimezone(userId);
+    const timezone = await getUserTimezone(internalUserId);
     const today = getTodayInTimezone(timezone);
     
     dailyPlan = await getOrGenerateDailyPlan(
-      userId,
+      internalUserId,
       node,
       progress,
       today,
@@ -79,10 +114,10 @@ export async function getToday(userId: string): Promise<TodayResponse | null> {
   }
 
   // Step 4: Check for in-progress warning (FIX #5)
-  const switchCheck = await checkNodeSwitch(userId, node.id);
+  const switchCheck = await checkNodeSwitch(internalUserId, node.id);
 
   // Step 5: Check if method node is due (FIX #4)
-  const nextNode = await getNextAvailableNode(userId, plan.id, node.id);
+  const nextNode = await getNextAvailableNode(internalUserId, plan.id, node.id);
   const methodNodeCheck = checkRuntimeMethodNodeTrigger(
     plan,
     node,
@@ -90,7 +125,7 @@ export async function getToday(userId: string): Promise<TodayResponse | null> {
   );
 
   // Step 6: Get graph context
-  const graphContext = await getGraphContext(userId, plan.id);
+  const graphContext = await getGraphContext(internalUserId, plan.id);
 
   // Build response
   return {
@@ -121,14 +156,15 @@ export async function getToday(userId: string): Promise<TodayResponse | null> {
 
 /**
  * Get user's active plan
+ * @param internalUserId - Internal UUID from users table
  */
-async function getActivePlan(userId: string): Promise<LessonPlan | null> {
+async function getActivePlan(internalUserId: string): Promise<LessonPlan | null> {
   const supabase = getSupabase();
   
   const { data, error } = await supabase
     .from('lesson_plans')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', internalUserId)
     .eq('status', 'active')
     .order('started_at', { ascending: false })
     .limit(1)

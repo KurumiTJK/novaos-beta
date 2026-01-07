@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SwordGate Test Harness</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    
+    /* Header */
+    .header {
+      background: #1a1a1a;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #333;
+    }
+    
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .logo {
+      font-size: 24px;
+    }
+    
+    .title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+    
+    .mode-badge {
+      background: #333;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #888;
+    }
+    
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #666;
+    }
+    
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.error { background: #ef4444; }
+    
+    .status-text {
+      font-size: 13px;
+      color: #888;
+    }
+    
+    /* URL Bar */
+    .url-bar {
+      background: #1a1a1a;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid #333;
+    }
+    
+    .url-bar label {
+      font-size: 13px;
+      color: #888;
+    }
+    
+    .url-bar input {
+      flex: 1;
+      max-width: 400px;
+      background: #0f0f0f;
+      border: 1px solid #333;
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 13px;
+    }
+    
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #3b82f6;
+      color: #fff;
+    }
+    
+    .btn-primary:hover { background: #2563eb; }
+    
+    .btn-success {
+      background: #22c55e;
+      color: #fff;
+    }
+    
+    .btn-success:hover { background: #16a34a; }
+    
+    .btn-danger {
+      background: #ef4444;
+      color: #fff;
+    }
+    
+    .btn-danger:hover { background: #dc2626; }
+    
+    .btn-secondary {
+      background: #333;
+      color: #e0e0e0;
+    }
+    
+    .btn-secondary:hover { background: #444; }
+    
+    .btn-ghost {
+      background: transparent;
+      color: #888;
+      border: 1px solid #333;
+    }
+    
+    .btn-ghost:hover { background: #222; color: #fff; }
+    
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    
+    /* Main Layout */
+    .main {
+      display: grid;
+      grid-template-columns: 300px 1fr 350px;
+      height: calc(100vh - 100px);
+      min-height: 500px;
+    }
+    
+    @media (max-width: 1200px) {
+      .main {
+        grid-template-columns: 280px 1fr 300px;
+      }
+    }
+    
+    /* Panels */
+    .panel {
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    .panel:last-child { border-right: none; }
+    
+    .panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1a1a1a;
+    }
+    
+    .panel-title {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .panel-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      min-height: 0;
+    }
+    
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+    }
+    
+    .tab {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      color: #888;
+      transition: all 0.2s;
+    }
+    
+    .tab:hover { color: #fff; background: #333; }
+    .tab.active { color: #fff; background: #3b82f6; }
+    
+    /* Chat Panel */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .message {
+      padding: 12px;
+      border-radius: 8px;
+      max-width: 90%;
+    }
+    
+    .message.user {
+      background: #3b82f6;
+      color: #fff;
+      align-self: flex-end;
+    }
+    
+    .message.assistant {
+      background: #262626;
+      align-self: flex-start;
+    }
+    
+    .message.system {
+      background: #1e3a5f;
+      align-self: center;
+      font-size: 12px;
+      color: #93c5fd;
+    }
+    
+    .stance-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    
+    .stance-lens { background: #8b5cf6; color: #fff; }
+    .stance-sword { background: #22c55e; color: #fff; }
+    .stance-shield { background: #3b82f6; color: #fff; }
+    .stance-control { background: #ef4444; color: #fff; }
+    
+    .chat-input-area {
+      padding: 12px;
+      border-top: 1px solid #333;
+      background: #1a1a1a;
+    }
+    
+    .chat-input-row {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .chat-input {
+      flex: 1;
+      background: #0f0f0f;
+      border: 1px solid #333;
+      padding: 10px 14px;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+    }
+    
+    .quick-messages {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    
+    .quick-msg {
+      padding: 6px 10px;
+      background: #262626;
+      border: 1px solid #333;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #888;
+      cursor: pointer;
+    }
+    
+    .quick-msg:hover { background: #333; color: #fff; }
+    
+    /* Status Card */
+    .status-card {
+      background: #1a2e1a;
+      border: 1px solid #2d4a2d;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    
+    .status-card.error {
+      background: #2e1a1a;
+      border-color: #4a2d2d;
+    }
+    
+    .status-card .label {
+      font-size: 11px;
+      color: #22c55e;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    
+    .status-card.error .label { color: #ef4444; }
+    
+    /* Plans Grid */
+    .plans-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .plan-card {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 16px;
+      transition: all 0.2s;
+    }
+    
+    .plan-card:hover {
+      border-color: #555;
+    }
+    
+    .plan-card.active {
+      border-color: #22c55e;
+      background: #1a2e1a;
+    }
+    
+    .plan-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    
+    .plan-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    
+    .plan-status {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    
+    .plan-status.active { background: #22c55e; color: #fff; }
+    .plan-status.designing { background: #f59e0b; color: #000; }
+    .plan-status.completed { background: #3b82f6; color: #fff; }
+    .plan-status.abandoned { background: #666; color: #fff; }
+    
+    .plan-meta {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #888;
+    }
+    
+    .plan-meta-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    .plan-progress {
+      margin-bottom: 12px;
+    }
+    
+    .progress-bar {
+      height: 6px;
+      background: #333;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: #22c55e;
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+    
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #888;
+    }
+    
+    .plan-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #333;
+    }
+    
+    .plan-capstone {
+      font-size: 13px;
+      color: #a0a0a0;
+      line-height: 1.5;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: #0f0f0f;
+      border-radius: 6px;
+      border-left: 3px solid #8b5cf6;
+    }
+    
+    .plan-criteria {
+      margin-bottom: 12px;
+    }
+    
+    .plan-criteria-title {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 6px;
+    }
+    
+    .plan-criteria-list {
+      list-style: none;
+      font-size: 12px;
+      color: #a0a0a0;
+    }
+    
+    .plan-criteria-list li {
+      padding: 4px 0;
+      padding-left: 16px;
+      position: relative;
+    }
+    
+    .plan-criteria-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: #22c55e;
+    }
+    
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
+    
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    
+    .empty-state-title {
+      font-size: 16px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    
+    .empty-state-text {
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    
+    /* Designer Panel */
+    .designer-phase {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    
+    .designer-phase-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    
+    .phase-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    
+    .phase-number.active { background: #3b82f6; }
+    .phase-number.complete { background: #22c55e; }
+    
+    .phase-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    .phase-status {
+      margin-left: auto;
+      font-size: 12px;
+      color: #888;
+    }
+    
+    .designer-data {
+      background: #0f0f0f;
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 12px;
+      color: #a0a0a0;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    
+    .designer-data pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    
+    /* API Logs */
+    .log-entry {
+      margin-bottom: 12px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 11px;
+    }
+    
+    .log-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    
+    .log-time {
+      color: #666;
+    }
+    
+    .log-method {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    
+    .log-method.GET { background: #22c55e22; color: #22c55e; }
+    .log-method.POST { background: #3b82f622; color: #3b82f6; }
+    .log-method.DELETE { background: #ef444422; color: #ef4444; }
+    
+    .log-path { color: #e0e0e0; }
+    
+    .log-status {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    
+    .log-status.success { background: #22c55e22; color: #22c55e; }
+    .log-status.error { background: #ef444422; color: #ef4444; }
+    
+    .log-body {
+      background: #0f0f0f;
+      border-radius: 4px;
+      padding: 8px;
+      color: #888;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    
+    .log-body pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    
+    /* Quick Actions */
+    .quick-actions {
+      padding: 12px;
+      border-top: 1px solid #333;
+      background: #1a1a1a;
+      flex-shrink: 0;
+    }
+    
+    .quick-actions-label {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    
+    .quick-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    
+    /* Loading */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      color: #888;
+    }
+    
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 2px solid #333;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 12px;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    /* Nodes List */
+    .nodes-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    
+    .node-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background: #0f0f0f;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    
+    .node-order {
+      width: 24px;
+      height: 24px;
+      background: #333;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    
+    .node-title {
+      flex: 1;
+      color: #e0e0e0;
+    }
+    
+    .node-route {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .node-route.recall { background: #8b5cf622; color: #8b5cf6; }
+    .node-route.practice { background: #3b82f622; color: #3b82f6; }
+    .node-route.apply { background: #22c55e22; color: #22c55e; }
+    .node-route.build { background: #f59e0b22; color: #f59e0b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <span class="logo">⚔️</span>
+      <span class="title">SwordGate Test Harness v4</span>
+      <span class="mode-badge">CONNECTED MODE</span>
+    </div>
+    <div class="header-right">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">Disconnected</span>
+      <button class="btn btn-danger btn-sm" onclick="resetHarness()">Reset</button>
+    </div>
+  </div>
+  
+  <div class="url-bar">
+    <label>Backend URL:</label>
+    <input type="text" id="baseUrl" value="http://localhost:3000/api/v1" />
+    <button class="btn btn-primary" onclick="connect()">Connect</button>
+  </div>
+  
+  <div class="main">
+    <!-- Chat Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">💬 Chat (Pipeline Test)</span>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="status-card" id="connectionStatus">
+          <div class="label">CONNECTING...</div>
+          <div>Waiting for connection</div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-input-row">
+          <input type="text" class="chat-input" id="chatInput" placeholder="Type a message..." onkeypress="handleChatKeypress(event)" />
+          <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+        </div>
+        <div class="quick-messages">
+          <span class="quick-msg" onclick="sendQuickMessage('I want to learn TypeScript')">I want to learn TypeScript</span>
+          <span class="quick-msg" onclick="sendQuickMessage('Teach me guitar')">Teach me guitar</span>
+          <span class="quick-msg" onclick="sendQuickMessage('Hello!')">Hello!</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Center Panel (Tabs: Designer / Plans) -->
+    <div class="panel">
+      <div class="tabs">
+        <div class="tab active" id="tabDesigner" onclick="switchTab('designer')">🎨 Designer</div>
+        <div class="tab" id="tabPlans" onclick="switchTab('plans')">📚 Plans</div>
+        <div class="tab" id="tabToday" onclick="switchTab('today')">📅 Today</div>
+      </div>
+      
+      <!-- Designer View -->
+      <div class="panel-content" id="viewDesigner">
+        <div id="designerContent">
+          <div class="empty-state">
+            <div class="empty-state-icon">⚔️</div>
+            <div class="empty-state-title">No Active Designer Session</div>
+            <div class="empty-state-text">Start a design session to create a learning plan</div>
+            <button class="btn btn-success" onclick="startDesigner()">Start Designer (TypeScript)</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Plans View -->
+      <div class="panel-content" id="viewPlans" style="display: none;">
+        <div id="plansContent">
+          <div class="loading">
+            <div class="spinner"></div>
+            <span>Loading plans...</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Today View -->
+      <div class="panel-content" id="viewToday" style="display: none;">
+        <div id="todayContent">
+          <div class="empty-state">
+            <div class="empty-state-icon">📅</div>
+            <div class="empty-state-title">No Active Learning</div>
+            <div class="empty-state-text">Activate a plan to see today's learning content</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- API Logs Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">📋 API Logs</span>
+        <button class="btn btn-ghost btn-sm" onclick="clearLogs()">Clear</button>
+      </div>
+      <div class="panel-content" id="apiLogs"></div>
+      <div class="quick-actions">
+        <div class="quick-actions-label">Quick API Calls</div>
+        <div class="quick-actions-grid">
+          <button class="btn btn-secondary btn-sm" onclick="callApi('GET', '/health')">Health</button>
+          <button class="btn btn-secondary btn-sm" onclick="callApi('GET', '/auth/status')">Status</button>
+          <button class="btn btn-secondary btn-sm" onclick="callApi('GET', '/sword')">Sword State</button>
+          <button class="btn btn-secondary btn-sm" onclick="callApi('GET', '/sword/today')">Today</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadPlansButton()">Plans</button>
+          <button class="btn btn-secondary btn-sm" onclick="callApi('GET', '/sword/stats')">Stats</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let state = {
+      baseUrl: 'http://localhost:3000/api/v1',
+      token: null,
+      apiKey: null,
+      userId: null,
+      connected: false,
+      conversationId: null,
+      currentTab: 'designer',
+      plans: [],
+      designerSession: null,
+    };
+    
+    // Initialize
+    document.getElementById('baseUrl').value = state.baseUrl;
+    
+    // Tab switching
+    function switchTab(tab) {
+      state.currentTab = tab;
+      
+      // Update tab buttons
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+      
+      // Show/hide views
+      document.getElementById('viewDesigner').style.display = tab === 'designer' ? 'block' : 'none';
+      document.getElementById('viewPlans').style.display = tab === 'plans' ? 'block' : 'none';
+      document.getElementById('viewToday').style.display = tab === 'today' ? 'block' : 'none';
+      
+      // Load data for tab
+      if (tab === 'plans') loadPlans();
+      if (tab === 'today') loadToday();
+      if (tab === 'designer') loadDesigner();
+    }
+    
+    // Connect to backend
+    async function connect() {
+      state.baseUrl = document.getElementById('baseUrl').value;
+      updateStatus('connecting');
+      
+      try {
+        // Health check
+        const health = await request('GET', '/health');
+        
+        // Use consistent test email so we keep the same user
+        const email = 'test_persistent@example.com';
+        const auth = await request('POST', '/auth/register', { email, tier: 'free' });
+        
+        state.token = auth.token;
+        state.apiKey = auth.apiKey;
+        state.userId = auth.userId;
+        state.connected = true;
+        
+        updateStatus('connected');
+        showConnectionStatus(true);
+        
+        // Load initial data
+        loadDesigner();
+        
+      } catch (error) {
+        updateStatus('error');
+        showConnectionStatus(false, error.message);
+      }
+    }
+    
+    // HTTP requests
+    async function request(method, path, body = null) {
+      // Add cache-busting for GET requests
+      let url = state.baseUrl + path;
+      if (method === 'GET') {
+        const separator = path.includes('?') ? '&' : '?';
+        url += `${separator}_t=${Date.now()}`;
+      }
+      
+      const headers = { 
+        'Content-Type': 'application/json',
+      };
+      
+      if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+      if (state.apiKey) headers['X-API-Key'] = state.apiKey;
+      
+      const startTime = Date.now();
+      
+      try {
+        const res = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : null,
+        });
+        
+        let data = null;
+        const contentType = res.headers.get('content-type');
+        
+        // Only try to parse JSON if there's content
+        if (res.status !== 304 && contentType && contentType.includes('application/json')) {
+          try {
+            data = await res.json();
+          } catch (e) {
+            data = { _raw: 'Could not parse response' };
+          }
+        } else if (res.status === 304) {
+          data = { _status: 'Not Modified (cached)' };
+        }
+        
+        logRequest(method, path, body, res.status, data, Date.now() - startTime);
+        
+        if (!res.ok && res.status !== 304) {
+          throw new Error(data?.error?.message || data?.error || 'Request failed');
+        }
+        
+        return data?.data !== undefined ? data.data : data;
+        
+      } catch (error) {
+        logRequest(method, path, body, 0, { error: error.message }, Date.now() - startTime);
+        throw error;
+      }
+    }
+    
+    // Logging
+    function logRequest(method, path, body, status, response, duration) {
+      const logs = document.getElementById('apiLogs');
+      const time = new Date().toLocaleTimeString();
+      const statusClass = status >= 200 && status < 300 ? 'success' : 'error';
+      
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `
+        <div class="log-header">
+          <span class="log-time">${time}</span>
+          <span class="log-method ${method}">${method}</span>
+          <span class="log-path">${path}</span>
+          <span class="log-status ${statusClass}">${status || 'ERR'}</span>
+          <span style="color: #666; font-size: 10px;">${duration}ms</span>
+        </div>
+        ${body ? `<div class="log-body"><pre>${JSON.stringify(body, null, 2)}</pre></div>` : ''}
+        <div class="log-body"><pre>${JSON.stringify(response, null, 2).substring(0, 500)}${JSON.stringify(response).length > 500 ? '...' : ''}</pre></div>
+      `;
+      
+      logs.insertBefore(entry, logs.firstChild);
+    }
+    
+    function clearLogs() {
+      document.getElementById('apiLogs').innerHTML = '';
+    }
+    
+    // Status updates
+    function updateStatus(status) {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      
+      dot.className = 'status-dot ' + status;
+      text.textContent = status === 'connected' ? `Connected (${state.baseUrl})` : 
+                         status === 'connecting' ? 'Connecting...' : 'Error';
+    }
+    
+    function showConnectionStatus(success, error = null) {
+      const el = document.getElementById('connectionStatus');
+      if (success) {
+        el.className = 'status-card';
+        el.innerHTML = `
+          <div class="label">✅ CONNECTED</div>
+          <div>User: ${state.userId}</div>
+        `;
+      } else {
+        el.className = 'status-card error';
+        el.innerHTML = `
+          <div class="label">❌ CONNECTION FAILED</div>
+          <div>${error || 'Unknown error'}</div>
+        `;
+      }
+    }
+    
+    // Chat functionality
+    function handleChatKeypress(e) {
+      if (e.key === 'Enter') sendMessage();
+    }
+    
+    function sendQuickMessage(msg) {
+      document.getElementById('chatInput').value = msg;
+      sendMessage();
+    }
+    
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const message = input.value.trim();
+      if (!message) return;
+      
+      input.value = '';
+      addChatMessage('user', message);
+      
+      try {
+        const body = {
+          message,
+          source: 'test_harness',
+        };
+        if (state.conversationId) {
+          body.conversationId = state.conversationId;
+        }
+        
+        const response = await request('POST', '/chat', body);
+        
+        state.conversationId = response.conversationId;
+        addChatMessage('assistant', response.response, response.stance);
+        
+        // If redirected to designer, refresh
+        if (response.pendingAction?.type === 'sword_redirect') {
+          setTimeout(() => {
+            loadDesigner();
+            switchTab('designer');
+          }, 500);
+        }
+        
+      } catch (error) {
+        addChatMessage('system', '❌ Error: ' + error.message);
+      }
+    }
+    
+    function addChatMessage(role, content, stance = null) {
+      const container = document.getElementById('chatMessages');
+      const msg = document.createElement('div');
+      msg.className = `message ${role}`;
+      
+      if (stance) {
+        msg.innerHTML = `<div class="stance-badge stance-${stance}">${stance.toUpperCase()}</div>${content}`;
+      } else {
+        msg.textContent = content;
+      }
+      
+      container.appendChild(msg);
+      container.scrollTop = container.scrollHeight;
+    }
+    
+    // Designer functionality
+    async function loadDesigner() {
+      try {
+        const session = await request('GET', '/sword/designer');
+        state.designerSession = session;
+        renderDesigner(session);
+      } catch (error) {
+        renderDesigner(null);
+      }
+    }
+    
+    function renderDesigner(session) {
+      const container = document.getElementById('designerContent');
+      
+      if (!session) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">⚔️</div>
+            <div class="empty-state-title">No Active Designer Session</div>
+            <div class="empty-state-text">Start a design session to create a learning plan</div>
+            <button class="btn btn-success" onclick="startDesigner()">Start Designer (TypeScript)</button>
+          </div>
+        `;
+        return;
+      }
+      
+      const phases = [
+        { key: 'exploration', name: 'Exploration', data: session.explorationData },
+        { key: 'define_goal', name: 'Define Goal', data: session.capstoneData },
+        { key: 'research', name: 'Research', data: session.researchData },
+        { key: 'review', name: 'Review', data: session.nodesData },
+      ];
+      
+      const currentPhaseIndex = phases.findIndex(p => p.key === session.visiblePhase);
+      
+      let html = `
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 18px; font-weight: 600;">Session: ${session.id.substring(0, 8)}...</div>
+            <button class="btn btn-danger btn-sm" onclick="cancelDesigner()">Cancel</button>
+          </div>
+          <div style="color: #888; font-size: 13px; margin-top: 4px;">
+            Internal Phase: ${session.internalPhase}
+          </div>
+        </div>
+      `;
+      
+      phases.forEach((phase, i) => {
+        const isComplete = i < currentPhaseIndex;
+        const isCurrent = i === currentPhaseIndex;
+        const numberClass = isComplete ? 'complete' : (isCurrent ? 'active' : '');
+        
+        html += `
+          <div class="designer-phase">
+            <div class="designer-phase-header">
+              <div class="phase-number ${numberClass}">${i + 1}</div>
+              <div class="phase-title">${phase.name}</div>
+              <div class="phase-status">${isComplete ? '✅ Complete' : (isCurrent ? '🔄 Current' : '⏳ Pending')}</div>
+            </div>
+            ${phase.data ? `<div class="designer-data"><pre>${JSON.stringify(phase.data, null, 2).substring(0, 300)}...</pre></div>` : ''}
+          </div>
+        `;
+      });
+      
+      // Action buttons
+      html += '<div style="display: flex; gap: 8px; margin-top: 16px;">';
+      
+      if (session.visiblePhase === 'exploration') {
+        html += `<button class="btn btn-primary" onclick="defineGoal()">Define Goal →</button>`;
+      } else if (session.visiblePhase === 'define_goal') {
+        html += `<button class="btn btn-primary" onclick="runResearch()">Research →</button>`;
+      } else if (session.visiblePhase === 'research') {
+        html += `<button class="btn btn-primary" onclick="runReview()">Review →</button>`;
+      } else if (session.visiblePhase === 'review') {
+        html += `<button class="btn btn-success" onclick="finalize()">✓ Create Plan</button>`;
+      }
+      
+      html += '</div>';
+      
+      container.innerHTML = html;
+    }
+    
+    async function startDesigner() {
+      try {
+        await request('POST', '/sword/designer/start', { topic: 'TypeScript' });
+        loadDesigner();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function cancelDesigner() {
+      try {
+        await request('DELETE', '/sword/designer');
+        loadDesigner();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function defineGoal() {
+      try {
+        await request('POST', '/sword/designer/goal', {
+          goal: 'Build type-safe applications',
+          topic: 'TypeScript',
+          context: 'Developer learning',
+          difficulty: 'intermediate',
+          dailyMinutes: 20,
+          weeklyCadence: 5,
+        });
+        loadDesigner();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function runResearch() {
+      try {
+        await request('POST', '/sword/designer/research');
+        loadDesigner();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function runReview() {
+      try {
+        await request('POST', '/sword/designer/review');
+        loadDesigner();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function finalize() {
+      try {
+        const result = await request('POST', '/sword/designer/finalize');
+        alert('✅ Plan created! ID: ' + result.id);
+        loadDesigner();
+        switchTab('plans');
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    // Plans functionality
+    async function loadPlans() {
+      const container = document.getElementById('plansContent');
+      container.innerHTML = '<div class="loading"><div class="spinner"></div><span>Loading plans...</span></div>';
+      
+      try {
+        const plans = await request('GET', '/sword/plans');
+        state.plans = plans || [];
+        renderPlans(state.plans);
+      } catch (error) {
+        container.innerHTML = `<div class="status-card error"><div class="label">Error</div>${error.message}</div>`;
+      }
+    }
+    
+    function renderPlans(plans) {
+      const container = document.getElementById('plansContent');
+      
+      if (!plans || plans.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📚</div>
+            <div class="empty-state-title">No Plans Yet</div>
+            <div class="empty-state-text">Create a plan using the Designer</div>
+            <button class="btn btn-primary" onclick="switchTab('designer')">Go to Designer</button>
+          </div>
+        `;
+        return;
+      }
+      
+      let html = '<div class="plans-grid">';
+      
+      plans.forEach(plan => {
+        const isActive = plan.status === 'active';
+        const progress = Math.round((plan.progress || 0) * 100);
+        
+        html += `
+          <div class="plan-card ${isActive ? 'active' : ''}">
+            <div class="plan-header">
+              <div>
+                <div class="plan-title">${plan.title || 'Untitled Plan'}</div>
+                <div style="font-size: 12px; color: #666;">ID: ${plan.id.substring(0, 8)}...</div>
+              </div>
+              <span class="plan-status ${plan.status}">${plan.status}</span>
+            </div>
+            
+            ${plan.capstoneStatement ? `<div class="plan-capstone">${plan.capstoneStatement}</div>` : ''}
+            
+            <div class="plan-meta">
+              <div class="plan-meta-item">📚 ${plan.totalNodes || 0} nodes</div>
+              <div class="plan-meta-item">📅 ${plan.totalSessions || 0} sessions</div>
+              <div class="plan-meta-item">⏱️ ~${plan.estimatedWeeks || 0} weeks</div>
+              <div class="plan-meta-item">🎯 ${plan.dailyMinutes || 0} min/day</div>
+            </div>
+            
+            ${plan.successCriteria && plan.successCriteria.length > 0 ? `
+              <div class="plan-criteria">
+                <div class="plan-criteria-title">Success Criteria:</div>
+                <ul class="plan-criteria-list">
+                  ${plan.successCriteria.slice(0, 3).map(c => `<li>${c}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+            
+            <div class="plan-progress">
+              <div class="progress-label">
+                <span>Progress</span>
+                <span>${progress}%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" style="width: ${progress}%"></div>
+              </div>
+            </div>
+            
+            <div class="plan-actions">
+              ${!isActive ? `<button class="btn btn-success btn-sm" onclick="activatePlan('${plan.id}')">Activate</button>` : ''}
+              <button class="btn btn-secondary btn-sm" onclick="viewPlanNodes('${plan.id}')">View Nodes</button>
+              ${plan.status !== 'abandoned' ? `<button class="btn btn-ghost btn-sm" onclick="abandonPlan('${plan.id}')">Abandon</button>` : ''}
+            </div>
+          </div>
+        `;
+      });
+      
+      html += '</div>';
+      container.innerHTML = html;
+    }
+    
+    async function activatePlan(planId) {
+      try {
+        await request('POST', `/sword/plans/${planId}/activate`);
+        loadPlans();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function abandonPlan(planId) {
+      if (!confirm('Are you sure you want to abandon this plan?')) return;
+      try {
+        await request('POST', `/sword/plans/${planId}/abandon`);
+        loadPlans();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    async function viewPlanNodes(planId) {
+      try {
+        const nodes = await request('GET', `/sword/plans/${planId}/nodes`);
+        renderPlanNodes(nodes);
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    function renderPlanNodes(nodes) {
+      if (!nodes || nodes.length === 0) {
+        alert('No nodes found for this plan');
+        return;
+      }
+      
+      let html = '<div style="padding: 16px;"><h3 style="margin-bottom: 12px;">Plan Nodes</h3><div class="nodes-list">';
+      
+      nodes.forEach((node, i) => {
+        html += `
+          <div class="node-item">
+            <div class="node-order">${i + 1}</div>
+            <div class="node-title">${node.title}</div>
+            <div class="node-route ${node.route}">${node.route}</div>
+          </div>
+        `;
+      });
+      
+      html += '</div><button class="btn btn-secondary" onclick="loadPlans()" style="margin-top: 16px;">← Back to Plans</button></div>';
+      
+      document.getElementById('plansContent').innerHTML = html;
+    }
+    
+    // Today functionality
+    async function loadToday() {
+      const container = document.getElementById('todayContent');
+      container.innerHTML = '<div class="loading"><div class="spinner"></div><span>Loading today...</span></div>';
+      
+      try {
+        const today = await request('GET', '/sword/today');
+        renderToday(today);
+      } catch (error) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📅</div>
+            <div class="empty-state-title">No Active Learning</div>
+            <div class="empty-state-text">${error.message}</div>
+            <button class="btn btn-primary" onclick="switchTab('plans')">View Plans</button>
+          </div>
+        `;
+      }
+    }
+    
+    function renderToday(today) {
+      const container = document.getElementById('todayContent');
+      
+      if (!today) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📅</div>
+            <div class="empty-state-title">No Active Learning</div>
+            <div class="empty-state-text">Activate a plan to see today's content</div>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = `
+        <div class="plan-card active">
+          <div class="plan-title">Today's Learning</div>
+          <div style="color: #888; margin: 8px 0;">${today.plan?.title || 'Unknown Plan'}</div>
+          <div class="plan-meta">
+            <div class="plan-meta-item">📚 Node ${today.completedNodes || 0}/${today.totalNodes || 0}</div>
+            <div class="plan-meta-item">📅 Session ${today.sessionNumber || 0}/${today.totalSessions || 0}</div>
+          </div>
+          ${today.currentNode ? `
+            <div style="margin-top: 12px; padding: 12px; background: #0f0f0f; border-radius: 6px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">${today.currentNode.title}</div>
+              <div style="font-size: 13px; color: #888;">${today.currentNode.objective}</div>
+              <div class="node-route ${today.currentNode.route}" style="margin-top: 8px; display: inline-block;">${today.currentNode.route}</div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+    
+    // Quick API calls
+    async function callApi(method, path) {
+      if (!state.connected) {
+        alert('Not connected! Click Connect first.');
+        return;
+      }
+      try {
+        await request(method, path);
+      } catch (error) {
+        // Error already logged
+      }
+    }
+    
+    // Load plans wrapper for button
+    async function loadPlansButton() {
+      if (!state.connected) {
+        alert('Not connected! Click Connect first.');
+        return;
+      }
+      switchTab('plans');
+    }
+    
+    // Reset
+    function resetHarness() {
+      state = {
+        baseUrl: document.getElementById('baseUrl').value,
+        token: null,
+        apiKey: null,
+        userId: null,
+        connected: false,
+        conversationId: null,
+        currentTab: 'designer',
+        plans: [],
+        designerSession: null,
+      };
+      
+      updateStatus('');
+      document.getElementById('chatMessages').innerHTML = `
+        <div class="status-card" id="connectionStatus">
+          <div class="label">DISCONNECTED</div>
+          <div>Click Connect to start</div>
+        </div>
+      `;
+      document.getElementById('designerContent').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">⚔️</div>
+          <div class="empty-state-title">Not Connected</div>
+          <div class="empty-state-text">Connect to the backend first</div>
+        </div>
+      `;
+      clearLogs();
+    }
+    
+    // Auto-connect on load
+    setTimeout(() => connect(), 500);
+  </script>
+</body>
+</html>
