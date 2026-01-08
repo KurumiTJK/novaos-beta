@@ -343,7 +343,10 @@ export async function completeSession(sessionId: string): Promise<DesignerSessio
  * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
 export async function cancelSession(externalUserId: string): Promise<void> {
+  console.log('[Session] Cancelling session for user:', externalUserId);
+  
   if (!isSupabaseInitialized()) {
+    console.log('[Session] Supabase not initialized, cannot cancel');
     return;
   }
 
@@ -351,16 +354,26 @@ export async function cancelSession(externalUserId: string): Promise<void> {
   let internalUserId: string;
   try {
     internalUserId = await getInternalUserId(externalUserId);
-  } catch {
+  } catch (e) {
+    console.log('[Session] User not found, nothing to cancel');
     return; // User doesn't exist, nothing to cancel
   }
 
+  console.log('[Session] Internal user ID:', internalUserId);
+
   const supabase = getSupabase();
-  await supabase
+  const { error, count } = await supabase
     .from('designer_sessions')
     .delete()
     .eq('user_id', internalUserId)
     .is('completed_at', null);
+
+  if (error) {
+    console.error('[Session] Failed to delete session:', error);
+    throw new Error(`Failed to cancel session: ${error.message}`);
+  }
+
+  console.log('[Session] Deleted sessions, count:', count);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

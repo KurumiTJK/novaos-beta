@@ -10,7 +10,15 @@ import type {
   Subskill,
   SubskillType,
 } from '../types.js';
-import { updateSessionPhase } from './session.js';
+import { updateSessionPhase, updatePhaseData } from './session.js';
+import { SwordGateLLM } from '../llm/swordgate-llm.js';
+import {
+  SUBSKILLS_SYSTEM_PROMPT,
+  buildSubskillsUserMessage,
+  parseLLMJson,
+  type SubskillsOutput,
+  type SubskillOutput,
+} from '../llm/prompts/define-goal.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -36,11 +44,16 @@ export async function generateSubskills(
   const capstone = session.capstoneData;
   
   // Generate subskills via LLM
-  const subskillsData = await generateSubskillsWithLLM(capstone);
+  const subskillsData = await generateSubskillsWithLLM(
+    capstone, 
+    session.explorationData?.priorKnowledge || null,
+    session.explorationData?.context || null
+  );
 
   // Validate count
   if (subskillsData.subskills.length < MIN_SUBSKILLS) {
-    throw new Error(`Need at least ${MIN_SUBSKILLS} subskills, got ${subskillsData.subskills.length}`);
+    console.warn(`[SUBSKILLS] Only ${subskillsData.subskills.length} subskills, need ${MIN_SUBSKILLS}+`);
+    // Continue anyway - let UI handle this
   }
 
   if (subskillsData.subskills.length > MAX_SUBSKILLS) {
@@ -56,40 +69,87 @@ export async function generateSubskills(
 
 /**
  * LLM-based subskill generation
- * 
- * @stub - Implement with actual LLM call
  */
 async function generateSubskillsWithLLM(
-  capstone: CapstoneData
+  capstone: CapstoneData,
+  priorKnowledge: string | null,
+  context: string | null
 ): Promise<SubskillsData> {
-  // ═══════════════════════════════════════════════════════════════════════════
-  // TODO: Implement LLM call
-  // 
-  // Prompt structure:
-  // ```
-  // Given the learning capstone:
-  // "${capstone.capstoneStatement}"
-  // 
-  // Success criteria:
-  // ${capstone.successCriteria.map((c, i) => `${i+1}. ${c}`).join('\n')}
-  // 
-  // Decompose this into 8-20 discrete subskills. For each subskill, provide:
-  // 1. title: Brief name (3-6 words)
-  // 2. description: What this subskill enables (1-2 sentences)
-  // 3. subskillType: One of:
-  //    - "concepts" (facts, vocabulary, mental models to know)
-  //    - "procedures" (step-by-step processes to execute)
-  //    - "judgments" (decisions, diagnoses, pattern recognition)
-  //    - "outputs" (artifacts to produce)
-  //    - "tool_setup" (environment, tool configuration)
-  //    - "tool_management" (resource organization, workflow)
-  // 4. estimatedComplexity: 1 (simple), 2 (moderate), or 3 (complex)
-  // 
-  // Output as JSON array.
-  // ```
-  // ═══════════════════════════════════════════════════════════════════════════
+  const userMessage = buildSubskillsUserMessage({
+    capstone: {
+      title: capstone.title || 'Learning Goal',
+      statement: capstone.capstoneStatement,
+      successCriteria: capstone.successCriteria,
+      estimatedTime: capstone.estimatedTime || 'Not specified',
+    },
+    priorKnowledge,
+    context,
+  });
 
-  // STUB: Generate placeholder subskills based on capstone
+  console.log('[SUBSKILLS] Generating with LLM...');
+
+  const response = await SwordGateLLM.generate(
+    SUBSKILLS_SYSTEM_PROMPT,
+    userMessage,
+    { thinkingLevel: 'high' }
+  );
+
+  let parsed: SubskillsOutput;
+  try {
+    parsed = parseLLMJson<SubskillsOutput>(response);
+  } catch (error) {
+    console.error('[SUBSKILLS] Failed to parse LLM response:', error);
+    console.error('[SUBSKILLS] Raw response:', response);
+    // Fallback to template
+    return generateFallbackSubskills(capstone);
+  }
+
+  // Validate structure
+  if (!parsed.subskills?.length) {
+    console.warn('[SUBSKILLS] Empty response, using fallback');
+    return generateFallbackSubskills(capstone);
+  }
+
+  // Transform and add IDs
+  const subskills: Subskill[] = parsed.subskills.map((s: SubskillOutput, index: number) => ({
+    id: `ss_${Date.now()}_${index}`,
+    title: s.title,
+    description: s.description,
+    subskillType: validateSubskillType(s.subskillType),
+    estimatedComplexity: validateComplexity(s.estimatedComplexity),
+    order: s.order || index + 1,
+  }));
+
+  console.log(`[SUBSKILLS] Generated ${subskills.length} subskills`);
+
+  return { subskills };
+}
+
+/**
+ * Validate subskill type
+ */
+function validateSubskillType(type: string): SubskillType {
+  const validTypes: SubskillType[] = ['concepts', 'procedures', 'judgments', 'outputs', 'tool_setup', 'tool_management'];
+  if (validTypes.includes(type as SubskillType)) {
+    return type as SubskillType;
+  }
+  return 'procedures'; // Default
+}
+
+/**
+ * Validate complexity
+ */
+function validateComplexity(complexity: number): 1 | 2 | 3 {
+  if (complexity === 1 || complexity === 2 || complexity === 3) {
+    return complexity;
+  }
+  return 2; // Default
+}
+
+/**
+ * Fallback subskills when LLM fails
+ */
+function generateFallbackSubskills(capstone: CapstoneData): SubskillsData {
   const subskills: Subskill[] = [
     // Concepts (recall)
     {
@@ -98,6 +158,7 @@ async function generateSubskillsWithLLM(
       description: 'Understand fundamental vocabulary and definitions used in the field.',
       subskillType: 'concepts',
       estimatedComplexity: 1,
+      order: 1,
     },
     {
       id: generateId(),
@@ -105,6 +166,7 @@ async function generateSubskillsWithLLM(
       description: 'Internalize key frameworks and ways of thinking about problems.',
       subskillType: 'concepts',
       estimatedComplexity: 2,
+      order: 2,
     },
 
     // Procedures (practice)
@@ -114,6 +176,7 @@ async function generateSubskillsWithLLM(
       description: 'Execute fundamental procedures and operations correctly.',
       subskillType: 'procedures',
       estimatedComplexity: 1,
+      order: 3,
     },
     {
       id: generateId(),
@@ -121,6 +184,7 @@ async function generateSubskillsWithLLM(
       description: 'Follow established step-by-step workflows for common tasks.',
       subskillType: 'procedures',
       estimatedComplexity: 2,
+      order: 4,
     },
     {
       id: generateId(),
@@ -128,6 +192,7 @@ async function generateSubskillsWithLLM(
       description: 'Apply sophisticated methods for complex scenarios.',
       subskillType: 'procedures',
       estimatedComplexity: 3,
+      order: 5,
     },
 
     // Judgments (diagnose)
@@ -137,6 +202,7 @@ async function generateSubskillsWithLLM(
       description: 'Recognize when something is wrong and categorize the issue.',
       subskillType: 'judgments',
       estimatedComplexity: 2,
+      order: 6,
     },
     {
       id: generateId(),
@@ -144,6 +210,7 @@ async function generateSubskillsWithLLM(
       description: 'Choose the appropriate approach for a given situation.',
       subskillType: 'judgments',
       estimatedComplexity: 2,
+      order: 7,
     },
 
     // Outputs (build)
@@ -153,6 +220,7 @@ async function generateSubskillsWithLLM(
       description: 'Create focused artifacts demonstrating specific skills.',
       subskillType: 'outputs',
       estimatedComplexity: 2,
+      order: 8,
     },
     {
       id: generateId(),
@@ -160,6 +228,7 @@ async function generateSubskillsWithLLM(
       description: 'Build a comprehensive project combining multiple skills.',
       subskillType: 'outputs',
       estimatedComplexity: 3,
+      order: 9,
     },
 
     // Tools (practice/plan)
@@ -169,6 +238,7 @@ async function generateSubskillsWithLLM(
       description: 'Configure tools and environment for effective work.',
       subskillType: 'tool_setup',
       estimatedComplexity: 1,
+      order: 10,
     },
     {
       id: generateId(),
@@ -176,10 +246,170 @@ async function generateSubskillsWithLLM(
       description: 'Organize and manage learning resources and references.',
       subskillType: 'tool_management',
       estimatedComplexity: 1,
+      order: 11,
     },
   ];
 
   return { subskills };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// REGENERATION
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Regenerate subskills with optional guidance
+ */
+export async function regenerateSubskills(
+  session: DesignerSession,
+  guidance?: string
+): Promise<SubskillsData> {
+  if (!session.capstoneData) {
+    throw new Error('Capstone data required');
+  }
+
+  const systemPrompt = guidance
+    ? `${SUBSKILLS_SYSTEM_PROMPT}\n\nADDITIONAL GUIDANCE: ${guidance}`
+    : SUBSKILLS_SYSTEM_PROMPT;
+
+  const userMessage = buildSubskillsUserMessage({
+    capstone: {
+      title: session.capstoneData.title || 'Learning Goal',
+      statement: session.capstoneData.capstoneStatement,
+      successCriteria: session.capstoneData.successCriteria,
+      estimatedTime: session.capstoneData.estimatedTime || 'Not specified',
+    },
+    priorKnowledge: session.explorationData?.priorKnowledge || null,
+    context: session.explorationData?.context || null,
+  });
+
+  console.log('[SUBSKILLS] Regenerating with guidance...');
+
+  const response = await SwordGateLLM.generate(
+    systemPrompt,
+    userMessage,
+    { thinkingLevel: 'high' }
+  );
+
+  let parsed: SubskillsOutput;
+  try {
+    parsed = parseLLMJson<SubskillsOutput>(response);
+  } catch (error) {
+    console.error('[SUBSKILLS] Failed to parse regeneration response:', error);
+    throw new Error('Failed to regenerate subskills');
+  }
+
+  const subskills: Subskill[] = parsed.subskills.map((s: SubskillOutput, index: number) => ({
+    id: `ss_${Date.now()}_${index}`,
+    title: s.title,
+    description: s.description,
+    subskillType: validateSubskillType(s.subskillType),
+    estimatedComplexity: validateComplexity(s.estimatedComplexity),
+    order: s.order || index + 1,
+  }));
+
+  const subskillsData: SubskillsData = { subskills };
+  await updatePhaseData(session.id, 'subskills', subskillsData);
+
+  return subskillsData;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// EDITING
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Add a new subskill
+ */
+export async function addSubskill(
+  session: DesignerSession,
+  subskill: Omit<Subskill, 'id'>
+): Promise<SubskillsData> {
+  if (!session.subskillsData) {
+    throw new Error('No subskills data to add to');
+  }
+
+  const newSubskill: Subskill = {
+    ...subskill,
+    id: generateId(),
+  };
+
+  const subskillsData: SubskillsData = {
+    subskills: [...session.subskillsData.subskills, newSubskill],
+  };
+
+  await updatePhaseData(session.id, 'subskills', subskillsData);
+  return subskillsData;
+}
+
+/**
+ * Update a subskill
+ */
+export async function updateSubskill(
+  session: DesignerSession,
+  subskillId: string,
+  updates: Partial<Omit<Subskill, 'id'>>
+): Promise<SubskillsData> {
+  if (!session.subskillsData) {
+    throw new Error('No subskills data to update');
+  }
+
+  const subskills = session.subskillsData.subskills.map(s => {
+    if (s.id === subskillId) {
+      return { ...s, ...updates };
+    }
+    return s;
+  });
+
+  const subskillsData: SubskillsData = { subskills };
+  await updatePhaseData(session.id, 'subskills', subskillsData);
+  return subskillsData;
+}
+
+/**
+ * Remove a subskill
+ */
+export async function removeSubskill(
+  session: DesignerSession,
+  subskillId: string
+): Promise<SubskillsData> {
+  if (!session.subskillsData) {
+    throw new Error('No subskills data to remove from');
+  }
+
+  const subskills = session.subskillsData.subskills.filter(s => s.id !== subskillId);
+  const subskillsData: SubskillsData = { subskills };
+  
+  await updatePhaseData(session.id, 'subskills', subskillsData);
+  return subskillsData;
+}
+
+/**
+ * Reorder subskills
+ */
+export async function reorderSubskills(
+  session: DesignerSession,
+  orderedIds: string[]
+): Promise<SubskillsData> {
+  if (!session.subskillsData) {
+    throw new Error('No subskills data to reorder');
+  }
+
+  const subskillMap = new Map(
+    session.subskillsData.subskills.map(s => [s.id, s])
+  );
+
+  const subskills = orderedIds
+    .map((id, index) => {
+      const subskill = subskillMap.get(id);
+      if (!subskill) return null;
+      return { ...subskill, order: index + 1 };
+    })
+    .filter((s): s is Subskill => s !== null);
+
+  const subskillsData: SubskillsData = { subskills };
+  await updatePhaseData(session.id, 'subskills', subskillsData);
+  return subskillsData;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -255,6 +485,36 @@ export function validateSubskills(subskills: Subskill[]): {
 }
 
 /**
+ * Check if subskills cover success criteria
+ */
+export function checkCriteriaCoverage(
+  subskills: Subskill[],
+  successCriteria: string[]
+): { covered: boolean; gaps: string[] } {
+  // Simple heuristic: check if criteria keywords appear in subskill titles/descriptions
+  const subskillText = subskills
+    .map(s => `${s.title} ${s.description}`)
+    .join(' ')
+    .toLowerCase();
+
+  const gaps: string[] = [];
+  
+  for (const criterion of successCriteria) {
+    const keywords = criterion.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+    const matched = keywords.some(kw => subskillText.includes(kw));
+    
+    if (!matched) {
+      gaps.push(criterion);
+    }
+  }
+
+  return {
+    covered: gaps.length === 0,
+    gaps,
+  };
+}
+
+/**
  * Get type distribution summary
  */
 export function getTypeDistribution(subskills: Subskill[]): Record<SubskillType, number> {
@@ -289,7 +549,7 @@ export function estimateTotalSessions(subskills: Subskill[]): number {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 function generateId(): string {
-  return `subskill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return `ss_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -298,7 +558,13 @@ function generateId(): string {
 
 export const SubskillsGenerator = {
   generate: generateSubskills,
+  regenerate: regenerateSubskills,
+  add: addSubskill,
+  update: updateSubskill,
+  remove: removeSubskill,
+  reorder: reorderSubskills,
   validate: validateSubskills,
+  checkCriteriaCoverage,
   getDistribution: getTypeDistribution,
   estimateSessions: estimateTotalSessions,
   MIN_SUBSKILLS,

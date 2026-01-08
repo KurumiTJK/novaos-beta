@@ -8,6 +8,8 @@
 
 export type Route = 'recall' | 'practice' | 'diagnose' | 'apply' | 'build' | 'refine' | 'plan';
 
+export type RouteStatus = 'learn' | 'skip' | 'assess';
+
 export type SubskillType =
   | 'concepts'         // → recall
   | 'procedures'       // → practice
@@ -497,9 +499,77 @@ export interface ExplorationData {
   readyForCapstone: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// EXPLORATION STATE (Two-part exploration: Orient + Clarify)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Message in exploration conversation (Part 1: Orient)
+ */
+export interface ExplorationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+/**
+ * Extracted data from conversation (Part 2: Clarify)
+ */
+export interface ExplorationExtracted {
+  learningGoal: string | null;
+  priorKnowledge: string | null;
+  context: string | null;
+  constraints: string[];
+}
+
+/**
+ * Track where each field's data came from
+ */
+export type FieldSource = 'extracted' | 'user_filled' | 'user_edited' | null;
+
+/**
+ * Full exploration state (stored in designer_sessions.exploration_data)
+ */
+export interface ExplorationState {
+  // Current part of exploration
+  part: 'orient' | 'clarify';
+  
+  // Part 1: Conversation history (unlimited messages)
+  messages: ExplorationMessage[];
+  
+  // Part 2: Extracted/edited data
+  extracted: ExplorationExtracted;
+  
+  // Track field sources for UI display
+  fieldSources: {
+    learningGoal: FieldSource;
+    priorKnowledge: FieldSource;
+    context: FieldSource;
+  };
+  
+  // Required fields that are still empty
+  missing: ('learningGoal' | 'priorKnowledge')[];
+}
+
+/**
+ * Current SwordGate mode (persistent until complete)
+ */
+export type SwordGateMode = 
+  | 'explore_orient'    // Part 1: Free conversation
+  | 'explore_clarify'   // Part 2: Sort & fill page
+  | 'define_goal'       // Capstone generation
+  | 'research'          // Research phase
+  | 'review'            // Review & finalize
+  | 'learning'          // Active plan, daily learning
+  | null;               // No active SwordGate mode
+
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export interface CapstoneData {
+  title: string;
   capstoneStatement: string;
   successCriteria: string[];
+  estimatedTime?: string;
   impliedNodeTypes: {
     recall: number;
     practice: number;
@@ -513,6 +583,7 @@ export interface Subskill {
   description: string;
   subskillType: SubskillType;
   estimatedComplexity: 1 | 2 | 3;
+  order: number;
 }
 
 export interface SubskillsData {
@@ -523,6 +594,8 @@ export interface RoutingData {
   assignments: Array<{
     subskillId: string;
     route: Route;
+    status: RouteStatus;
+    reason?: string;
   }>;
 }
 

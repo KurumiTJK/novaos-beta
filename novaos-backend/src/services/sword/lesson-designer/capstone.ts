@@ -8,7 +8,14 @@ import type {
   ExplorationData,
   CapstoneData,
 } from '../types.js';
-import { updateSessionPhase } from './session.js';
+import { updateSessionPhase, updatePhaseData } from './session.js';
+import { SwordGateLLM } from '../llm/swordgate-llm.js';
+import {
+  CAPSTONE_SYSTEM_PROMPT,
+  buildCapstoneUserMessage,
+  parseLLMJson,
+  type CapstoneOutput,
+} from '../llm/prompts/define-goal.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CAPSTONE GENERATION
@@ -29,8 +36,7 @@ export async function generateCapstone(
 
   const exploration = session.explorationData;
 
-  // TODO: LLM call to generate capstone
-  // For now, return structured template
+  // Generate via LLM
   const capstoneData = await generateCapstoneWithLLM(exploration);
 
   // Update session with capstone data
@@ -41,62 +47,114 @@ export async function generateCapstone(
 
 /**
  * LLM-based capstone generation
- * 
- * @stub - Implement with actual LLM call
  */
 async function generateCapstoneWithLLM(
   exploration: ExplorationData
 ): Promise<CapstoneData> {
-  // ═══════════════════════════════════════════════════════════════════════════
-  // TODO: Implement LLM call
-  // 
-  // Prompt structure:
-  // - Input: learning goal, context, constraints, prior knowledge
-  // - Output: capstone statement, success criteria, implied node types
-  // 
-  // Example prompt:
-  // ```
-  // Based on the learner's goal: "${exploration.learningGoal}"
-  // Context: ${exploration.context}
-  // Constraints: ${exploration.constraints.join(', ')}
-  // Prior knowledge: ${exploration.priorKnowledge}
-  // 
-  // Generate a capstone statement in the format:
-  // "The learner can [specific capability] under [realistic constraints]."
-  // 
-  // Also provide:
-  // 1. 3-5 measurable success criteria
-  // 2. Estimated distribution of node types needed (recall/practice/build)
-  // ```
-  // ═══════════════════════════════════════════════════════════════════════════
+  const userMessage = buildCapstoneUserMessage({
+    learningGoal: exploration.learningGoal,
+    priorKnowledge: exploration.priorKnowledge || null,
+    context: exploration.context || null,
+    constraints: exploration.constraints || [],
+  });
 
-  // STUB: Generate placeholder based on exploration
-  const capstoneStatement = `The learner can ${exploration.learningGoal} under real-world time constraints and with access to reference materials.`;
+  console.log('[CAPSTONE] Generating with LLM...');
 
-  const successCriteria = [
-    'Complete a practical project demonstrating core skills',
-    'Explain key concepts without reference materials',
-    'Debug common issues independently',
-    'Apply knowledge to novel situations',
-  ];
+  const response = await SwordGateLLM.generate(
+    CAPSTONE_SYSTEM_PROMPT,
+    userMessage,
+    { thinkingLevel: 'high' }
+  );
 
-  // Estimate node type distribution based on goal keywords
+  let parsed: CapstoneOutput;
+  try {
+    parsed = parseLLMJson<CapstoneOutput>(response);
+  } catch (error) {
+    console.error('[CAPSTONE] Failed to parse LLM response:', error);
+    console.error('[CAPSTONE] Raw response:', response);
+    // Fallback to template
+    return generateFallbackCapstone(exploration);
+  }
+
+  // Validate and transform
+  if (!parsed.statement || !parsed.successCriteria?.length) {
+    console.warn('[CAPSTONE] Incomplete response, using fallback');
+    return generateFallbackCapstone(exploration);
+  }
+
+  console.log('[CAPSTONE] Generated:', parsed.title);
+
+  return {
+    title: parsed.title || 'Learning Goal',
+    capstoneStatement: parsed.statement,
+    successCriteria: parsed.successCriteria,
+    estimatedTime: parsed.estimatedTime || 'To be determined',
+    impliedNodeTypes: estimateNodeTypes(parsed.successCriteria),
+  };
+}
+
+/**
+ * Fallback capstone when LLM fails
+ */
+function generateFallbackCapstone(exploration: ExplorationData): CapstoneData {
   const goalLower = exploration.learningGoal.toLowerCase();
+  
+  // Estimate node distribution
   let impliedNodeTypes = { recall: 3, practice: 4, build: 2 };
-
   if (goalLower.includes('understand') || goalLower.includes('learn')) {
     impliedNodeTypes = { recall: 5, practice: 3, build: 1 };
   } else if (goalLower.includes('build') || goalLower.includes('create')) {
     impliedNodeTypes = { recall: 2, practice: 4, build: 4 };
-  } else if (goalLower.includes('master') || goalLower.includes('expert')) {
-    impliedNodeTypes = { recall: 3, practice: 5, build: 3 };
   }
 
   return {
-    capstoneStatement,
-    successCriteria,
+    title: truncateToWords(exploration.learningGoal, 5),
+    capstoneStatement: `The learner will be able to ${exploration.learningGoal} under real-world conditions with access to reference materials.`,
+    successCriteria: [
+      'Complete a practical project demonstrating core skills',
+      'Explain key concepts without reference materials',
+      'Debug common issues independently',
+      'Apply knowledge to novel situations',
+    ],
+    estimatedTime: '4-8 weeks at 20-30 minutes per day',
     impliedNodeTypes,
   };
+}
+
+/**
+ * Estimate node type distribution from success criteria
+ */
+function estimateNodeTypes(criteria: string[]): { recall: number; practice: number; build: number } {
+  let recall = 0, practice = 0, build = 0;
+  
+  const text = criteria.join(' ').toLowerCase();
+  
+  // Count indicators
+  if (text.includes('explain') || text.includes('describe') || text.includes('understand')) {
+    recall += 2;
+  }
+  if (text.includes('perform') || text.includes('execute') || text.includes('apply')) {
+    practice += 2;
+  }
+  if (text.includes('create') || text.includes('build') || text.includes('produce') || text.includes('project')) {
+    build += 2;
+  }
+  
+  // Ensure minimums
+  return {
+    recall: Math.max(2, recall),
+    practice: Math.max(3, practice),
+    build: Math.max(1, build),
+  };
+}
+
+/**
+ * Truncate text to N words
+ */
+function truncateToWords(text: string, maxWords: number): string {
+  const words = text.split(/\s+/);
+  if (words.length <= maxWords) return text;
+  return words.slice(0, maxWords).join(' ');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -113,7 +171,7 @@ export function validateCapstoneStatement(statement: string): {
   const issues: string[] = [];
 
   // Check for required format elements
-  if (!statement.toLowerCase().includes('can')) {
+  if (!statement.toLowerCase().includes('can') && !statement.toLowerCase().includes('will be able to')) {
     issues.push('Capstone should describe what the learner CAN do');
   }
 
@@ -126,7 +184,7 @@ export function validateCapstoneStatement(statement: string): {
   }
 
   // Check for measurability indicators
-  const measurableWords = ['create', 'build', 'write', 'solve', 'explain', 'implement', 'design', 'analyze'];
+  const measurableWords = ['create', 'build', 'write', 'solve', 'explain', 'implement', 'design', 'analyze', 'play', 'perform'];
   const hasMeasurable = measurableWords.some(word => statement.toLowerCase().includes(word));
   
   if (!hasMeasurable) {
@@ -184,15 +242,60 @@ export async function refineCapstone(
     throw new Error('No capstone to refine');
   }
 
-  // TODO: LLM call to refine based on feedback
-  // For now, return existing with minor modifications
+  if (!session.explorationData) {
+    throw new Error('Exploration data required');
+  }
+
+  const refinementPrompt = `${CAPSTONE_SYSTEM_PROMPT}
+
+══════════════════════════════════════════════════════════════════════
+REFINEMENT REQUEST
+══════════════════════════════════════════════════════════════════════
+
+The current capstone needs adjustment based on user feedback.
+
+Current capstone:
+Title: ${session.capstoneData.title}
+Statement: ${session.capstoneData.capstoneStatement}
+Criteria: ${session.capstoneData.successCriteria.join(', ')}
+
+User feedback: ${feedback}
+
+Generate an improved capstone that addresses this feedback.`;
+
+  const userMessage = buildCapstoneUserMessage({
+    learningGoal: session.explorationData.learningGoal,
+    priorKnowledge: session.explorationData.priorKnowledge || null,
+    context: session.explorationData.context || null,
+    constraints: session.explorationData.constraints || [],
+  });
+
+  console.log('[CAPSTONE] Refining with feedback...');
+
+  const response = await SwordGateLLM.generate(
+    refinementPrompt,
+    userMessage,
+    { thinkingLevel: 'high' }
+  );
+
+  let parsed: CapstoneOutput;
+  try {
+    parsed = parseLLMJson<CapstoneOutput>(response);
+  } catch (error) {
+    console.error('[CAPSTONE] Failed to parse refinement response:', error);
+    // Return existing capstone unchanged
+    return session.capstoneData;
+  }
 
   const refined: CapstoneData = {
-    ...session.capstoneData,
-    // Would incorporate feedback here
+    title: parsed.title || session.capstoneData.title,
+    capstoneStatement: parsed.statement || session.capstoneData.capstoneStatement,
+    successCriteria: parsed.successCriteria || session.capstoneData.successCriteria,
+    estimatedTime: parsed.estimatedTime || session.capstoneData.estimatedTime,
+    impliedNodeTypes: session.capstoneData.impliedNodeTypes,
   };
 
-  await updateSessionPhase(session.id, 'capstone', refined);
+  await updatePhaseData(session.id, 'capstone', refined);
 
   return refined;
 }
