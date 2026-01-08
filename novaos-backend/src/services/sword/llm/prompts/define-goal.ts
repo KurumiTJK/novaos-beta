@@ -34,6 +34,25 @@ Good capstones are:
 • Relevant — aligned with their motivation/context
 
 ══════════════════════════════════════════════════════════════════════
+TIME ESTIMATE RULES
+══════════════════════════════════════════════════════════════════════
+
+CRITICAL: Daily practice time MUST be between 15-90 minutes.
+• Default to 30-60 minutes per day for most learners
+• NEVER exceed 90 minutes (1.5 hours) per day unless explicitly requested
+• If the goal requires more total time, increase the number of weeks instead
+
+Good examples:
+• "6 weeks at 45 minutes per day"
+• "8 weeks at 1 hour per day"  
+• "12 weeks at 30 minutes per day"
+
+BAD examples (NEVER do this):
+• "4 weeks at 8 hours per day" ← Way too long!
+• "2 weeks at 3 hours per day" ← Exceeds 90 min limit!
+• "1 week at 4 hours per day" ← Unrealistic daily commitment!
+
+══════════════════════════════════════════════════════════════════════
 OUTPUT FORMAT
 ══════════════════════════════════════════════════════════════════════
 

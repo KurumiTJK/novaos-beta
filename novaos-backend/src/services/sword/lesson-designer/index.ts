@@ -114,6 +114,8 @@ export {
  *   "6 weeks at 1 hour per day" → { weeks: 6, dailyMinutes: 60 }
  *   "4 weeks at 30 minutes per day" → { weeks: 4, dailyMinutes: 30 }
  *   "2 months at 45 minutes per day" → { weeks: 8, dailyMinutes: 45 }
+ * 
+ * NOTE: Daily minutes are clamped to 90 min max to prevent unrealistic plans
  */
 export function parseTimeEstimate(estimatedTime: string): { 
   weeks: number; 
@@ -127,6 +129,7 @@ export function parseTimeEstimate(estimatedTime: string): {
   let weeks = 4;
   let dailyMinutes = 30;
   const daysPerWeek = 5; // Assume 5 days/week
+  const MAX_DAILY_MINUTES = 90; // Hard cap at 1.5 hours
   
   // Parse weeks/months
   const weeksMatch = lower.match(/(\d+)\s*weeks?/);
@@ -152,6 +155,18 @@ export function parseTimeEstimate(estimatedTime: string): {
     } else {
       dailyMinutes = parseInt(minuteMatch[1], 10);
     }
+  }
+  
+  // Clamp daily minutes to max 90 (1.5 hours)
+  if (dailyMinutes > MAX_DAILY_MINUTES) {
+    console.warn(`[SESSION_DIST] Daily minutes ${dailyMinutes} exceeds max ${MAX_DAILY_MINUTES}, clamping`);
+    dailyMinutes = MAX_DAILY_MINUTES;
+  }
+  
+  // Ensure minimum of 15 minutes
+  if (dailyMinutes < 15) {
+    console.warn(`[SESSION_DIST] Daily minutes ${dailyMinutes} below minimum 15, setting to 15`);
+    dailyMinutes = 15;
   }
   
   // Calculate total sessions
