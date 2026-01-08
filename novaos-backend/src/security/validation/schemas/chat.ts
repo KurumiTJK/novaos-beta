@@ -15,14 +15,15 @@ export const ChatMessageSchema = z.object({
     .min(1, 'Message cannot be empty')
     .max(100000, 'Message too long (max 100,000 characters)'),
   
-  conversationId: z.string().optional(),
+  // .nullish() accepts string | null | undefined (fixes frontend sending null)
+  conversationId: z.string().nullish(),
   
-  ackToken: z.string().optional(),
+  ackToken: z.string().nullish(),
   
   context: z.object({
     timezone: z.string().optional(),
     locale: z.string().optional(),
-  }).optional(),
+  }).nullish(),
 });
 
 export type ChatMessageInput = z.infer<typeof ChatMessageSchema>;
@@ -39,7 +40,7 @@ export const ParseCommandSchema = z.object({
   
   source: z.enum(['ui_button', 'command_parser', 'api_field']),
   
-  conversationId: z.string().optional(),
+  conversationId: z.string().nullish(),
 });
 
 export type ParseCommandInput = z.infer<typeof ParseCommandSchema>;
