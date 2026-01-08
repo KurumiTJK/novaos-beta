@@ -9,7 +9,7 @@ import { ExplorationService } from '../services/sword/lesson-designer/exploratio
 import { CapstoneGenerator } from '../services/sword/lesson-designer/capstone.js';
 import { SubskillsGenerator } from '../services/sword/lesson-designer/subskills.js';
 import { RoutingGenerator } from '../services/sword/lesson-designer/routing.js';
-import { updateSessionPhase } from '../services/sword/lesson-designer/session.js';
+import { updateSessionPhase, updatePhaseData } from '../services/sword/lesson-designer/session.js';
 import {
   StartDesignerSchema,
   ExplorationMessageSchema,
@@ -102,17 +102,24 @@ router.get('/today', async (req: Request, res: Response, next: NextFunction) => 
  * POST /sword/explore/start
  * Body: { sessionId?: string, topic?: string }
  * 
- * If sessionId is not provided, creates a new designer session automatically.
+ * If sessionId is not provided:
+ * - Uses existing active session if one exists
+ * - Otherwise creates a new designer session
  */
 router.post('/explore/start', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = getUserId(req);
     let { sessionId, topic } = req.body;
     
-    // If no sessionId provided, create a new session
+    // If no sessionId provided, check for existing session or create new
     if (!sessionId) {
-      const session = await LessonDesigner.startSession(userId, topic || 'New Learning Goal');
-      sessionId = session.id;
+      const existingSession = await LessonDesigner.getActiveSession(userId);
+      if (existingSession) {
+        sessionId = existingSession.id;
+      } else {
+        const newSession = await LessonDesigner.startSession(userId, topic || 'New Learning Goal');
+        sessionId = newSession.id;
+      }
     }
 
     const result = await ExplorationService.start(sessionId, topic);
@@ -345,7 +352,16 @@ router.post('/explore/continue', async (req: Request, res: Response, next: NextF
       return;
     }
 
+    // Complete exploration and get the proper ExplorationData format
     const explorationData = await ExplorationService.complete(sessionId);
+    
+    // CRITICAL: Save the ExplorationData back to the session so capstone can use it
+    // The session currently has ExplorationState format (with extracted.learningGoal)
+    // We need to overwrite it with ExplorationData format (learningGoal at root)
+    await updatePhaseData(sessionId, 'exploration', explorationData);
+    
+    // Update phase to define_goal/capstone
+    await updateSessionPhase(sessionId, 'capstone', undefined);
 
     res.json({
       success: true,

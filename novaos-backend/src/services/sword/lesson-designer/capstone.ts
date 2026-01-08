@@ -51,6 +51,15 @@ export async function generateCapstone(
 async function generateCapstoneWithLLM(
   exploration: ExplorationData
 ): Promise<CapstoneData> {
+  // Debug: Log exploration data
+  console.log('[CAPSTONE] Exploration data:', JSON.stringify(exploration, null, 2));
+  
+  // Safety check for missing learningGoal
+  if (!exploration.learningGoal) {
+    console.error('[CAPSTONE] Missing learningGoal in exploration data!');
+    throw new Error('Learning goal is required. Please complete exploration first.');
+  }
+  
   const userMessage = buildCapstoneUserMessage({
     learningGoal: exploration.learningGoal,
     priorKnowledge: exploration.priorKnowledge || null,

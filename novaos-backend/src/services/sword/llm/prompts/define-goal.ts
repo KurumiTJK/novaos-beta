@@ -11,6 +11,17 @@
 export const CAPSTONE_SYSTEM_PROMPT = `You are a learning design expert. Transform a learning goal into a specific, measurable capstone.
 
 ══════════════════════════════════════════════════════════════════════
+CRITICAL: USE THE EXACT LEARNING GOAL PROVIDED
+══════════════════════════════════════════════════════════════════════
+
+You MUST create a capstone about the SPECIFIC topic the user provided.
+- If they want to learn guitar → capstone is about guitar
+- If they want to learn cooking → capstone is about cooking
+- If they want to learn Python → capstone is about Python
+
+DO NOT generate generic examples. DO NOT substitute a different topic.
+
+══════════════════════════════════════════════════════════════════════
 WHAT IS A CAPSTONE?
 ══════════════════════════════════════════════════════════════════════
 
@@ -29,12 +40,12 @@ OUTPUT FORMAT
 Return ONLY valid JSON, no markdown, no explanation:
 
 {
-  "title": "Short name (2-5 words)",
-  "statement": "The learner will be able to [specific action] [under what conditions] [to what standard].",
+  "title": "Short name (2-5 words) - MUST relate to their learning goal",
+  "statement": "The learner will be able to [specific action about THEIR TOPIC] [under what conditions] [to what standard].",
   "successCriteria": [
-    "Measurable criterion 1",
-    "Measurable criterion 2",
-    "Measurable criterion 3"
+    "Measurable criterion 1 about THEIR TOPIC",
+    "Measurable criterion 2 about THEIR TOPIC",
+    "Measurable criterion 3 about THEIR TOPIC"
   ],
   "estimatedTime": "X weeks/months at Y per day"
 }`;
@@ -54,13 +65,21 @@ export interface CapstoneOutput {
 }
 
 export function buildCapstoneUserMessage(input: CapstoneInput): string {
-  return `Learning Goal: ${input.learningGoal}
+  const learningGoal = input.learningGoal || 'the specified topic';
+  
+  return `══════════════════════════════════════════════════════════════════════
+THE USER WANTS TO LEARN: ${learningGoal.toUpperCase()}
+══════════════════════════════════════════════════════════════════════
+
+Generate a capstone specifically about: ${learningGoal}
 
 Prior Knowledge: ${input.priorKnowledge || 'Complete beginner'}
 
 Context/Motivation: ${input.context || 'Not specified'}
 
-Time Constraints: ${input.constraints.length ? input.constraints.join(', ') : 'None specified'}`;
+Time Constraints: ${input.constraints.length ? input.constraints.join(', ') : 'None specified'}
+
+Remember: Your output MUST be about "${learningGoal}" - not any other topic.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -153,7 +172,11 @@ export interface SubskillsOutput {
 }
 
 export function buildSubskillsUserMessage(input: SubskillsInput): string {
-  return `CAPSTONE:
+  return `══════════════════════════════════════════════════════════════════════
+GENERATE SUBSKILLS FOR THIS SPECIFIC CAPSTONE
+══════════════════════════════════════════════════════════════════════
+
+CAPSTONE:
 Title: ${input.capstone.title}
 Statement: ${input.capstone.statement}
 
@@ -164,7 +187,9 @@ Estimated Time: ${input.capstone.estimatedTime}
 
 LEARNER CONTEXT:
 Prior Knowledge: ${input.priorKnowledge || 'Complete beginner'}
-Motivation: ${input.context || 'Not specified'}`;
+Motivation: ${input.context || 'Not specified'}
+
+IMPORTANT: All subskills MUST be relevant to achieving the capstone above. Do not generate generic or unrelated subskills.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

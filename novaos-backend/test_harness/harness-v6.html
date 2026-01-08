@@ -1717,7 +1717,7 @@
       renderExploreOrient();
       
       try {
-        const result = await request('POST', '/sword/explore/message', {
+        const result = await request('POST', '/sword/explore/chat', {
           sessionId: state.exploreSessionId,
           message
         });
