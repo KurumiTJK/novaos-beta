@@ -1289,6 +1289,56 @@ router.post('/plans/:planId/abandon',
   }
 );
 
+// DELETE /sword/plans/:planId - Delete a single plan
+router.delete('/plans/:planId',
+  validateParams(PlanIdParamSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const { planId } = req.params;
+      
+      await SwordGate.deletePlan(userId, planId!);
+      
+      res.json({ 
+        success: true, 
+        message: 'Plan deleted successfully' 
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// DELETE /sword/plans - Delete all plans for user
+router.delete('/plans', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { confirm } = req.query;
+    
+    // Require confirmation query param
+    if (confirm !== 'true') {
+      res.status(400).json({
+        success: false,
+        error: { 
+          code: 'CONFIRMATION_REQUIRED', 
+          message: 'Add ?confirm=true to delete all plans' 
+        },
+      });
+      return;
+    }
+    
+    const count = await SwordGate.deleteAllPlans(userId);
+    
+    res.json({ 
+      success: true, 
+      message: `Deleted ${count} plan(s)`,
+      deletedCount: count,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────────
 // STATS
 // ─────────────────────────────────────────────────────────────────────────────────

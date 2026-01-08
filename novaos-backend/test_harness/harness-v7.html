@@ -2571,6 +2571,11 @@
       }
       
       container.innerHTML = `
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+          <button class="btn btn-ghost btn-sm" onclick="deleteAllPlans()" style="color: #ef4444;">
+            🗑️ Delete All Plans
+          </button>
+        </div>
         <div class="plans-grid">
           ${state.plans.map(plan => `
             <div class="plan-card ${plan.status === 'active' ? 'active' : ''}">
@@ -2590,6 +2595,7 @@
               <div class="plan-actions">
                 ${plan.status !== 'active' ? `<button class="btn btn-success btn-sm" onclick="activatePlan('${plan.id}')">Activate</button>` : ''}
                 <button class="btn btn-secondary btn-sm" onclick="viewPlanSubskills('${plan.id}')">View Subskills</button>
+                <button class="btn btn-ghost btn-sm" onclick="deletePlan('${plan.id}')" style="color: #ef4444;">Delete</button>
               </div>
             </div>
           `).join('')}
@@ -2617,6 +2623,36 @@
         alert('Subskills:\n' + display);
       } catch (error) {
         alert('Failed to load subskills: ' + error.message);
+      }
+    }
+    
+    async function deletePlan(planId) {
+      if (!confirm('Are you sure you want to delete this plan? This cannot be undone.')) {
+        return;
+      }
+      
+      try {
+        await request('DELETE', `/sword/plans/${planId}`);
+        loadPlans();
+        loadToday();
+      } catch (error) {
+        alert('Failed to delete plan: ' + error.message);
+      }
+    }
+    
+    async function deleteAllPlans() {
+      const planCount = state.plans.length;
+      if (!confirm(`Are you sure you want to delete ALL ${planCount} plan(s)? This cannot be undone.`)) {
+        return;
+      }
+      
+      try {
+        const result = await request('DELETE', '/sword/plans?confirm=true');
+        alert(result.message || 'All plans deleted');
+        loadPlans();
+        loadToday();
+      } catch (error) {
+        alert('Failed to delete plans: ' + error.message);
       }
     }
     

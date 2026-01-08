@@ -250,6 +250,123 @@ export async function abandonPlan(
     .eq('user_id', internalUserId);
 }
 
+/**
+ * Delete a single plan and its subskills
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
+ * @param planId - Plan UUID
+ */
+export async function deletePlan(
+  externalUserId: string,
+  planId: string
+): Promise<void> {
+  if (!isSupabaseInitialized()) {
+    throw new Error('Database not initialized');
+  }
+
+  // Get internal UUID from external ID
+  const internalUserId = await getInternalUserId(externalUserId);
+
+  const supabase = getSupabase();
+
+  // Verify ownership
+  const { data: plan, error: fetchError } = await supabase
+    .from('lesson_plans')
+    .select('id, user_id')
+    .eq('id', planId)
+    .single();
+
+  if (fetchError || !plan) {
+    throw new Error('Plan not found');
+  }
+
+  if (plan.user_id !== internalUserId) {
+    throw new Error('Not authorized to delete this plan');
+  }
+
+  // Delete subskills first (cascade should handle this, but being explicit)
+  const { error: subskillsError } = await supabase
+    .from('plan_subskills')
+    .delete()
+    .eq('plan_id', planId);
+
+  if (subskillsError) {
+    console.error('[SWORDGATE] Failed to delete subskills:', subskillsError);
+  }
+
+  // Delete the plan
+  const { error: planError } = await supabase
+    .from('lesson_plans')
+    .delete()
+    .eq('id', planId);
+
+  if (planError) {
+    throw new Error(`Failed to delete plan: ${planError.message}`);
+  }
+
+  console.log('[SWORDGATE] Deleted plan:', planId);
+}
+
+/**
+ * Delete all plans for a user
+ * @param externalUserId - JWT user ID (e.g., "user_xxx")
+ * @returns Number of plans deleted
+ */
+export async function deleteAllPlans(externalUserId: string): Promise<number> {
+  if (!isSupabaseInitialized()) {
+    return 0;
+  }
+
+  // Get internal UUID from external ID
+  let internalUserId: string;
+  try {
+    internalUserId = await getInternalUserId(externalUserId);
+  } catch {
+    return 0; // User doesn't exist
+  }
+
+  const supabase = getSupabase();
+
+  // Get all plan IDs first
+  const { data: plans, error: fetchError } = await supabase
+    .from('lesson_plans')
+    .select('id')
+    .eq('user_id', internalUserId);
+
+  if (fetchError) {
+    throw new Error(`Failed to fetch plans: ${fetchError.message}`);
+  }
+
+  if (!plans || plans.length === 0) {
+    return 0;
+  }
+
+  const planIds = plans.map(p => p.id);
+
+  // Delete all subskills for these plans
+  const { error: subskillsError } = await supabase
+    .from('plan_subskills')
+    .delete()
+    .in('plan_id', planIds);
+
+  if (subskillsError) {
+    console.error('[SWORDGATE] Failed to delete subskills:', subskillsError);
+  }
+
+  // Delete all plans
+  const { error: plansError } = await supabase
+    .from('lesson_plans')
+    .delete()
+    .eq('user_id', internalUserId);
+
+  if (plansError) {
+    throw new Error(`Failed to delete plans: ${plansError.message}`);
+  }
+
+  console.log('[SWORDGATE] Deleted', planIds.length, 'plans for user:', externalUserId);
+
+  return planIds.length;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────
 // MAIN EXPORT
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -263,6 +380,8 @@ export const SwordGate = {
   getPlanSubskills,
   activatePlan,
   abandonPlan,
+  deletePlan,
+  deleteAllPlans,
   
   // Designer (delegation)
   Designer: LessonDesigner,
