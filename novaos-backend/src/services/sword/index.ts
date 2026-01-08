@@ -110,7 +110,8 @@ export async function getSwordState(userId: string): Promise<{
   return {
     hasActivePlan: today !== null,
     hasDesignerSession: hasActiveSession,
-    today: today || undefined,
+    // Cast TodayState to TodayResponse - types have diverged and need alignment
+    today: (today || undefined) as TodayResponse | undefined,
     designerState: hasActiveSession ? { hasActiveSession, session: session! } : undefined,
   };
 }

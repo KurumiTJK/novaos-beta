@@ -8,7 +8,7 @@ import { logAudit } from '../security/index.js';
 import { getShieldService } from '../services/shield/index.js';
 import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
 import { workingMemory } from '../core/memory/working_memory/index.js';
-import type { PipelineContext, ConversationMessage } from '../types/index.js';
+import type { PipelineContext, ConversationMessage, ShieldContext } from '../types/index.js';
 
 export const shieldRoutes = Router();
 
@@ -42,12 +42,12 @@ shieldRoutes.get('/status',
 // ─────────────────────────────────────────────────────────────────────────────────
 // Called when user clicks "I Understand" on warning overlay
 // 
-// NEW BEHAVIOR:
-// 1. Retrieves pending message from Redis
-// 2. Runs pipeline with shieldBypassed: true
-// 3. Returns full pipeline response
-//
-// This allows the original message to be processed after user confirms
+// BEHAVIOR:
+// 1. Retrieves pending message from Redis (includes domain, warningMessage, intentResult)
+// 2. Builds shieldContext with acknowledgment info
+// 3. Calls pipeline.resume() to continue from Gate 3 with cached intent
+// 4. Response Gate uses shieldContext to inform LLM user accepted risk
+// 5. Returns full pipeline response
 
 shieldRoutes.post('/confirm',
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -103,7 +103,13 @@ shieldRoutes.post('/confirm',
         category: 'shield',
         action: 'warning_acknowledged',
         userId,
-        details: { activationId, success: true, conversationId: pendingMessage.conversationId },
+        details: { 
+          activationId, 
+          success: true, 
+          conversationId: pendingMessage.conversationId,
+          domain: pendingMessage.domain,
+          hasCachedIntent: !!pendingMessage.intentResult,
+        },
       });
       
       // ═══════════════════════════════════════════════════════════════════════
@@ -120,22 +126,47 @@ shieldRoutes.post('/confirm',
       }));
       
       // ═══════════════════════════════════════════════════════════════════════
-      // RUN PIPELINE WITH BYPASS FLAG
+      // BUILD SHIELD CONTEXT — Tells LLM user acknowledged the risk
       // ═══════════════════════════════════════════════════════════════════════
       
-      const context: PipelineContext = {
+      const shieldContext: ShieldContext = {
+        acknowledged: true,
+        domain: pendingMessage.domain,
+        warningShown: pendingMessage.warningMessage,
+      };
+      
+      console.log(`[SHIELD] Building context: domain=${shieldContext.domain}, acknowledged=true`);
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // BUILD PIPELINE CONTEXT
+      // ═══════════════════════════════════════════════════════════════════════
+      
+      const context: Partial<PipelineContext> = {
         userId,
         conversationId: pendingMessage.conversationId,
         message: pendingMessage.message,
         timestamp: Date.now(),
         requestId: `req-confirm-${Date.now()}`,
         conversationHistory,
-        shieldBypassed: true, // Skip shield evaluation
+        shieldBypassed: true,    // Skip shield evaluation
+        shieldContext,           // Tell LLM user accepted risk
       };
       
-      console.log(`[SHIELD] Running pipeline for confirmed message: ${pendingMessage.conversationId}`);
+      // ═══════════════════════════════════════════════════════════════════════
+      // RESUME PIPELINE FROM GATE 3 (or fallback to full process)
+      // ═══════════════════════════════════════════════════════════════════════
       
-      const result = await pipeline.process(pendingMessage.message, context);
+      let result;
+      
+      if (pendingMessage.intentResult) {
+        // Use cached intent - skip Gates 1-2
+        console.log(`[SHIELD] Resuming pipeline from Gate 3 (cached intent: ${pendingMessage.intentResult.primary_route})`);
+        result = await pipeline.resume(pendingMessage.message, pendingMessage.intentResult, context);
+      } else {
+        // Fallback: No cached intent, run full pipeline (shouldn't happen normally)
+        console.log(`[SHIELD] Running full pipeline (no cached intent)`);
+        result = await pipeline.process(pendingMessage.message, context);
+      }
       
       // ═══════════════════════════════════════════════════════════════════════
       // SAVE MESSAGES TO WORKING MEMORY
@@ -173,6 +204,8 @@ shieldRoutes.post('/confirm',
           activationId,
           stance: result.stance,
           status: result.status,
+          shieldDomain: pendingMessage.domain,
+          resumedFromCache: !!pendingMessage.intentResult,
         },
       });
       

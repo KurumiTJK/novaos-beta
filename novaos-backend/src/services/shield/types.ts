@@ -2,6 +2,8 @@
 // SHIELD SERVICE TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import type { IntentSummary } from '../../types/index.js';
+
 export type ShieldAction = 'skip' | 'warn' | 'crisis';
 
 /**
@@ -83,4 +85,16 @@ export interface PendingMessage {
   message: string;
   conversationId: string;
   timestamp: number;
+  
+  /** Risk domain: financial, career, legal, health, relationship, other */
+  domain?: string;
+  
+  /** The warning message shown to the user */
+  warningMessage?: string;
+  
+  /** 
+   * Cached intent result from Gate 1
+   * Used to resume pipeline from Gate 3 without re-running intent classification
+   */
+  intentResult?: IntentSummary;
 }

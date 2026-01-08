@@ -280,6 +280,25 @@ export interface GateResults {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// SHIELD CONTEXT — For Response Gate after user confirms warning
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Shield context passed to pipeline after user acknowledges risk warning
+ * Used by Response Gate to inject acknowledgment into system prompt
+ */
+export interface ShieldContext {
+  /** Always true when present (user confirmed the warning) */
+  acknowledged: boolean;
+  
+  /** Risk domain: financial, career, legal, health, relationship, other */
+  domain?: string;
+  
+  /** The exact warning message the user saw and acknowledged */
+  warningShown?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // PIPELINE
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -306,6 +325,13 @@ export interface PipelineContext {
    * Set by /shield/confirm endpoint when processing pending message
    */
   shieldBypassed?: boolean;
+  
+  /**
+   * Shield context after user acknowledges risk warning
+   * Contains domain and warning shown, used by Response Gate
+   * to inform LLM that user accepted the risk
+   */
+  shieldContext?: ShieldContext;
 }
 
 export interface PipelineState {

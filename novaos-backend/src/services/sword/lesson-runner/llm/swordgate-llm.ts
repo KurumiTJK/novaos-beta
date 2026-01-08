@@ -133,7 +133,7 @@ export async function chat(
       contents,
       config: {
         thinkingConfig: {
-          thinkingLevel,
+          thinkingLevel: thinkingLevel as any, // Cast string to ThinkingLevel enum
         },
         temperature: options.temperature,
         maxOutputTokens: options.maxTokens,

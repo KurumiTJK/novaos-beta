@@ -719,11 +719,13 @@ function generateFallbackLesson(
   // Add connection to previous if available
   if (previousSummaries && previousSummaries.length > 0) {
     const lastSummary = previousSummaries[previousSummaries.length - 1];
-    content.push({
-      title: 'Building on Previous Learning',
-      content: `Last session: ${lastSummary.summary}`,
-      bulletPoints: lastSummary.keyConcepts.slice(0, 3),
-    });
+    if (lastSummary) {
+      content.push({
+        title: 'Building on Previous Learning',
+        content: `Last session: ${lastSummary.summary}`,
+        bulletPoints: lastSummary.keyConcepts?.slice(0, 3) ?? [],
+      });
+    }
   }
   
   // Generate activities

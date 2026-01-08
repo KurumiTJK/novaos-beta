@@ -21,6 +21,7 @@ import {
   getCrisisSession,
 } from './crisis-session.js';
 import type { ShieldEvaluation, ShieldAction, RiskAssessment, PendingMessage } from './types.js';
+import type { IntentSummary } from '../../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -53,13 +54,16 @@ export class ShieldService {
    * Called by Shield Gate when safety_signal is detected
    * 
    * For MEDIUM: Also generates short warning and stores pending message
+   * 
+   * @param intentResult - Cached intent result to store for pipeline resume
    */
   async evaluate(
     userId: string,
     message: string,
     safetySignal: 'none' | 'low' | 'medium' | 'high',
     urgency: 'low' | 'medium' | 'high',
-    conversationId?: string
+    conversationId?: string,
+    intentResult?: IntentSummary
   ): Promise<ShieldEvaluation> {
     // Skip for none/low - no intervention needed
     if (safetySignal === 'none' || safetySignal === 'low') {
@@ -111,12 +115,24 @@ export class ShieldService {
     // Generate short warning message using LLM
     const warningMessage = await this.generateShortWarning(message, riskAssessment);
     
+    // Extract domain from risk assessment
+    const domain = riskAssessment?.domain;
+    
     // Store pending message for retrieval after user confirms
+    // Now includes domain, warningMessage, AND intentResult for pipeline resume
     if (activationId && conversationId) {
-      await this.storePendingMessage(activationId, userId, message, conversationId);
+      await this.storePendingMessage(
+        activationId,
+        userId,
+        message,
+        conversationId,
+        domain,
+        warningMessage,
+        intentResult
+      );
     }
 
-    console.log(`[SHIELD] WARNING for user: ${userId}, activationId: ${activationId}`);
+    console.log(`[SHIELD] WARNING for user: ${userId}, domain: ${domain}, activationId: ${activationId}`);
 
     return {
       action: 'warn',
@@ -216,12 +232,16 @@ export class ShieldService {
   /**
    * Store pending message in Redis
    * Called when MEDIUM signal blocks pipeline
+   * Now includes domain, warningMessage, AND intentResult for pipeline resume
    */
   async storePendingMessage(
     activationId: string,
     userId: string,
     message: string,
-    conversationId: string
+    conversationId: string,
+    domain?: string,
+    warningMessage?: string,
+    intentResult?: IntentSummary
   ): Promise<void> {
     const store = getStore();
     const key = `pending:${activationId}`;
@@ -232,10 +252,13 @@ export class ShieldService {
       message,
       conversationId,
       timestamp: Date.now(),
+      domain,
+      warningMessage,
+      intentResult,
     };
     
     await store.set(key, JSON.stringify(pendingMessage), PENDING_MESSAGE_TTL_SECONDS);
-    console.log(`[SHIELD] Stored pending message: ${key}`);
+    console.log(`[SHIELD] Stored pending message: ${key} (domain: ${domain}, intentCached: ${!!intentResult})`);
   }
 
   /**

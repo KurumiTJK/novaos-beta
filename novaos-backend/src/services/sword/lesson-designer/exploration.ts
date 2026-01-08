@@ -114,7 +114,7 @@ async function updateExplorationState(
 /**
  * Get required fields that are missing
  */
-function getMissingFields(extracted: ExtractedData): string[] {
+function getMissingFields(extracted: ExtractedData): ('learningGoal' | 'priorKnowledge')[] {
   const required = ['learningGoal', 'priorKnowledge'] as const;
   return required.filter(field => !extracted[field]);
 }

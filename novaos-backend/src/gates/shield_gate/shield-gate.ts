@@ -112,13 +112,15 @@ export async function executeShieldGateAsync(
   // ═══════════════════════════════════════════════════════════════════════════════
   // MEDIUM/HIGH — Evaluate with Shield Service
   // ═══════════════════════════════════════════════════════════════════════════════
+  // Pass intent result so it can be cached with pending message for pipeline resume
   
   const evaluation = await shieldService.evaluate(
     context.userId ?? 'anonymous',
     state.userMessage,
     safety_signal,
     urgency,
-    context.conversationId // Pass conversationId for pending message storage
+    context.conversationId,
+    intent // Pass intent result for caching
   );
 
   console.log(`[SHIELD] ${evaluation.action} (safety_signal: ${safety_signal}, urgency: ${urgency})`);
@@ -164,7 +166,7 @@ export async function executeShieldGateAsync(
       riskAssessment: evaluation.riskAssessment,
       activationId: evaluation.activationId,
       warningMessage: evaluation.warningMessage, // Short 2-3 sentence warning
-    },
+    } as ShieldGateOutput,
     action: 'halt', // Changed from 'continue' to 'halt'
     executionTimeMs: Date.now() - start,
   };

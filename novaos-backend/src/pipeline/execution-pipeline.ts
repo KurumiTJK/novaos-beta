@@ -7,6 +7,8 @@ import type {
   PipelineContext,
   PipelineResult,
   ShieldResult,
+  IntentSummary,
+  ShieldContext,
 } from '../types/index.js';
 
 import {
@@ -66,7 +68,8 @@ export class ExecutionPipeline {
       sessionId: context.sessionId,
       conversationHistory: context.conversationHistory,
       actionSources: context.actionSources,
-      shieldBypassed: context.shieldBypassed, // Pass through bypass flag
+      shieldBypassed: context.shieldBypassed,
+      shieldContext: context.shieldContext, // ✅ Now passed through
     };
 
     // Initialize state
@@ -84,6 +87,92 @@ export class ExecutionPipeline {
       return await this.executePipeline(state, fullContext);
     } catch (error) {
       console.error('[PIPELINE] Fatal error:', error);
+      return {
+        status: 'error',
+        response: 'I apologize, but I encountered an error. Please try again.',
+        gateResults: state.gateResults,
+        metadata: {
+          requestId: fullContext.requestId,
+          totalTimeMs: Date.now() - pipelineStart,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+      };
+    }
+  }
+
+  /**
+   * Resume pipeline from Gate 3 with cached intent result.
+   * Used after shield warning is confirmed - skips Intent and Shield gates.
+   * 
+   * @param userMessage - The original user message
+   * @param cachedIntent - Intent result from first pipeline run (cached in pending message)
+   * @param context - Pipeline context with shieldContext for Response Gate
+   */
+  async resume(
+    userMessage: string,
+    cachedIntent: IntentSummary,
+    context: Partial<PipelineContext> = {}
+  ): Promise<PipelineResult> {
+    const pipelineStart = Date.now();
+    
+    // Build full context (shieldContext should be set by caller)
+    const fullContext: PipelineContext = {
+      conversationId: context.conversationId ?? `conv-${Date.now()}`,
+      requestId: context.requestId ?? `req-${Date.now()}`,
+      userId: context.userId,
+      sessionId: context.sessionId,
+      conversationHistory: context.conversationHistory,
+      actionSources: context.actionSources,
+      shieldBypassed: true, // Always true for resume
+      shieldContext: context.shieldContext,
+    };
+
+    // Initialize state with cached intent
+    const state: PipelineState = {
+      userMessage,
+      normalizedInput: userMessage.toLowerCase().trim(),
+      gateResults: {},
+      flags: {
+        resumedFromShield: true,
+      },
+      timestamps: {
+        pipelineStart,
+      },
+      // Inject cached intent result
+      intent_summary: cachedIntent,
+    };
+
+    // Create synthetic gate result for intent (for consistent gateResults)
+    state.gateResults.intent = {
+      gateId: 'intent',
+      status: 'pass',
+      action: 'continue',
+      output: cachedIntent,
+      executionTimeMs: 0, // Cached, no execution time
+    };
+
+    // Create synthetic gate result for shield (bypassed)
+    state.gateResults.shield = {
+      gateId: 'shield',
+      status: 'pass',
+      action: 'continue',
+      output: {
+        route: 'skip',
+        safety_signal: cachedIntent.safety_signal,
+        urgency: cachedIntent.urgency,
+        shield_acceptance: true,
+        action: 'skip',
+      },
+      executionTimeMs: 0,
+    };
+    state.shieldResult = state.gateResults.shield.output;
+
+    console.log(`[PIPELINE] Resuming from Gate 3 (cached intent: ${cachedIntent.primary_route}, stance: ${cachedIntent.stance})`);
+
+    try {
+      return await this.executeFromGate3(state, fullContext);
+    } catch (error) {
+      console.error('[PIPELINE] Fatal error in resume:', error);
       return {
         status: 'error',
         response: 'I apologize, but I encountered an error. Please try again.',
@@ -178,6 +267,20 @@ export class ExecutionPipeline {
         },
       };
     }
+
+    // Continue from Gate 3
+    return this.executeFromGate3(state, context);
+  }
+
+  /**
+   * Execute pipeline starting from Gate 3 (Tools).
+   * Used by both full pipeline (after Gates 1-2) and resume (with cached intent).
+   */
+  private async executeFromGate3(
+    state: PipelineState,
+    context: PipelineContext
+  ): Promise<PipelineResult> {
+    const pipelineStart = state.timestamps.pipelineStart;
 
     // ─── STAGE 3: TOOLS (Router) ───
     state.gateResults.tools = executeToolsGate(state, context);

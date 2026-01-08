@@ -10,6 +10,7 @@ import type {
   PipelineContext,
   GateResult,
   SwordContext,
+  ShieldContext,
 } from '../../types/index.js';
 
 import { PERSONALITY_DESCRIPTORS } from './personality_descriptor.js';
@@ -65,7 +66,11 @@ For lists, use simple dashes on new lines.`,
 /**
  * Build the system prompt with personality.
  */
-function buildSystemPrompt(personality: Personality, swordContext?: SwordContext): string {
+function buildSystemPrompt(
+  personality: Personality, 
+  swordContext?: SwordContext,
+  shieldContext?: ShieldContext
+): string {
   const parts: string[] = [];
 
   parts.push('Given the following personality:');
@@ -77,6 +82,42 @@ function buildSystemPrompt(personality: Personality, swordContext?: SwordContext
   parts.push('Your previous responses in this conversation that contain specific data (prices, statistics, facts, dates) were based on verified real-time sources at that moment.');
   parts.push('Do not contradict or disclaim your own previous statements with phrases like "I don\'t have access to real-time data."');
   parts.push('If asked follow-up questions, build on what you already provided. The data may be slightly stale, but it was accurate when you stated it.');
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SHIELD CONTEXT INJECTION — User acknowledged risk warning
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // When the user has been shown a risk warning and clicked "I Understand",
+  // inject context so the LLM knows to be helpful rather than refusing.
+  
+  if (shieldContext?.acknowledged) {
+    parts.push('');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+    parts.push('RISK ACKNOWLEDGMENT:');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+    parts.push('The user has been shown a risk warning and explicitly confirmed they want to proceed.');
+    parts.push('');
+    
+    if (shieldContext.domain) {
+      parts.push(`Domain: ${shieldContext.domain}`);
+    }
+    
+    if (shieldContext.warningShown) {
+      parts.push(`Warning shown: "${shieldContext.warningShown}"`);
+    }
+    
+    parts.push('');
+    parts.push('INSTRUCTIONS:');
+    parts.push('- The user understands and accepts the risks involved');
+    parts.push('- Respond to their actual request or statement with helpful guidance');
+    parts.push('- If they stated an intention, engage with that intention directly');
+    parts.push('- Do NOT interpret this as a request to help them "phrase" or "say" something');
+    parts.push('- Do NOT offer to help them reword or communicate their message');
+    parts.push('- Treat their message as the topic they want help WITH, not help phrasing');
+    parts.push('- Brief relevant caveats are fine, but do not refuse or over-warn');
+    parts.push('- Be genuinely helpful now that informed consent is established');
+    parts.push('- Do not repeat the warning they already acknowledged');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════════
   // SWORDGATE CONTEXT INJECTION (Entry A)
@@ -133,16 +174,34 @@ function buildUserPrompt(userMessage: string, topic?: string): string {
  */
 export function stitchPrompt(
   state: PipelineState,
+  contextOrConfig?: PipelineContext | ResponseGateConfig,
   config?: ResponseGateConfig
 ): StitchedPrompt {
-  const personality = config?.personality ?? DEFAULT_PERSONALITY;
+  // Handle backward compatibility: stitchPrompt(state, config) vs stitchPrompt(state, context, config)
+  let context: PipelineContext | undefined;
+  let actualConfig: ResponseGateConfig | undefined;
+  
+  if (contextOrConfig && 'personality' in contextOrConfig) {
+    // Old signature: stitchPrompt(state, config)
+    actualConfig = contextOrConfig as ResponseGateConfig;
+    context = undefined;
+  } else {
+    // New signature: stitchPrompt(state, context, config)
+    context = contextOrConfig as PipelineContext | undefined;
+    actualConfig = config;
+  }
+  
+  const personality = actualConfig?.personality ?? DEFAULT_PERSONALITY;
   const capOutput = state.capabilityResult as CapabilityGateOutput | undefined;
   const topic = capOutput?.config?.topic;
   
   // Get SwordContext from stance gate output (Entry A enrichment)
   const swordContext = state.stanceResult?.swordContext;
+  
+  // Get ShieldContext from pipeline context (set by /shield/confirm)
+  const shieldContext = context?.shieldContext;
 
-  const system = buildSystemPrompt(personality, swordContext);
+  const system = buildSystemPrompt(personality, swordContext, shieldContext);
   const user = buildUserPrompt(state.userMessage, topic);
 
   return { system, user };
@@ -191,13 +250,18 @@ export async function executeResponseGateAsync(
     };
   }
 
-  // Build prompts (now includes SwordContext if present)
-  const { system, user } = stitchPrompt(state, config);
+  // Build prompts (now includes SwordContext and ShieldContext if present)
+  const { system, user } = stitchPrompt(state, context, config);
 
   if (DEBUG) {
     console.log(`[RESPONSE] provider: ${provider}`);
     console.log(`[RESPONSE] SYSTEM PROMPT:\n${system}`);
     console.log(`[RESPONSE] USER PROMPT:\n${user}`);
+  }
+
+  // Log if ShieldContext is being used
+  if (context.shieldContext?.acknowledged) {
+    console.log(`[RESPONSE] ShieldContext injected: domain="${context.shieldContext.domain}", acknowledged=true`);
   }
 
   // Log if SwordContext is being used
