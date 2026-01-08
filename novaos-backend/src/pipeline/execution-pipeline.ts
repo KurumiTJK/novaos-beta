@@ -6,11 +6,11 @@ import type {
   PipelineState,
   PipelineContext,
   PipelineResult,
+  ShieldResult,
 } from '../types/index.js';
 
 import {
   executeIntentGateAsync,
-  executeShieldGate,
   executeToolsGate,
   executeStanceGateAsync,
   executeCapabilityGate,
@@ -20,6 +20,9 @@ import {
   buildRegenerationMessage,
   type ConstitutionGateOutput,
 } from '../gates/index.js';
+
+// Import async shield gate
+import { executeShieldGateAsync } from '../gates/shield_gate/index.js';
 
 import { isOpenAIAvailable } from './llm_engine.js';
 
@@ -103,9 +106,45 @@ export class ExecutionPipeline {
     state.gateResults.intent = await executeIntentGateAsync(state, context);
     state.intent_summary = state.gateResults.intent.output;
 
-    // ─── STAGE 2: SHIELD (Router) ───
-    state.gateResults.shield = executeShieldGate(state, context);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STAGE 2: SHIELD (Protection Layer) — Now Async with Service
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Shield evaluates safety signals:
+    // - NONE/LOW: Skip (no intervention)
+    // - MEDIUM: Warn (pipeline continues, warning attached to response)
+    // - HIGH: Crisis (pipeline halts, no response generated)
+    
+    state.gateResults.shield = await executeShieldGateAsync(state, context);
     state.shieldResult = state.gateResults.shield.output;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CHECK FOR SHIELD BLOCK — High signal or active crisis session
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    if (state.gateResults.shield.action === 'halt') {
+      const shieldOutput = state.shieldResult;
+      console.log(`[PIPELINE] Shield BLOCK: ${shieldOutput.action} (crisis)`);
+      
+      const shieldData: ShieldResult = {
+        action: 'crisis',
+        riskAssessment: shieldOutput.riskAssessment,
+        sessionId: shieldOutput.sessionId,
+        activationId: shieldOutput.activationId,
+        crisisBlocked: shieldOutput.crisisBlocked,
+      };
+      
+      return {
+        status: 'blocked',
+        response: '', // No response for crisis - frontend shows crisis UI
+        stance: 'shield',
+        shield: shieldData,
+        gateResults: state.gateResults,
+        metadata: {
+          requestId: context.requestId,
+          totalTimeMs: Date.now() - pipelineStart,
+        },
+      };
+    }
 
     // ─── STAGE 3: TOOLS (Router) ───
     state.gateResults.tools = executeToolsGate(state, context);
@@ -201,10 +240,27 @@ export class ExecutionPipeline {
     // ─── BUILD FINAL RESPONSE ───
     const finalText = state.validatedOutput?.text ?? state.generation?.text ?? '';
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ATTACH SHIELD WARNING (for medium signals)
+    // Pipeline completed normally, but we attach warning for frontend to show
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    let shieldWarning: ShieldResult | undefined;
+    
+    if (state.shieldResult?.action === 'warn') {
+      shieldWarning = {
+        action: 'warn',
+        riskAssessment: state.shieldResult.riskAssessment,
+        activationId: state.shieldResult.activationId,
+      };
+      console.log(`[PIPELINE] Response includes shield warning`);
+    }
+
     return {
       status: 'success',
       response: finalText,
       stance: state.stance,
+      shield: shieldWarning, // Attached for frontend to show overlay
       gateResults: state.gateResults,
       metadata: {
         requestId: context.requestId,

@@ -1,13 +1,26 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SHIELD GATE — Exports
+// SHIELD SERVICE — Exports
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { executeShieldGate, executeShieldGateAsync } from './shield-gate.js';
+export {
+  ShieldService,
+  getShieldService,
+  resetShieldService,
+} from './shield-service.js';
+
+export { assessRisk } from './risk-assessor.js';
+
+export {
+  getActiveCrisisSession,
+  createCrisisSession,
+  resolveCrisisSession,
+  getCrisisSession,
+} from './crisis-session.js';
 
 export type {
-  ShieldGateOutput,
-  ShieldRoute,
-  SafetySignal,
-  Urgency,
-  ShieldGateAction,
+  ShieldAction,
+  ShieldEvaluation,
+  RiskAssessment,
+  CrisisSession,
+  ShieldActivation,
 } from './types.js';

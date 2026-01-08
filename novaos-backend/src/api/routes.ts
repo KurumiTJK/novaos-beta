@@ -90,6 +90,12 @@ import {
 import { swordRoutes } from './sword-routes.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// SHIELD ROUTES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { shieldRoutes } from './shield-routes.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -167,6 +173,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'structured-logging',
         'pipeline-integration',
         'swordgate-v2',
+        'shield-protection',
         isSupabaseInitialized() ? 'supabase' : null,
         appConfig.verification.enabled ? 'verification' : null,
         appConfig.webFetch.enabled ? 'web-fetch' : null,
@@ -442,6 +449,14 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   
   router.use('/sword', authenticate({ required: true }), swordRoutes);
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SHIELD ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Shield protection endpoints for warning acknowledgment and crisis resolution
+  // All shield endpoints require authentication
+  
+  router.use('/shield', authenticate({ required: true }), shieldRoutes);
+
   // ─────────────────────────────────────────────────────────────────────────────
   // PROTECTED MIDDLEWARE STACK
   // ─────────────────────────────────────────────────────────────────────────────
@@ -550,44 +565,46 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         const result = await pipeline.process(message, context);
 
         // ═════════════════════════════════════════════════════════════════════
-        // STEP 5: Save messages to working memory
+        // STEP 5: Handle special pipeline statuses
         // ═════════════════════════════════════════════════════════════════════
-        const capabilityOutput = result.gateResults?.capability?.output;
-        const usedLiveData = capabilityOutput?.provider === 'gemini_grounded';
 
-        // Save user message
-        await workingMemory.addUserMessage(resolvedConversationId, message);
-
-        // Save assistant response with metadata
-        await workingMemory.addAssistantMessage(
-          resolvedConversationId,
-          result.response,
-          {
-            liveData: usedLiveData,
-            stance: result.stance,
-            tokensUsed: result.gateResults?.model?.output?.tokensUsed,
-          }
-        );
-
-        // ═════════════════════════════════════════════════════════════════════
-        // STEP 6: Audit & respond
-        // ═════════════════════════════════════════════════════════════════════
-        await logAudit({
-          category: 'chat',
-          action: 'chat_message',
-          userId,
-          details: {
+        // ═══════════════════════════════════════════════════════════════════════
+        // SHIELD BLOCKED → CRISIS MODE
+        // When user has active crisis session or HIGH safety signal detected
+        // No response generated, frontend shows crisis UI
+        // ═══════════════════════════════════════════════════════════════════════
+        if (result.status === 'blocked' && result.shield) {
+          const { shield } = result;
+          
+          // Don't save messages for blocked requests
+          
+          await logAudit({
+            category: 'shield',
+            severity: shield.crisisBlocked ? 'info' : 'warning',
+            action: shield.crisisBlocked ? 'crisis_blocked' : 'crisis_activated',
+            userId,
+            details: {
+              conversationId: resolvedConversationId,
+              sessionId: shield.sessionId,
+              activationId: shield.activationId,
+            },
+          });
+          
+          res.json({
+            response: '', // No response for crisis
+            stance: 'shield',
+            status: 'blocked',
             conversationId: resolvedConversationId,
-            stance: result.stance,
-            status: result.status,
-            usedLiveData,
             isNewConversation,
-          },
-        });
-
-
-        if (result.status === 'stopped') {
-          await trackVeto(userId);
+            shield: {
+              action: shield.action,
+              riskAssessment: shield.riskAssessment,
+              sessionId: shield.sessionId,
+              activationId: shield.activationId,
+              crisisBlocked: shield.crisisBlocked,
+            },
+          });
+          return;
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -627,6 +644,51 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
           return;
         }
 
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 6: Save messages to working memory (normal flow)
+        // ═════════════════════════════════════════════════════════════════════
+        const capabilityOutput = result.gateResults?.capability?.output;
+        const usedLiveData = capabilityOutput?.provider === 'gemini_grounded';
+
+        // Save user message
+        await workingMemory.addUserMessage(resolvedConversationId, message);
+
+        // Save assistant response with metadata
+        await workingMemory.addAssistantMessage(
+          resolvedConversationId,
+          result.response,
+          {
+            liveData: usedLiveData,
+            stance: result.stance,
+            tokensUsed: result.gateResults?.model?.output?.tokensUsed,
+          }
+        );
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 7: Audit & respond
+        // ═════════════════════════════════════════════════════════════════════
+        await logAudit({
+          category: 'chat',
+          action: 'chat_message',
+          userId,
+          details: {
+            conversationId: resolvedConversationId,
+            stance: result.stance,
+            status: result.status,
+            usedLiveData,
+            isNewConversation,
+            hasShieldWarning: !!result.shield,
+          },
+        });
+
+
+        if (result.status === 'stopped') {
+          await trackVeto(userId);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // NORMAL RESPONSE (may include shield warning for medium signals)
+        // ═══════════════════════════════════════════════════════════════════════
         res.json({
           ...result,
           conversationId: resolvedConversationId,
@@ -874,6 +936,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
             redactPII: appConfig.observability.redactPII,
             supabase: isSupabaseInitialized(),
             swordgate: true,
+            shield: true,
           },
           verification: {
             enabled: appConfig.verification.enabled,

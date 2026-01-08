@@ -64,15 +64,48 @@ export interface GateResult<T = unknown> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// GATE OUTPUTS
+// SHIELD GATE — Updated with Service Integration
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type ShieldRoute = 'shield' | 'skip';
+export type ShieldGateAction = 'skip' | 'warn' | 'crisis';
+
+/**
+ * Risk assessment from Shield Service LLM
+ */
+export interface ShieldRiskAssessment {
+  domain: string;
+  riskExplanation: string;
+  consequences: string[];
+  alternatives: string[];
+  question: string;
+}
+
 export interface ShieldGateOutput {
   route: ShieldRoute;
   safety_signal: SafetySignal;
   urgency: Urgency;
+  shield_acceptance?: boolean;
+  
+  /** Shield action: skip (none/low), warn (medium), crisis (high) */
+  action?: ShieldGateAction;
+  
+  /** LLM risk assessment (medium/high only) */
+  riskAssessment?: ShieldRiskAssessment;
+  
+  /** Crisis session ID (high only) */
+  sessionId?: string;
+  
+  /** Activation ID for audit */
+  activationId?: string;
+  
+  /** True if blocked by existing crisis session */
+  crisisBlocked?: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// TOOLS GATE
+// ─────────────────────────────────────────────────────────────────────────────────
 
 export type ToolsRoute = 'tools' | 'skip';
 export interface ToolsGateOutput {
@@ -80,11 +113,11 @@ export interface ToolsGateOutput {
   external_tool: boolean;
 }
 
-export type StanceRoute = 'sword' | 'lens';
+// ─────────────────────────────────────────────────────────────────────────────────
+// STANCE GATE
+// ─────────────────────────────────────────────────────────────────────────────────
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SWORDGATE REDIRECT
-// ═══════════════════════════════════════════════════════════════════════════════
+export type StanceRoute = 'sword' | 'lens';
 
 /**
  * SwordRedirect signals the frontend to navigate to the SwordGate UI
@@ -106,11 +139,6 @@ export interface SwordRedirect {
   /** If designer mode, the extracted topic */
   topic?: string;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// SWORDGATE CONTEXT (Entry A Enrichment - DEPRECATED)
-// Now using redirect instead of enrichment
-// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface SwordContext {
   hasActivePlan: boolean;
@@ -287,7 +315,29 @@ export interface PipelineState {
   stance?: Stance;
 }
 
-export type PipelineStatus = 'success' | 'stopped' | 'await_ack' | 'degraded' | 'error' | 'redirect';
+export type PipelineStatus = 'success' | 'stopped' | 'await_ack' | 'degraded' | 'error' | 'redirect' | 'blocked';
+
+/**
+ * Shield data attached to pipeline result
+ * For medium: attached alongside response
+ * For high/crisis: response is empty, only shield data returned
+ */
+export interface ShieldResult {
+  /** warn = show warning overlay, crisis = block all */
+  action: 'warn' | 'crisis';
+  
+  /** LLM-generated risk assessment */
+  riskAssessment?: ShieldRiskAssessment;
+  
+  /** Crisis session ID (for high) */
+  sessionId?: string;
+  
+  /** Activation ID for audit */
+  activationId?: string;
+  
+  /** True if blocked by existing active crisis */
+  crisisBlocked?: boolean;
+}
 
 export interface PipelineResult {
   readonly status: PipelineStatus;
@@ -299,6 +349,9 @@ export interface PipelineResult {
   
   /** Present when status='redirect' - frontend should navigate to SwordGate */
   readonly redirect?: SwordRedirect;
+  
+  /** Present when shield activated (medium=warn with response, high/blocked=crisis without response) */
+  readonly shield?: ShieldResult;
   
   readonly metadata: {
     readonly requestId?: string;

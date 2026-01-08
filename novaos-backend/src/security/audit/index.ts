@@ -6,7 +6,7 @@
 import type { KeyValueStore } from '../../storage/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// TYPES (Added 'chat' and 'admin')
+// TYPES (Added 'chat', 'admin', and 'shield')
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type AuditCategory =
@@ -18,7 +18,8 @@ export type AuditCategory =
   | 'validation'
   | 'system'
   | 'chat'
-  | 'admin';
+  | 'admin'
+  | 'shield';
 
 export type AuditSeverity = 'info' | 'warning' | 'error' | 'critical';
 
