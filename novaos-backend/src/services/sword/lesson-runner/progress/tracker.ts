@@ -92,7 +92,10 @@ export async function getToday(userId: string): Promise<TodayState | null> {
   // Calculate session info - use sessionsCompleted (correct property name)
   const sessionNumber = (currentSubskill.sessionsCompleted || 0) + 1;
   const totalSessions = currentSubskill.estimatedSessions || 3;
-  const isKnowledgeCheckDay = sessionNumber === totalSessions;
+  
+  // Knowledge check is AFTER all learning sessions are complete
+  // e.g., 3-session subskill: sessions 1-3 = learning, then KC
+  const isKnowledgeCheckDay = sessionNumber > totalSessions;
   
   // Check for refresh need (7+ day gap)
   const needsRefresh = checkNeedsRefresh(currentSubskill);

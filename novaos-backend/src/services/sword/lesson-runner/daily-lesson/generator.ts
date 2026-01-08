@@ -584,7 +584,10 @@ export async function completeSession(
   const subskill = mapPlanSubskill(subskillRow);
   const newSessionCount = dailyLesson.sessionNumber;
   const totalSessions = subskill.estimatedSessions || 3;
-  const isKnowledgeCheckNext = newSessionCount === totalSessions - 1;
+  
+  // Knowledge check is next AFTER completing all learning sessions
+  // e.g., 3-session subskill: after session 3, KC is next (not session 2)
+  const isKnowledgeCheckNext = newSessionCount >= totalSessions;
   const isComplete = newSessionCount >= totalSessions;
   
   await supabase

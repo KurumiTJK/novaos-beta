@@ -298,7 +298,29 @@ async function handleFail(
   missedQuestions: MissedQuestion[],
   feedback: string[]
 ): Promise<KnowledgeCheckResult> {
-  console.log(`[KC] FAILED - user can retake`);
+  const supabase = getSupabase();
+  
+  console.log(`[KC] FAILED - adding remediation session`);
+  
+  // Get current subskill to find estimated_sessions
+  const { data: subskillRow } = await supabase
+    .from('plan_subskills')
+    .select('*')
+    .eq('id', check.subskillId)
+    .single();
+  
+  if (subskillRow) {
+    const currentEstimated = subskillRow.estimated_sessions || 3;
+    
+    // Add one remediation session
+    await supabase
+      .from('plan_subskills')
+      .update({ estimated_sessions: currentEstimated + 1 } as any)
+      .eq('id', check.subskillId);
+    
+    console.log(`[KC] Remediation session added: ${currentEstimated} → ${currentEstimated + 1}`);
+    feedback.push('Complete the remediation session to review missed concepts, then retry the knowledge check.');
+  }
   
   return {
     check,

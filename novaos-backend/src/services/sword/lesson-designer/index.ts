@@ -567,7 +567,7 @@ async function createPlanFromSession(sessionId: string): Promise<LessonPlan> {
       estimated_sessions: timeEstimate.totalSessions,
       estimated_weeks: timeEstimate.weeks,
       estimated_time_display: capstoneData.estimatedTime,  // NEW: Store LLM's human-readable string
-      status: 'active',
+      status: 'designing',  // Plans start as 'designing' - user must activate via activatePlan()
       progress: 0,
       sessions_completed: 0,
       current_subskill_index: 0,
@@ -664,7 +664,7 @@ async function createPlanFromSession(sessionId: string): Promise<LessonPlan> {
     estimatedSessions: timeEstimate.totalSessions,
     estimatedWeeks: timeEstimate.weeks,
     estimatedTimeDisplay: capstoneData.estimatedTime,  // NEW
-    status: 'active',
+    status: 'designing',  // Plans start as 'designing' - user must activate via activatePlan()
     progress: 0,
     sessionsCompleted: 0,
     currentSubskillIndex: 0,

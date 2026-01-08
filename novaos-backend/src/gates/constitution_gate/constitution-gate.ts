@@ -3,6 +3,9 @@
 // 
 // Router + LLM check to verify responses comply with the Nova Constitution.
 // Runs check only when safety_signal is medium/high OR shield_acceptance is true.
+// 
+// SHIELD AMENDMENT: When shieldContext.acknowledged = true, the constitution
+// check is loosened to allow direct helpful responses on the acknowledged topic.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type {
@@ -12,7 +15,7 @@ import type {
 } from '../../types/index.js';
 
 import { generateForConstitutionGate } from '../../pipeline/llm_engine.js';
-import { CONSTITUTIONAL_CHECK_PROMPT } from './constitution.js';
+import { buildConstitutionalCheckPrompt, CONSTITUTIONAL_CHECK_PROMPT } from './constitution.js';
 import type {
   ConstitutionGateOutput,
   ConstitutionGateConfig,
@@ -35,8 +38,8 @@ function shouldRunConstitutionCheck(state: PipelineState): RouterDecision {
   // Get shield acceptance from shield gate (defaults to false until implemented)
   const shieldAcceptance = (state.shieldResult as any)?.shield_acceptance ?? false;
   
-  // Run check if safety_signal is medium or high
-  if (safetySignal === 'medium' || safetySignal === 'high') {
+  // Run check if safety_signal is low, medium, or high
+  if (safetySignal === 'low' || safetySignal === 'medium' || safetySignal === 'high') {
     return {
       runCheck: true,
       reason: `safety=${safetySignal}`,
@@ -71,10 +74,16 @@ function shouldRunConstitutionCheck(state: PipelineState): RouterDecision {
  * - shield_acceptance is true
  * 
  * Otherwise skips and passes through.
+ * 
+ * SHIELD AMENDMENT:
+ * If context.shieldContext.acknowledged = true, the constitution check prompt
+ * includes a "Shield Amendment" that loosens restrictions for the acknowledged
+ * topic, allowing direct helpful responses without requiring disclaimers or
+ * redirection.
  */
 export async function executeConstitutionGateAsync(
   state: PipelineState,
-  _context: PipelineContext,
+  context: PipelineContext,
   config?: ConstitutionGateConfig
 ): Promise<GateResult<ConstitutionGateOutput>> {
   const start = Date.now();
@@ -107,8 +116,25 @@ export async function executeConstitutionGateAsync(
   }
 
   try {
-    // Build the check prompt
-    const userPrompt = `RESPONSE TO CHECK:
+    // Build the check prompt (with Shield Amendment if applicable)
+    const shieldContext = context.shieldContext;
+    const systemPrompt = buildConstitutionalCheckPrompt(shieldContext);
+    
+    // Log if Shield Amendment is active
+    if (shieldContext?.acknowledged) {
+      console.log(`[CONSTITUTION] Shield Amendment active: domain="${shieldContext.domain}"`);
+    }
+
+    // Build user prompt with context
+    const domain = shieldContext?.domain ?? state.intent_summary?.topic ?? 'general';
+    const userMessage = state.userMessage;
+    
+    const userPrompt = `CONTEXT:
+- Domain: ${domain}
+- User's message: "${userMessage}"
+${shieldContext?.acknowledged ? `- Shield Status: User acknowledged risk warning and confirmed they want to proceed` : ''}
+
+RESPONSE TO CHECK:
 """
 ${generatedText}
 """
@@ -117,7 +143,7 @@ Analyze this response for constitutional violations.`;
 
     // Call LLM directly via llm_engine
     const checkResponse = await generateForConstitutionGate(
-      CONSTITUTIONAL_CHECK_PROMPT,
+      systemPrompt,
       userPrompt
     );
     
