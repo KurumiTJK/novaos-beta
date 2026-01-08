@@ -1355,6 +1355,472 @@ router.get('/stats', async (req: Request, res: Response, next: NextFunction) => 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - SUBSKILL MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// POST /sword/runner/subskill/:subskillId/start - Start a subskill (routes to skip/assess/learn)
+router.post('/runner/subskill/:subskillId/start', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.startSubskill(userId, subskillId);
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/subskill/:subskillId - Get subskill details
+router.get('/runner/subskill/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const subskill = await LessonRunner.getSubskill(subskillId);
+    
+    if (!subskill) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Subskill not found' },
+      });
+      return;
+    }
+    
+    res.json({ success: true, data: subskill });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/subskills/:planId - Get all subskills for a plan
+router.get('/runner/subskills/:planId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { planId } = req.params;
+    
+    if (!planId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'planId required' },
+      });
+      return;
+    }
+    
+    const subskills = await LessonRunner.getAllSubskills(planId);
+    
+    res.json({ success: true, data: subskills });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/subskill/current/:planId - Get current subskill for a plan
+router.get('/runner/subskill/current/:planId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { planId } = req.params;
+    
+    if (!planId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'planId required' },
+      });
+      return;
+    }
+    
+    const subskill = await LessonRunner.getCurrentSubskill(planId);
+    
+    res.json({ success: true, data: subskill });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - DIAGNOSTIC (Assessment)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// GET /sword/runner/diagnostic/:subskillId - Get diagnostic test
+router.get('/runner/diagnostic/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const assessment = await LessonRunner.getDiagnostic(userId, subskillId);
+    
+    res.json({ success: true, data: assessment });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/runner/diagnostic/submit - Submit diagnostic answers
+router.post('/runner/diagnostic/submit', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { assessmentId, answers } = req.body;
+    
+    if (!assessmentId || !answers) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'assessmentId and answers required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.submitDiagnostic(userId, { assessmentId, answers });
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - DAILY LESSONS (Sessions)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// POST /sword/runner/session/start - Start a learning session
+router.post('/runner/session/start', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.body;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.startSession(userId, subskillId);
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/session/:subskillId/:sessionNumber - Get specific session
+router.get('/runner/session/:subskillId/:sessionNumber', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId, sessionNumber } = req.params;
+    
+    if (!subskillId || !sessionNumber) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId and sessionNumber required' },
+      });
+      return;
+    }
+    
+    const session = await LessonRunner.getSession(userId, subskillId, parseInt(sessionNumber));
+    
+    if (!session) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Session not found' },
+      });
+      return;
+    }
+    
+    res.json({ success: true, data: session });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/runner/session/:dailyLessonId/complete - Complete a session
+router.post('/runner/session/:dailyLessonId/complete', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { dailyLessonId } = req.params;
+    
+    if (!dailyLessonId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'dailyLessonId required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.completeSession(userId, dailyLessonId);
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/runner/session/:subskillId/:sessionNumber/regenerate - Regenerate session
+router.post('/runner/session/:subskillId/:sessionNumber/regenerate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId, sessionNumber } = req.params;
+    
+    if (!subskillId || !sessionNumber) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId and sessionNumber required' },
+      });
+      return;
+    }
+    
+    const session = await LessonRunner.regenerateSession(userId, subskillId, parseInt(sessionNumber));
+    
+    res.json({ success: true, data: session });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - KNOWLEDGE CHECK (Mastery Gate)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// GET /sword/runner/check/:subskillId - Get knowledge check
+router.get('/runner/check/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const check = await LessonRunner.getKnowledgeCheck(userId, subskillId);
+    
+    res.json({ success: true, data: check });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/runner/check/submit - Submit knowledge check answers
+router.post('/runner/check/submit', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { checkId, answers } = req.body;
+    
+    if (!checkId || !answers) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'checkId and answers required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.submitKnowledgeCheck(userId, { checkId, answers });
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - PROGRESS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// GET /sword/runner/progress/subskill/:subskillId - Get subskill progress
+router.get('/runner/progress/subskill/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const progress = await LessonRunner.getSubskillProgress(userId, subskillId);
+    
+    res.json({ success: true, data: progress });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/progress/plan/:planId - Get plan progress
+router.get('/runner/progress/plan/:planId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { planId } = req.params;
+    
+    if (!planId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'planId required' },
+      });
+      return;
+    }
+    
+    const progress = await LessonRunner.getPlanProgress(userId, planId);
+    
+    res.json({ success: true, data: progress });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/history/:subskillId - Get session history
+router.get('/runner/history/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const history = await LessonRunner.getSessionHistory(userId, subskillId);
+    
+    res.json({ success: true, data: history });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - LESSON PLAN
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// GET /sword/runner/lesson-plan/:subskillId - Get lesson plan for a subskill
+router.get('/runner/lesson-plan/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const lessonPlan = await LessonRunner.getLessonPlan(subskillId);
+    
+    if (!lessonPlan) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Lesson plan not found' },
+      });
+      return;
+    }
+    
+    res.json({ success: true, data: lessonPlan });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - REFRESH (Gap Detection)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// GET /sword/runner/refresh/:subskillId - Check if needs refresh
+router.get('/runner/refresh/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.checkNeedsRefresh(userId, subskillId);
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/refresh/:subskillId/content - Get refresh content
+router.get('/runner/refresh/:subskillId/content', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    const content = await LessonRunner.getRefreshContent(userId, subskillId);
+    
+    res.json({ success: true, data: content });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/runner/refresh/:subskillId/skip - Skip refresh
+router.post('/runner/refresh/:subskillId/skip', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    await LessonRunner.skipRefresh(userId, subskillId);
+    
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // EXPORT
 // ─────────────────────────────────────────────────────────────────────────────────
 
