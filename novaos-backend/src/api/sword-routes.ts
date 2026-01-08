@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SWORD API ROUTES
-// Express router for SwordGate endpoints
+// SWORD API ROUTES v3 - SIMPLIFIED
+// No Research, Node Gen, Sequencing, or Method Nodes
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -85,7 +85,6 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.get('/today', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = getUserId(req);
-    // Note: getToday only takes userId, timezone is handled internally
     const today = await LessonRunner.getToday(userId);
     res.json({ success: true, data: today });
   } catch (error) {
@@ -100,18 +99,12 @@ router.get('/today', async (req: Request, res: Response, next: NextFunction) => 
 /**
  * Start exploration (enters Orient mode)
  * POST /sword/explore/start
- * Body: { sessionId?: string, topic?: string }
- * 
- * If sessionId is not provided:
- * - Uses existing active session if one exists
- * - Otherwise creates a new designer session
  */
 router.post('/explore/start', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = getUserId(req);
     let { sessionId, topic } = req.body;
     
-    // If no sessionId provided, check for existing session or create new
     if (!sessionId) {
       const existingSession = await LessonDesigner.getActiveSession(userId);
       if (existingSession) {
@@ -127,7 +120,7 @@ router.post('/explore/start', async (req: Request, res: Response, next: NextFunc
     res.json({
       success: true,
       data: {
-        sessionId, // Include sessionId so frontend can track it
+        sessionId,
         message: result.message,
         state: result.state,
       },
@@ -141,7 +134,6 @@ router.post('/explore/start', async (req: Request, res: Response, next: NextFunc
 /**
  * Chat in Orient phase
  * POST /sword/explore/chat
- * Body: { sessionId: string, message: string }
  */
 router.post('/explore/chat', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -171,9 +163,8 @@ router.post('/explore/chat', async (req: Request, res: Response, next: NextFunct
 });
 
 /**
- * Confirm Orient → move to Clarify (extracts data)
+ * Confirm Orient → move to Clarify
  * POST /sword/explore/confirm
- * Body: { sessionId: string }
  */
 router.post('/explore/confirm', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -200,7 +191,7 @@ router.post('/explore/confirm', async (req: Request, res: Response, next: NextFu
 });
 
 /**
- * Get Clarify data (extracted + missing fields)
+ * Get Clarify data
  * GET /sword/explore/clarify?sessionId=xxx
  */
 router.get('/explore/clarify', async (req: Request, res: Response, next: NextFunction) => {
@@ -228,9 +219,8 @@ router.get('/explore/clarify', async (req: Request, res: Response, next: NextFun
 });
 
 /**
- * Update a field (fill or edit)
+ * Update a field
  * PATCH /sword/explore/field
- * Body: { sessionId: string, field: string, value: string }
  */
 router.patch('/explore/field', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -270,9 +260,8 @@ router.patch('/explore/field', async (req: Request, res: Response, next: NextFun
 });
 
 /**
- * Update constraints array
+ * Update constraints
  * PATCH /sword/explore/constraints
- * Body: { sessionId: string, constraints: string[] }
  */
 router.patch('/explore/constraints', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -309,7 +298,6 @@ router.patch('/explore/constraints', async (req: Request, res: Response, next: N
 /**
  * Go back to Orient phase
  * POST /sword/explore/back
- * Body: { sessionId: string }
  */
 router.post('/explore/back', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -338,7 +326,6 @@ router.post('/explore/back', async (req: Request, res: Response, next: NextFunct
 /**
  * Complete exploration → move to Define Goal
  * POST /sword/explore/continue
- * Body: { sessionId: string }
  */
 router.post('/explore/continue', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -352,15 +339,8 @@ router.post('/explore/continue', async (req: Request, res: Response, next: NextF
       return;
     }
 
-    // Complete exploration and get the proper ExplorationData format
     const explorationData = await ExplorationService.complete(sessionId);
-    
-    // CRITICAL: Save the ExplorationData back to the session so capstone can use it
-    // The session currently has ExplorationState format (with extracted.learningGoal)
-    // We need to overwrite it with ExplorationData format (learningGoal at root)
     await updatePhaseData(sessionId, 'exploration', explorationData);
-    
-    // Update phase to define_goal/capstone
     await updateSessionPhase(sessionId, 'capstone', undefined);
 
     res.json({
@@ -405,15 +385,12 @@ router.get('/explore/state', async (req: Request, res: Response, next: NextFunct
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DEFINE GOAL ENDPOINTS (Phase 2: Capstone → Subskills → Routing)
+// DEFINE GOAL ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Run all three Define Goal steps
+ * Generate all Define Goal steps (capstone → subskills → routing)
  * POST /sword/goal/generate
- * 
- * Runs: capstone → subskills → routing
- * Returns full Define Goal state
  */
 router.post('/goal/generate', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -442,7 +419,6 @@ router.post('/goal/generate', async (req: Request, res: Response, next: NextFunc
     console.log('[DEFINE GOAL] Step 1: Generating capstone...');
     const capstoneData = await CapstoneGenerator.generate(session);
 
-    // Refresh session to get updated data
     const sessionAfterCapstone = await LessonDesigner.getActiveSession(userId);
     if (!sessionAfterCapstone) throw new Error('Session lost after capstone');
 
@@ -450,7 +426,6 @@ router.post('/goal/generate', async (req: Request, res: Response, next: NextFunc
     console.log('[DEFINE GOAL] Step 2: Generating subskills...');
     const subskillsData = await SubskillsGenerator.generate(sessionAfterCapstone);
 
-    // Refresh session
     const sessionAfterSubskills = await LessonDesigner.getActiveSession(userId);
     if (!sessionAfterSubskills) throw new Error('Session lost after subskills');
 
@@ -458,13 +433,9 @@ router.post('/goal/generate', async (req: Request, res: Response, next: NextFunc
     console.log('[DEFINE GOAL] Step 3: Generating routing...');
     const routingData = await RoutingGenerator.generate(sessionAfterSubskills);
 
-    // Get final session state
     const finalSession = await LessonDesigner.getActiveSession(userId);
 
-    // Build summary
     const summary = buildDefineGoalSummary(capstoneData, subskillsData, routingData);
-
-    // Merge subskills with routing for UI
     const subskillsWithRouting = mergeSubskillsWithRouting(
       subskillsData.subskills,
       routingData
@@ -514,7 +485,6 @@ router.get('/goal', async (req: Request, res: Response, next: NextFunction) => {
       ? buildDefineGoalSummary(capstone, session.subskillsData!, routing)
       : null;
 
-    // Merge subskills with routing for UI
     const subskillsWithRouting = subskills && routing
       ? mergeSubskillsWithRouting(subskills, routing)
       : null;
@@ -536,7 +506,7 @@ router.get('/goal', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 /**
- * Regenerate capstone only
+ * Regenerate capstone
  * POST /sword/goal/capstone/regenerate
  */
 router.post('/goal/capstone/regenerate', async (req: Request, res: Response, next: NextFunction) => {
@@ -566,7 +536,6 @@ router.post('/goal/capstone/regenerate', async (req: Request, res: Response, nex
 /**
  * Update capstone
  * PATCH /sword/goal/capstone
- * Body: { title?, statement?, successCriteria?, estimatedTime? }
  */
 router.patch('/goal/capstone', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -590,7 +559,6 @@ router.patch('/goal/capstone', async (req: Request, res: Response, next: NextFun
       return;
     }
 
-    // Build updated capstone
     const updated = {
       ...session.capstoneData,
       ...(title && { title }),
@@ -613,7 +581,6 @@ router.patch('/goal/capstone', async (req: Request, res: Response, next: NextFun
 /**
  * Refine capstone with feedback
  * POST /sword/goal/capstone/refine
- * Body: { feedback: string }
  */
 router.post('/goal/capstone/refine', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -651,7 +618,6 @@ router.post('/goal/capstone/refine', async (req: Request, res: Response, next: N
 /**
  * Regenerate subskills
  * POST /sword/goal/subskills/regenerate
- * Body: { guidance?: string }
  */
 router.post('/goal/subskills/regenerate', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -681,7 +647,6 @@ router.post('/goal/subskills/regenerate', async (req: Request, res: Response, ne
 /**
  * Add a subskill
  * POST /sword/goal/subskills
- * Body: { title, description, subskillType, estimatedComplexity, order }
  */
 router.post('/goal/subskills', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -725,7 +690,6 @@ router.post('/goal/subskills', async (req: Request, res: Response, next: NextFun
 /**
  * Update a subskill
  * PATCH /sword/goal/subskills/:subskillId
- * Body: { title?, description?, subskillType?, estimatedComplexity?, order? }
  */
 router.patch('/goal/subskills/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -801,7 +765,6 @@ router.delete('/goal/subskills/:subskillId', async (req: Request, res: Response,
 /**
  * Reorder subskills
  * POST /sword/goal/subskills/reorder
- * Body: { orderedIds: string[] }
  */
 router.post('/goal/subskills/reorder', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -839,7 +802,6 @@ router.post('/goal/subskills/reorder', async (req: Request, res: Response, next:
 /**
  * Regenerate routing
  * POST /sword/goal/routing/regenerate
- * Body: { guidance?: string }
  */
 router.post('/goal/routing/regenerate', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -869,7 +831,6 @@ router.post('/goal/routing/regenerate', async (req: Request, res: Response, next
 /**
  * Override status for a subskill
  * PATCH /sword/goal/routing/:subskillId/status
- * Body: { status: 'learn' | 'skip' | 'assess', reason?: string }
  */
 router.patch('/goal/routing/:subskillId/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -916,7 +877,6 @@ router.patch('/goal/routing/:subskillId/status', async (req: Request, res: Respo
 /**
  * Override route for a subskill
  * PATCH /sword/goal/routing/:subskillId/route
- * Body: { route: Route, reason?: string }
  */
 router.patch('/goal/routing/:subskillId/route', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -989,11 +949,15 @@ router.post('/goal/routing/learn-all', async (req: Request, res: Response, next:
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// REVIEW ENDPOINTS (NEW - replaces research + old review)
+// ─────────────────────────────────────────────────────────────────────────────────
+
 /**
- * Confirm Define Goal and move to Research
- * POST /sword/goal/confirm
+ * Get review preview - shows capstone, subskills, and stats
+ * GET /sword/review
  */
-router.post('/goal/confirm', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/review', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = getUserId(req);
     
@@ -1006,69 +970,91 @@ router.post('/goal/confirm', async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    // Validate we have all required data
-    if (!session.capstoneData) {
+    // Check if we have all required data
+    if (!session.capstoneData || !session.subskillsData || !session.routingData) {
       res.status(400).json({
         success: false,
-        error: { code: 'INVALID_STATE', message: 'Capstone required before continuing' },
+        error: { code: 'INVALID_STATE', message: 'Define Goal must be completed first' },
       });
       return;
     }
 
-    if (!session.subskillsData || session.subskillsData.subskills.length === 0) {
-      res.status(400).json({
+    const preview = await LessonDesigner.getReviewPreview(session.id);
+
+    res.json({
+      success: true,
+      data: preview,
+    });
+  } catch (error) {
+    console.error('[REVIEW] Get preview error:', error);
+    next(error);
+  }
+});
+
+/**
+ * Confirm and create plan
+ * POST /sword/review/confirm
+ */
+router.post('/review/confirm', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    
+    const session = await LessonDesigner.getActiveSession(userId);
+    if (!session) {
+      res.status(404).json({
         success: false,
-        error: { code: 'INVALID_STATE', message: 'Subskills required before continuing' },
+        error: { code: 'NOT_FOUND', message: 'No active designer session' },
       });
       return;
     }
 
-    if (!session.routingData || session.routingData.assignments.length === 0) {
+    // Check if we have all required data
+    if (!session.capstoneData || !session.subskillsData || !session.routingData) {
       res.status(400).json({
         success: false,
-        error: { code: 'INVALID_STATE', message: 'Routing required before continuing' },
+        error: { code: 'INVALID_STATE', message: 'Define Goal must be completed first' },
       });
       return;
     }
 
-    // Update phase to research
-    await updateSessionPhase(session.id, 'research', undefined);
+    console.log('[REVIEW] Creating plan for session:', session.id);
+    
+    const plan = await LessonDesigner.createPlan(session.id);
 
-    const updatedSession = await LessonDesigner.getActiveSession(userId);
+    console.log('[REVIEW] Plan created:', plan.id);
 
     res.json({
       success: true,
       data: {
-        session: updatedSession,
-        nextPhase: 'research',
+        plan,
+        message: 'Plan created successfully!',
+        redirectTo: '/learn',
       },
     });
   } catch (error) {
+    console.error('[REVIEW] Confirm error:', error);
     next(error);
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DEFINE GOAL HELPER FUNCTIONS
+// HELPER FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 function buildDefineGoalSummary(capstone: any, subskillsData: any, routing: any): any {
   const subskills = subskillsData.subskills || [];
   const assignments = routing.assignments || [];
 
-  // Count by type
   const byType: Record<string, number> = {};
   for (const s of subskills) {
     byType[s.subskillType] = (byType[s.subskillType] || 0) + 1;
   }
 
-  // Count by route
   const byRoute: Record<string, number> = {};
   for (const a of assignments) {
     byRoute[a.route] = (byRoute[a.route] || 0) + 1;
   }
 
-  // Count by status
   let learn = 0, skip = 0, assess = 0;
   for (const a of assignments) {
     if (a.status === 'learn') learn++;
@@ -1146,7 +1132,7 @@ router.post('/designer/start',
   }
 );
 
-// POST /sword/designer/goal - Define goal and trigger phases 2a-2c
+// POST /sword/designer/goal - Run Define Goal phase
 router.post('/designer/goal',
   validate(GoalDefinitionSchema),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -1154,7 +1140,6 @@ router.post('/designer/goal',
       const userId = getUserId(req);
       const { goal, topic, context } = req.body;
       
-      // Get active session
       const session = await LessonDesigner.getActiveSession(userId);
       if (!session) {
         res.status(404).json({
@@ -1164,7 +1149,6 @@ router.post('/designer/goal',
         return;
       }
       
-      // Run define goal phase (capstone + subskills + routing)
       const result = await LessonDesigner.runDefineGoal(session.id, {
         topic: topic || session.explorationData?.learningGoal || 'Unknown Topic',
         goal,
@@ -1177,56 +1161,11 @@ router.post('/designer/goal',
   }
 );
 
-// POST /sword/designer/research - Run research (phase 3)
-router.post('/designer/research', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = getUserId(req);
-    
-    // Get active session
-    const session = await LessonDesigner.getActiveSession(userId);
-    if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'No active designer session' },
-      });
-      return;
-    }
-    
-    const result = await LessonDesigner.runResearch(session.id);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /sword/designer/review - Run review phase (phase 4: nodes + sequencing + method nodes)
-router.post('/designer/review', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = getUserId(req);
-    
-    // Get active session
-    const session = await LessonDesigner.getActiveSession(userId);
-    if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'No active designer session' },
-      });
-      return;
-    }
-    
-    const result = await LessonDesigner.runReview(session.id);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /sword/designer/finalize - Finalize and create plan
+// POST /sword/designer/finalize - Create plan (convenience alias for /review/confirm)
 router.post('/designer/finalize', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = getUserId(req);
     
-    // Get active session
     const session = await LessonDesigner.getActiveSession(userId);
     if (!session) {
       res.status(404).json({
@@ -1289,7 +1228,6 @@ router.get('/plans/:planId',
       const userId = getUserId(req);
       const { planId } = req.params;
       
-      // Get all plans and find the specific one
       const plans = await SwordGate.getPlans(userId);
       const plan = plans.find(p => p.id === planId);
       
@@ -1307,14 +1245,14 @@ router.get('/plans/:planId',
   }
 );
 
-// GET /sword/plans/:planId/nodes - Get nodes for a plan
-router.get('/plans/:planId/nodes',
+// GET /sword/plans/:planId/subskills - Get subskills for a plan
+router.get('/plans/:planId/subskills',
   validateParams(PlanIdParamSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { planId } = req.params;
-      const nodes = await LessonRunner.getNodes(planId!);
-      res.json({ success: true, data: nodes });
+      const subskills = await SwordGate.getPlanSubskills(planId!);
+      res.json({ success: true, data: subskills });
     } catch (error) {
       next(error);
     }
@@ -1352,111 +1290,7 @@ router.post('/plans/:planId/abandon',
 );
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// NODE ENDPOINTS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-// GET /sword/nodes/:nodeId - Get node details
-router.get('/nodes/:nodeId',
-  validateParams(NodeIdParamSchema),
-  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const { nodeId } = req.params;
-      const node = await LessonRunner.getNode(nodeId!);
-      if (!node) {
-        res.status(404).json({
-          success: false,
-          error: { code: 'NOT_FOUND', message: 'Node not found' },
-        });
-        return;
-      }
-      res.json({ success: true, data: node });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// POST /sword/nodes/:nodeId/start - Start working on a node
-router.post('/nodes/:nodeId/start',
-  validateParams(NodeIdParamSchema),
-  validate(StartNodeSchema),
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const userId = getUserId(req);
-      const { nodeId } = req.params;
-      const result = await LessonRunner.startSession(userId, nodeId!);
-      res.json({ success: true, data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// POST /sword/nodes/:nodeId/check-switch - Check if can switch to this node
-router.post('/nodes/:nodeId/check-switch',
-  validateParams(NodeIdParamSchema),
-  validate(SwitchNodeSchema),
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const userId = getUserId(req);
-      const { nodeId } = req.params;
-      const result = await LessonRunner.checkSwitch(userId, nodeId!);
-      res.json({ success: true, data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// SESSION/PROGRESS ENDPOINTS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-// POST /sword/sessions/:sessionId/asset/:assetId/complete - Complete an asset
-router.post('/sessions/:sessionId/asset/:assetId/complete',
-  validate(CompleteAssetSchema),
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const userId = getUserId(req);
-      const { sessionId, assetId } = req.params;
-      const result = await LessonRunner.completeAsset(userId, sessionId!, assetId!);
-      res.json({ success: true, data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// POST /sword/sessions/:sessionId/spark/complete - Complete today's spark
-router.post('/sessions/:sessionId/spark/complete', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = getUserId(req);
-    const { sessionId } = req.params;
-    const result = await LessonRunner.completeSpark(userId, sessionId!);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /sword/sessions/:sessionId/mastery - Submit mastery reflection
-router.post('/sessions/:sessionId/mastery',
-  validate(SubmitMasterySchema),
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const userId = getUserId(req);
-      const { sessionId } = req.params;
-      const { reflection } = req.body;
-      const result = await LessonRunner.submitMastery(userId, sessionId!, reflection);
-      res.json({ success: true, data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// PROGRESS/STATS
+// STATS
 // ─────────────────────────────────────────────────────────────────────────────────
 
 // GET /sword/stats - Get learning statistics

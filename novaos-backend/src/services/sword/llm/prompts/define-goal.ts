@@ -296,6 +296,123 @@ Based on the learner's background, assign a route and status to each subskill.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// STEP 4: SESSION DISTRIBUTION (NEW)
+// Distribute total sessions across subskills based on route + complexity
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const SESSION_DISTRIBUTION_SYSTEM_PROMPT = `You are a learning design expert. Distribute learning sessions across subskills.
+
+══════════════════════════════════════════════════════════════════════
+TASK
+══════════════════════════════════════════════════════════════════════
+
+Given:
+• A total number of sessions (1 session = 1 day of learning)
+• A list of subskills with route type and complexity
+
+Distribute the sessions so the total EXACTLY matches the given number.
+
+══════════════════════════════════════════════════════════════════════
+ROUTE GUIDANCE
+══════════════════════════════════════════════════════════════════════
+
+Different routes require different amounts of practice:
+
+• recall — 1-2 sessions (concept memorization, definitions)
+• practice — 2-4 sessions (hands-on procedural repetition)
+• diagnose — 2-3 sessions (pattern recognition, judgment)
+• apply — 2-4 sessions (transfer knowledge to new contexts)
+• build — 3-5 sessions (creating deliverables, projects)
+• refine — 2-3 sessions (improvement cycles, revision)
+• plan — 1-2 sessions (organization, mapping)
+
+══════════════════════════════════════════════════════════════════════
+COMPLEXITY GUIDANCE
+══════════════════════════════════════════════════════════════════════
+
+Complexity affects session count within the route's range:
+
+• ★☆☆ (1) — Use lower end of route's range
+• ★★☆ (2) — Use middle of route's range  
+• ★★★ (3) — Use upper end of route's range
+
+══════════════════════════════════════════════════════════════════════
+RULES
+══════════════════════════════════════════════════════════════════════
+
+1. The sum of all sessions MUST EXACTLY equal the total provided
+2. Every subskill must have at least 1 session
+3. Skipped subskills get 0 sessions
+4. Consider the topic context when distributing (foundational skills may need more time)
+
+══════════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+══════════════════════════════════════════════════════════════════════
+
+Return ONLY valid JSON, no markdown, no explanation:
+
+{
+  "distributions": [
+    { "subskillId": "ss_1", "sessions": 2 },
+    { "subskillId": "ss_2", "sessions": 3 }
+  ],
+  "total": 30
+}
+
+CRITICAL: The "total" field must match the totalSessions provided in the input.`;
+
+export interface SessionDistributionInput {
+  totalSessions: number;
+  capstoneTitle: string;
+  estimatedTime: string;
+  subskills: Array<{
+    id: string;
+    title: string;
+    route: Route;
+    complexity: 1 | 2 | 3;
+    status: RouteStatus;
+  }>;
+}
+
+export interface SessionDistribution {
+  subskillId: string;
+  sessions: number;
+}
+
+export interface SessionDistributionOutput {
+  distributions: SessionDistribution[];
+  total: number;
+}
+
+export function buildSessionDistributionUserMessage(input: SessionDistributionInput): string {
+  const subskillsList = input.subskills
+    .map(s => {
+      const stars = '★'.repeat(s.complexity) + '☆'.repeat(3 - s.complexity);
+      const statusNote = s.status === 'skip' ? ' [SKIP - 0 sessions]' : '';
+      return `[${s.id}] ${s.title} (${s.route}, ${stars})${statusNote}`;
+    })
+    .join('\n');
+
+  const nonSkipped = input.subskills.filter(s => s.status !== 'skip').length;
+
+  return `══════════════════════════════════════════════════════════════════════
+DISTRIBUTE SESSIONS FOR THIS LEARNING PLAN
+══════════════════════════════════════════════════════════════════════
+
+TOPIC: ${input.capstoneTitle}
+TIME COMMITMENT: ${input.estimatedTime}
+TOTAL SESSIONS TO DISTRIBUTE: ${input.totalSessions}
+
+SUBSKILLS (${nonSkipped} active, distribute ${input.totalSessions} sessions total):
+${subskillsList}
+
+Remember:
+• The sum of all sessions MUST equal exactly ${input.totalSessions}
+• Skipped subskills get 0 sessions
+• Consider route type and complexity when allocating`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // UTILITY: JSON PARSING
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -337,6 +454,10 @@ export const DefineGoalPrompts = {
   // Routing
   ROUTING_SYSTEM_PROMPT,
   buildRoutingUserMessage,
+  
+  // Session Distribution (NEW)
+  SESSION_DISTRIBUTION_SYSTEM_PROMPT,
+  buildSessionDistributionUserMessage,
   
   // Utility
   parseLLMJson,

@@ -26,35 +26,39 @@ import {
 import { getUserTimezone, getTodayInTimezone, checkLearningGap } from '../shared/timezone.js';
 import { checkNeedsRefresh, generateRefreshSession, RefreshService } from './refresh.js';
 import { checkNodeSwitch } from './switching.js';
-import { checkRuntimeMethodNodeTrigger } from '../lesson-designer/method-nodes.js';
+// REMOVED: import { checkRuntimeMethodNodeTrigger } from '../lesson-designer/method-nodes.js';
 import { generateDailyPlan } from './daily-plan.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// USER ID HELPER
+// METHOD NODE CHECK (Simplified - moved inline)
 // ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Get internal UUID from external user ID (JWT user ID like "user_xxx")
+ * Check if a method node should be inserted at runtime
+ * Simplified version - actual logic can be expanded later
  */
-async function getInternalUserId(externalId: string): Promise<string | null> {
-  if (!isSupabaseInitialized()) {
-    return null;
+function checkRuntimeMethodNodeTrigger(
+  plan: LessonPlan,
+  currentNode: Node,
+  nextNode: Node | null
+): { shouldInsert: boolean; type?: string } {
+  // Method nodes are now handled differently in the simplified system
+  // This stub returns false - method node insertion logic can be added later
+  // based on sessions_completed, node routes, etc.
+  
+  const sessionsSinceMethod = plan.sessionsCompleted % 8; // Every 8 sessions
+  
+  // Simple heuristic: suggest mixed practice every 8 sessions
+  if (sessionsSinceMethod === 0 && plan.sessionsCompleted > 0) {
+    return { shouldInsert: true, type: 'mixed_practice' };
   }
-
-  const supabase = getSupabase();
-
-  // Try to find existing user by external_id
-  const { data: existing } = await supabase
-    .from('users')
-    .select('id')
-    .eq('external_id', externalId)
-    .single();
-
-  if (existing) {
-    return existing.id;
+  
+  // Suggest spaced review before build nodes
+  if (nextNode?.route === 'build' && currentNode.route !== 'build') {
+    return { shouldInsert: true, type: 'spaced_review' };
   }
-
-  return null; // User doesn't exist
+  
+  return { shouldInsert: false };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -63,27 +67,20 @@ async function getInternalUserId(externalId: string): Promise<string | null> {
 
 /**
  * Get today's learning content
- * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
-export async function getToday(externalUserId: string): Promise<TodayResponse | null> {
+export async function getToday(userId: string): Promise<TodayResponse | null> {
   if (!isSupabaseInitialized()) {
     throw new Error('Database not initialized');
   }
 
-  // Get internal UUID from external ID
-  const internalUserId = await getInternalUserId(externalUserId);
-  if (!internalUserId) {
-    return null; // User doesn't exist
-  }
-
   // Step 1: Get active plan
-  const plan = await getActivePlan(internalUserId);
+  const plan = await getActivePlan(userId);
   if (!plan) {
     return null; // No active plan
   }
 
   // Step 2: Get current node (in-progress or next available)
-  const { node, progress } = await getCurrentNode(internalUserId, plan.id);
+  const { node, progress } = await getCurrentNode(userId, plan.id);
   if (!node || !progress) {
     return null; // Plan complete or no available nodes
   }
@@ -96,16 +93,16 @@ export async function getToday(externalUserId: string): Promise<TodayResponse | 
 
   if (refreshCheck.needsRefresh) {
     // Generate refresh session
-    dailyPlan = await generateRefreshSession(internalUserId, node, progress, refreshCheck.gapDays!);
+    dailyPlan = await generateRefreshSession(userId, node, progress, refreshCheck.gapDays!);
     isRefreshSession = true;
     refreshReason = `${refreshCheck.gapDays} days since last session`;
   } else {
     // Get or generate regular daily plan
-    const timezone = await getUserTimezone(internalUserId);
+    const timezone = await getUserTimezone(userId);
     const today = getTodayInTimezone(timezone);
     
     dailyPlan = await getOrGenerateDailyPlan(
-      internalUserId,
+      userId,
       node,
       progress,
       today,
@@ -114,10 +111,10 @@ export async function getToday(externalUserId: string): Promise<TodayResponse | 
   }
 
   // Step 4: Check for in-progress warning (FIX #5)
-  const switchCheck = await checkNodeSwitch(internalUserId, node.id);
+  const switchCheck = await checkNodeSwitch(userId, node.id);
 
   // Step 5: Check if method node is due (FIX #4)
-  const nextNode = await getNextAvailableNode(internalUserId, plan.id, node.id);
+  const nextNode = await getNextAvailableNode(userId, plan.id, node.id);
   const methodNodeCheck = checkRuntimeMethodNodeTrigger(
     plan,
     node,
@@ -125,7 +122,7 @@ export async function getToday(externalUserId: string): Promise<TodayResponse | 
   );
 
   // Step 6: Get graph context
-  const graphContext = await getGraphContext(internalUserId, plan.id);
+  const graphContext = await getGraphContext(userId, plan.id);
 
   // Build response
   return {
@@ -156,15 +153,14 @@ export async function getToday(externalUserId: string): Promise<TodayResponse | 
 
 /**
  * Get user's active plan
- * @param internalUserId - Internal UUID from users table
  */
-async function getActivePlan(internalUserId: string): Promise<LessonPlan | null> {
+async function getActivePlan(userId: string): Promise<LessonPlan | null> {
   const supabase = getSupabase();
   
   const { data, error } = await supabase
     .from('lesson_plans')
     .select('*')
-    .eq('user_id', internalUserId)
+    .eq('user_id', userId)
     .eq('status', 'active')
     .order('started_at', { ascending: false })
     .limit(1)

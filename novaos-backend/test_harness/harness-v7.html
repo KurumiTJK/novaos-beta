@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SwordGate Test Harness v6</title>
+  <title>SwordGate Test Harness v7</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
@@ -109,6 +109,19 @@
     .btn-ghost:hover { background: #333; color: #fff; }
     .btn-sm { padding: 6px 12px; font-size: 12px; }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    /* Status badges */
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    .status-badge.success { background: #166534; color: #86efac; }
+    .status-badge.warning { background: #854d0e; color: #fde047; }
+    .status-badge.secondary { background: #333; color: #888; }
     
     /* Main Layout */
     .main {
@@ -1271,6 +1284,7 @@
       <div class="tabs">
         <div class="tab" id="tabExplore" onclick="switchTab('explore')">🔍 Explore</div>
         <div class="tab" id="tabDefineGoal" onclick="switchTab('defineGoal')">🎯 Define Goal</div>
+        <div class="tab" id="tabReview" onclick="switchTab('review')">📋 Review</div>
         <div class="tab active" id="tabDesigner" onclick="switchTab('designer')">🎨 Designer</div>
         <div class="tab" id="tabPlans" onclick="switchTab('plans')">📚 Plans</div>
         <div class="tab" id="tabToday" onclick="switchTab('today')">📅 Today</div>
@@ -1299,6 +1313,18 @@
             <div class="empty-state-title">Define Your Learning Goal</div>
             <div class="empty-state-text">Complete Exploration first to generate your learning plan</div>
             <button class="btn btn-ghost" onclick="switchTab('explore')">← Go to Explore</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Review View (NEW) -->
+      <div class="panel-content" id="viewReview" style="display: none; padding: 0;">
+        <div class="review-container" id="reviewContainer">
+          <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <div class="empty-state-title">Review Your Plan</div>
+            <div class="empty-state-text">Complete Define Goal first to review your plan</div>
+            <button class="btn btn-ghost" onclick="switchTab('defineGoal')">← Go to Define Goal</button>
           </div>
         </div>
       </div>
@@ -1385,6 +1411,8 @@
       defineGoalState: null, // { capstone, subskills, routing, summary }
       defineGoalGenerating: false,
       defineGoalStep: 0, // 0=not started, 1=capstone, 2=subskills, 3=routing, 4=done
+      // Review state (NEW)
+      reviewData: null, // { capstone, subskills, stats }
     };
     
     // Initialize
@@ -1423,6 +1451,7 @@
       
       document.getElementById('viewExplore').style.display = tab === 'explore' ? 'block' : 'none';
       document.getElementById('viewDefineGoal').style.display = tab === 'defineGoal' ? 'block' : 'none';
+      document.getElementById('viewReview').style.display = tab === 'review' ? 'block' : 'none';
       document.getElementById('viewDesigner').style.display = tab === 'designer' ? 'block' : 'none';
       document.getElementById('viewPlans').style.display = tab === 'plans' ? 'block' : 'none';
       document.getElementById('viewToday').style.display = tab === 'today' ? 'block' : 'none';
@@ -1431,6 +1460,7 @@
       if (tab === 'today') loadToday();
       if (tab === 'designer') loadDesigner();
       if (tab === 'defineGoal') loadDefineGoal();
+      if (tab === 'review') loadReview();
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2213,7 +2243,7 @@
         </div>
         <div class="define-goal-actions">
           <button class="btn btn-ghost" onclick="regenerateLearningPlan()">↻ Regenerate All</button>
-          <button class="btn btn-success" onclick="confirmDefineGoal()">Continue to Research →</button>
+          <button class="btn btn-success" onclick="goToReview()">Continue to Review →</button>
         </div>
       `;
     }
@@ -2250,14 +2280,148 @@
       await generateLearningPlan();
     }
     
-    async function confirmDefineGoal() {
+    // Go to Review (replaces confirmDefineGoal)
+    function goToReview() {
+      switchTab('review');
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // REVIEW
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    async function loadReview() {
+      if (!state.connected) return;
+      
+      const container = document.getElementById('reviewContainer');
+      container.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <span>Loading review...</span>
+        </div>
+      `;
+      
       try {
-        const result = await request('POST', '/sword/goal/confirm');
-        alert('Moving to Research phase!\n\nNext phase: ' + (result.nextPhase || 'research'));
-        switchTab('designer');
-        loadDesigner();
+        const review = await request('GET', '/sword/review');
+        state.reviewData = review;
+        renderReview();
       } catch (error) {
-        alert('Failed to confirm: ' + error.message);
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <div class="empty-state-title">Review Your Plan</div>
+            <div class="empty-state-text">Complete Define Goal first to review your plan</div>
+            <button class="btn btn-ghost" onclick="switchTab('defineGoal')">← Go to Define Goal</button>
+          </div>
+        `;
+      }
+    }
+    
+    function renderReview() {
+      const container = document.getElementById('reviewContainer');
+      const r = state.reviewData;
+      
+      if (!r || !r.capstone) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <div class="empty-state-title">No Data to Review</div>
+            <div class="empty-state-text">Complete Define Goal first</div>
+            <button class="btn btn-ghost" onclick="switchTab('defineGoal')">← Go to Define Goal</button>
+          </div>
+        `;
+        return;
+      }
+      
+      const capstoneHtml = `
+        <div class="status-card" style="margin-bottom: 16px;">
+          <div class="label">📝 CAPSTONE</div>
+          <div style="font-size: 16px; font-weight: 600; margin: 8px 0;">${r.capstone.title}</div>
+          <div style="color: #888; font-style: italic; margin-bottom: 8px;">${r.capstone.statement}</div>
+          <div class="label" style="margin-top: 12px;">Success Criteria:</div>
+          <ul style="margin: 4px 0 0 16px; color: #888;">
+            ${(r.capstone.successCriteria || []).map(c => `<li>${c}</li>`).join('')}
+          </ul>
+        </div>
+      `;
+      
+      const statsHtml = `
+        <div class="status-card" style="margin-bottom: 16px;">
+          <div class="label">📊 PLAN STATS</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+            <div><strong>${r.stats?.totalSubskills || 0}</strong> Total Skills</div>
+            <div><strong>${r.stats?.toLearn || 0}</strong> To Learn</div>
+            <div><strong>${r.stats?.toSkip || 0}</strong> To Skip</div>
+            <div><strong>${r.stats?.toAssess || 0}</strong> To Assess</div>
+          </div>
+          <div style="margin-top: 12px; color: #22c55e;">
+            ⏱️ ${r.capstone?.estimatedTime || 'Time TBD'}
+          </div>
+        </div>
+      `;
+      
+      const subskillsHtml = `
+        <div class="status-card">
+          <div class="label">📚 SUBSKILLS (${r.subskills?.length || 0})</div>
+          <div style="max-height: 300px; overflow-y: auto; margin-top: 8px;">
+            ${(r.subskills || []).map((s, i) => {
+              const sessionDisplay = s.status === 'skip' 
+                ? '<span style="color: #666; font-size: 11px; margin-left: 8px;">skipped</span>'
+                : `<span style="color: #22c55e; font-size: 11px; margin-left: 8px;">${s.estimatedSessions || 1} session${(s.estimatedSessions || 1) > 1 ? 's' : ''}</span>`;
+              return `
+              <div style="padding: 8px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; ${s.status === 'skip' ? 'opacity: 0.5;' : ''}">
+                <div>
+                  <span style="color: #666; margin-right: 8px;">${i + 1}.</span>
+                  <strong>${s.title}</strong>
+                  <span style="color: #666; font-size: 11px; margin-left: 8px;">${s.route}</span>
+                  ${sessionDisplay}
+                </div>
+                <span class="status-badge ${s.status === 'learn' ? 'success' : s.status === 'skip' ? 'secondary' : 'warning'}">
+                  ${s.status}
+                </span>
+              </div>
+            `}).join('')}
+          </div>
+        </div>
+      `;
+      
+      container.innerHTML = `
+        <div style="padding: 16px;">
+          <div style="margin-bottom: 16px;">
+            <span class="phase-badge" style="background: #8b5cf6;">📋 Review</span>
+            <span style="color: #888; margin-left: 8px;">Confirm your plan before creating</span>
+          </div>
+          ${statsHtml}
+          ${capstoneHtml}
+          ${subskillsHtml}
+          <div style="display: flex; gap: 8px; margin-top: 16px;">
+            <button class="btn btn-ghost" onclick="switchTab('defineGoal')">← Back to Edit</button>
+            <button class="btn btn-success" onclick="createPlan()">✓ Create Plan</button>
+          </div>
+        </div>
+      `;
+    }
+    
+    async function createPlan() {
+      if (!confirm('Create this learning plan?')) return;
+      
+      const container = document.getElementById('reviewContainer');
+      container.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <span>Creating plan...</span>
+        </div>
+      `;
+      
+      try {
+        const result = await request('POST', '/sword/review/confirm');
+        alert('Plan created successfully!\n\n' + (result.plan?.title || 'Your plan is ready'));
+        state.reviewData = null;
+        state.defineGoalState = null;
+        switchTab('plans');
+        loadPlans();
+      } catch (error) {
+        alert('Failed to create plan: ' + error.message);
+        renderReview();
       }
     }
     
@@ -2300,10 +2464,10 @@
           <div><strong>Topic:</strong> ${session.explorationData?.learningGoal || 'N/A'}</div>
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;">
-          <button class="btn btn-primary btn-sm" onclick="switchTab('defineGoal')">Define Goal →</button>
-          <button class="btn btn-primary btn-sm" onclick="runDesignerPhase('research')">Run Research</button>
-          <button class="btn btn-primary btn-sm" onclick="runDesignerPhase('review')">Run Review</button>
-          <button class="btn btn-success btn-sm" onclick="finalizeDesigner()">Finalize</button>
+          <button class="btn btn-primary btn-sm" onclick="switchTab('explore')">Explore</button>
+          <button class="btn btn-primary btn-sm" onclick="switchTab('defineGoal')">Define Goal</button>
+          <button class="btn btn-primary btn-sm" onclick="switchTab('review')">Review</button>
+          <button class="btn btn-success btn-sm" onclick="createPlan()">Create Plan</button>
           <button class="btn btn-danger btn-sm" onclick="cancelDesigner()">Cancel</button>
         </div>
       `;
@@ -2416,16 +2580,16 @@
               </div>
               ${plan.capstoneStatement ? `<div class="plan-capstone">${plan.capstoneStatement}</div>` : ''}
               <div class="plan-meta">
-                <span>📚 ${plan.totalNodes || 0} nodes</span>
-                <span>📅 ${plan.totalSessions || 0} sessions</span>
-                <span>⏱️ ~${plan.estimatedWeeks || 0} weeks</span>
+                <span>📚 ${plan.totalSubskills || 0} skills</span>
+                <span>📅 ${plan.estimatedSessions || 0} sessions</span>
+                <span>⏱️ ${plan.estimatedTimeDisplay || `~${plan.estimatedWeeks || 0} weeks`}</span>
               </div>
               <div class="plan-progress">
                 <div class="plan-progress-bar" style="width: ${(plan.progress || 0) * 100}%"></div>
               </div>
               <div class="plan-actions">
                 ${plan.status !== 'active' ? `<button class="btn btn-success btn-sm" onclick="activatePlan('${plan.id}')">Activate</button>` : ''}
-                <button class="btn btn-secondary btn-sm" onclick="viewPlanNodes('${plan.id}')">View Nodes</button>
+                <button class="btn btn-secondary btn-sm" onclick="viewPlanSubskills('${plan.id}')">View Subskills</button>
               </div>
             </div>
           `).join('')}
@@ -2443,12 +2607,16 @@
       }
     }
     
-    async function viewPlanNodes(planId) {
+    async function viewPlanSubskills(planId) {
       try {
-        const nodes = await request('GET', `/sword/plans/${planId}/nodes`);
-        alert('Nodes:\n' + nodes.map((n, i) => `${i+1}. ${n.title} (${n.route})`).join('\n'));
+        const subskills = await request('GET', `/sword/plans/${planId}/subskills`);
+        const display = subskills.map((s, i) => {
+          const sessionInfo = s.status === 'skipped' ? 'skipped' : `${s.estimatedSessions || 1} sessions`;
+          return `${i+1}. ${s.title} (${s.route}) - ${sessionInfo} - ${s.status}`;
+        }).join('\n');
+        alert('Subskills:\n' + display);
       } catch (error) {
-        alert('Failed to load nodes: ' + error.message);
+        alert('Failed to load subskills: ' + error.message);
       }
     }
     

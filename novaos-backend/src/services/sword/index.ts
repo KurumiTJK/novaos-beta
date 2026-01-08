@@ -21,8 +21,8 @@ export { LessonRunner } from './lesson-runner/index.js';
 import { LessonDesigner } from './lesson-designer/index.js';
 import { LessonRunner } from './lesson-runner/index.js';
 import { getSupabase, isSupabaseInitialized } from '../../db/index.js';
-import type { LessonPlan, LessonPlanRow, TodayResponse, DesignerSession } from './types.js';
-import { mapLessonPlan } from './types.js';
+import type { LessonPlan, LessonPlanRow, TodayResponse, DesignerSession, PlanSubskill } from './types.js';
+import { mapLessonPlan, mapPlanSubskill } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // USER ID HELPER
@@ -147,6 +147,29 @@ export async function getUserPlans(externalUserId: string): Promise<LessonPlan[]
 }
 
 /**
+ * Get subskills for a plan
+ * @param planId - Plan UUID
+ */
+export async function getPlanSubskills(planId: string): Promise<PlanSubskill[]> {
+  if (!isSupabaseInitialized()) {
+    return [];
+  }
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('plan_subskills')
+    .select('*')
+    .eq('plan_id', planId)
+    .order('order', { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to get subskills: ${error.message}`);
+  }
+
+  return (data || []).map(mapPlanSubskill);
+}
+
+/**
  * Activate a plan
  * @param externalUserId - JWT user ID (e.g., "user_xxx")
  */
@@ -237,6 +260,7 @@ export const SwordGate = {
   
   // Plans
   getPlans: getUserPlans,
+  getPlanSubskills,
   activatePlan,
   abandonPlan,
   

@@ -57,19 +57,16 @@ export type PlanStatus = 'designing' | 'active' | 'completed' | 'abandoned';
 
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced';
 
-// Visible phases (user sees 4)
-export type VisiblePhase = 'exploration' | 'define_goal' | 'research' | 'review';
+// Visible phases (user sees 3 - removed research)
+export type VisiblePhase = 'exploration' | 'define_goal' | 'review';
 
-// Internal phases (system does 8)
+// Internal phases (system does 5 - simplified)
 export type InternalPhase =
   | 'exploration'
   | 'capstone'
   | 'subskills'
   | 'routing'
-  | 'research'
-  | 'node_generation'
-  | 'sequencing'
-  | 'method_nodes';
+  | 'review';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ROUTING TABLE (deterministic, no ambiguity)
@@ -104,16 +101,12 @@ export const PHASE_MAPPING: Record<InternalPhase, VisiblePhase> = {
   capstone: 'define_goal',
   subskills: 'define_goal',
   routing: 'define_goal',
-  research: 'research',
-  node_generation: 'review',
-  sequencing: 'review',
-  method_nodes: 'review',
+  review: 'review',
 };
 
 export const VISIBLE_PHASE_ORDER: VisiblePhase[] = [
   'exploration',
   'define_goal',
-  'research',
   'review',
 ];
 
@@ -122,10 +115,7 @@ export const INTERNAL_PHASE_ORDER: InternalPhase[] = [
   'capstone',
   'subskills',
   'routing',
-  'research',
-  'node_generation',
-  'sequencing',
-  'method_nodes',
+  'review',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -149,10 +139,16 @@ export interface LessonPlan {
   dailyMinutes: number;
   weeklyCadence: number;
 
-  // Derived from nodes
+  // Derived from nodes (legacy)
   totalNodes: number;
   totalSessions: number;
   estimatedWeeks: number;
+
+  // NEW: Derived from subskills
+  totalSubskills?: number;
+  currentSubskillIndex?: number;
+  estimatedSessions?: number;
+  estimatedTimeDisplay?: string;  // NEW: LLM's human-readable estimate
 
   // Status
   status: PlanStatus;
@@ -182,6 +178,11 @@ export interface LessonPlanRow {
   total_nodes: number;
   total_sessions: number;
   estimated_weeks: number;
+  // NEW
+  total_subskills: number | null;
+  current_subskill_index: number | null;
+  estimated_sessions: number | null;
+  estimated_time_display: string | null;  // NEW: LLM's human-readable estimate
   status: string;
   progress: number;
   sessions_completed: number;
@@ -206,6 +207,12 @@ export function mapLessonPlan(row: LessonPlanRow): LessonPlan {
     totalNodes: row.total_nodes,
     totalSessions: row.total_sessions,
     estimatedWeeks: row.estimated_weeks,
+    // NEW
+    totalSubskills: row.total_subskills || undefined,
+    currentSubskillIndex: row.current_subskill_index ?? undefined,
+    estimatedSessions: row.estimated_sessions || undefined,
+    estimatedTimeDisplay: row.estimated_time_display || undefined,  // NEW
+    // END NEW
     status: row.status as PlanStatus,
     progress: row.progress,
     sessionsCompleted: row.sessions_completed,
@@ -584,6 +591,7 @@ export interface Subskill {
   subskillType: SubskillType;
   estimatedComplexity: 1 | 2 | 3;
   order: number;
+  estimatedSessions?: number;  // Cached from session distribution LLM
 }
 
 export interface SubskillsData {
@@ -863,6 +871,169 @@ export function mapCircuitBreakerState(row: CircuitBreakerStateRow): CircuitBrea
     halfOpenAt: row.half_open_at ? new Date(row.half_open_at) : undefined,
     updatedAt: new Date(row.updated_at),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// PLAN SUBSKILLS (NEW - Simplified approach)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type SubskillStatus = 'pending' | 'active' | 'assess' | 'mastered' | 'skipped';
+
+export interface PlanSubskill {
+  id: string;
+  planId: string;
+  title: string;
+  description?: string;
+  subskillType: SubskillType;
+  route: Route;
+  complexity: 1 | 2 | 3;
+  order: number;
+  status: SubskillStatus;
+  estimatedSessions?: number;  // NEW: LLM-distributed sessions for this subskill
+  sessionsCompleted: number;
+  lastSessionDate?: Date;
+  masteredAt?: Date;
+  assessmentScore?: number;
+  assessmentData?: Record<string, unknown>;
+  assessedAt?: Date;
+  createdAt: Date;
+}
+
+export interface PlanSubskillRow {
+  id: string;
+  plan_id: string;
+  title: string;
+  description: string | null;
+  subskill_type: string;
+  route: string;
+  complexity: number;
+  order: number;
+  status: string;
+  estimated_sessions: number | null;  // NEW: LLM-distributed sessions
+  sessions_completed: number;
+  last_session_date: string | null;
+  mastered_at: string | null;
+  assessment_score: number | null;
+  assessment_data: Record<string, unknown> | null;
+  assessed_at: string | null;
+  created_at: string;
+}
+
+export function mapPlanSubskill(row: PlanSubskillRow): PlanSubskill {
+  return {
+    id: row.id,
+    planId: row.plan_id,
+    title: row.title,
+    description: row.description || undefined,
+    subskillType: row.subskill_type as SubskillType,
+    route: row.route as Route,
+    complexity: row.complexity as 1 | 2 | 3,
+    order: row.order,
+    status: row.status as SubskillStatus,
+    estimatedSessions: row.estimated_sessions || undefined,  // NEW
+    sessionsCompleted: row.sessions_completed,
+    lastSessionDate: row.last_session_date ? new Date(row.last_session_date) : undefined,
+    masteredAt: row.mastered_at ? new Date(row.mastered_at) : undefined,
+    assessmentScore: row.assessment_score || undefined,
+    assessmentData: row.assessment_data || undefined,
+    assessedAt: row.assessed_at ? new Date(row.assessed_at) : undefined,
+    createdAt: new Date(row.created_at),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// REVIEW PREVIEW (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ReviewPreview {
+  capstone: {
+    title: string;
+    statement: string;
+    successCriteria: string[];
+    estimatedTime?: string;
+  };
+  subskills: Array<{
+    id: string;
+    title: string;
+    description: string;
+    subskillType: SubskillType;
+    complexity: number;
+    order: number;
+    route: Route;
+    status: RouteStatus;
+    reason?: string;
+    estimatedSessions?: number;  // NEW: LLM-distributed sessions
+  }>;
+  stats: {
+    totalSubskills: number;
+    toLearn: number;
+    toSkip: number;
+    toAssess: number;
+    estimatedSessions: number;
+    estimatedWeeks: number;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SESSION ESTIMATION (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Estimate sessions needed for a single subskill
+ */
+export function estimateSessionsForSubskill(
+  complexity: number,
+  route: Route,
+  status: RouteStatus
+): number {
+  if (status === 'skip') return 0;
+  if (status === 'assess') return 1; // Just assessment
+
+  // Base sessions by complexity
+  const baseSessions = complexity === 1 ? 2 : complexity === 2 ? 3 : 5;
+
+  // Route multipliers
+  const routeMultipliers: Record<Route, number> = {
+    recall: 0.8,
+    practice: 1.0,
+    diagnose: 1.2,
+    apply: 1.3,
+    build: 1.5,
+    refine: 1.2,
+    plan: 1.0,
+  };
+
+  return Math.ceil(baseSessions * (routeMultipliers[route] || 1.0));
+}
+
+/**
+ * Estimate total sessions for a plan based on subskills and routing
+ */
+export function estimateTotalSessions(
+  subskills: Subskill[],
+  routingData: RoutingData
+): { totalSessions: number; estimatedWeeks: number } {
+  let totalSessions = 0;
+
+  for (const subskill of subskills) {
+    const assignment = routingData.assignments.find(a => a.subskillId === subskill.id);
+    if (!assignment) continue;
+
+    totalSessions += estimateSessionsForSubskill(
+      subskill.estimatedComplexity,
+      assignment.route,
+      assignment.status
+    );
+  }
+
+  // Add method nodes (~1 per 8 sessions)
+  const methodNodeSessions = Math.floor(totalSessions / 8);
+  totalSessions += methodNodeSessions;
+
+  // Estimate weeks (assuming 5 sessions/week)
+  const estimatedWeeks = Math.ceil(totalSessions / 5);
+
+  return { totalSessions, estimatedWeeks };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
