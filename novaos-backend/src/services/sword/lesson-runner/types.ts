@@ -118,8 +118,11 @@ export interface AreaResult {
 export interface Gap {
   area: string;
   score: number;
-  priority: 'high' | 'medium' | 'low';
-  suggestedFocus: string;
+  status: 'weak' | 'gap';
+  missedConcepts?: string[];
+  // For lesson plan generation
+  priority?: 'high' | 'medium' | 'low';
+  suggestedFocus?: string;
 }
 
 export interface SubskillAssessment {

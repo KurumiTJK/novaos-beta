@@ -10,6 +10,9 @@ import { CapstoneGenerator } from '../services/sword/lesson-designer/capstone.js
 import { SubskillsGenerator } from '../services/sword/lesson-designer/subskills.js';
 import { RoutingGenerator } from '../services/sword/lesson-designer/routing.js';
 import { updateSessionPhase, updatePhaseData } from '../services/sword/lesson-designer/session.js';
+import { AssessmentHandler } from '../services/sword/lesson-runner/router/assess.js';
+import { getSupabase } from '../db/index.js';
+import { mapSubskillAssessment } from '../services/sword/lesson-runner/types.js';
 import {
   StartDesignerSchema,
   ExplorationMessageSchema,
@@ -1642,6 +1645,138 @@ router.post('/runner/check/submit', async (req: Request, res: Response, next: Ne
     const result = await LessonRunner.submitKnowledgeCheck(userId, { checkId, answers });
     
     res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// LESSON RUNNER - DIAGNOSTIC ASSESSMENT
+// For subskills with routeStatus='assess' - determines if user can skip or needs to learn
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// GET /sword/runner/diagnostic/:subskillId - Get diagnostic assessment (strips correct answers)
+router.get('/runner/diagnostic/:subskillId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.params;
+    
+    if (!subskillId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'subskillId required' },
+      });
+      return;
+    }
+    
+    // Start subskill routes to assess flow and returns assessment
+    const result = await LessonRunner.startSubskill(userId, subskillId);
+    
+    if (result.routeType !== 'assess' || !result.assessment) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'NOT_ASSESS', message: 'Subskill is not in assess status' },
+      });
+      return;
+    }
+    
+    // Strip correct answers before sending to client
+    const forUser = AssessmentHandler.getForUser(result.assessment);
+    
+    res.json({ success: true, data: forUser });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/runner/diagnostic/submit - Submit diagnostic assessment answers
+router.post('/runner/diagnostic/submit', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { assessmentId, answers } = req.body;
+    
+    if (!assessmentId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'assessmentId required' },
+      });
+      return;
+    }
+    
+    if (!answers || !Array.isArray(answers)) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'answers array required' },
+      });
+      return;
+    }
+    
+    const result = await LessonRunner.submitDiagnostic(userId, { assessmentId, answers });
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/runner/diagnostic/:assessmentId/results - Get detailed results after completion
+router.get('/runner/diagnostic/:assessmentId/results', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { assessmentId } = req.params;
+    
+    if (!assessmentId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'assessmentId required' },
+      });
+      return;
+    }
+    
+    const supabase = getSupabase();
+    
+    // Get user's internal ID
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('external_id', userId)
+      .single();
+    
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'User not found' },
+      });
+      return;
+    }
+    
+    const { data: assessmentRow } = await supabase
+      .from('subskill_assessments')
+      .select('*')
+      .eq('id', assessmentId)
+      .eq('user_id', user.id)
+      .single();
+    
+    if (!assessmentRow) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Assessment not found' },
+      });
+      return;
+    }
+    
+    if (!assessmentRow.completed_at) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'NOT_COMPLETED', message: 'Assessment not completed yet' },
+      });
+      return;
+    }
+    
+    const assessment = mapSubskillAssessment(assessmentRow);
+    const results = AssessmentHandler.getResults(assessment);
+    
+    res.json({ success: true, data: results });
   } catch (error) {
     next(error);
   }

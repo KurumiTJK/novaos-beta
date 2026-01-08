@@ -4,8 +4,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { getSupabase } from '../../../../db/index.js';
+import { SwordGateLLM } from '../../llm/swordgate-llm.js';
 import type { PlanSubskill, LessonPlan } from '../../types.js';
-import { mapPlanSubskill } from '../../types.js';
+import { mapPlanSubskill, mapLessonPlan } from '../../types.js';
 import type {
   StartSubskillResult,
   SubskillAssessment,
@@ -18,6 +19,11 @@ import type {
 } from '../types.js';
 import { mapSubskillAssessment } from '../types.js';
 import { generateLessonPlan } from '../lesson-plan/generator.js';
+import {
+  DIAGNOSTIC_SYSTEM_PROMPT,
+  buildDiagnosticUserMessage,
+  parseLLMJson,
+} from '../shared/prompts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // ASSESS FLOW
@@ -174,7 +180,7 @@ async function handleAssessmentResult(
   
   switch (recommendation) {
     case 'autopass': {
-      // 90-100%: Mark as mastered, advance to next
+      // 85-100%: Mark as mastered, advance to next
       console.log(`[ASSESS] Autopass - marking as mastered`);
       
       await supabase
@@ -214,7 +220,7 @@ async function handleAssessmentResult(
     }
     
     case 'targeted': {
-      // 40-89%: Generate targeted remediation plan
+      // 50-84%: Generate targeted remediation plan
       console.log(`[ASSESS] Targeted remediation - generating plan for gaps`);
       
       // Update subskill status
@@ -247,7 +253,7 @@ async function handleAssessmentResult(
     }
     
     case 'convert_learn': {
-      // 0-39%: Convert to full learn flow
+      // 0-49%: Convert to full learn flow
       console.log(`[ASSESS] Converting to learn flow`);
       
       // Update subskill to active (full learn)
@@ -283,55 +289,97 @@ async function handleAssessmentResult(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// DIAGNOSTIC TEST GENERATION
+// DIAGNOSTIC TEST GENERATION (LLM-POWERED)
 // ─────────────────────────────────────────────────────────────────────────────────
 
+interface DiagnosticLLMResponse {
+  questions: DiagnosticQuestion[];
+}
+
 /**
- * Generate diagnostic test questions for a subskill
+ * Generate diagnostic test questions for a subskill using LLM
  */
 async function generateDiagnosticTest(
   subskill: PlanSubskill,
   plan: LessonPlan
 ): Promise<DiagnosticQuestion[]> {
-  // TODO: Implement LLM generation
-  // For now, generate template questions based on route
-  
   console.log(`[ASSESS] Generating diagnostic for: ${subskill.title}`);
   
-  const questions = generateTemplateDiagnostic(subskill);
+  // Check if LLM is available
+  if (!SwordGateLLM.isAvailable()) {
+    console.log(`[ASSESS] LLM not available, using template questions`);
+    return generateTemplateQuestions(subskill);
+  }
   
-  return questions;
+  try {
+    const response = await SwordGateLLM.generate(
+      DIAGNOSTIC_SYSTEM_PROMPT,
+      buildDiagnosticUserMessage(subskill, plan),
+      { thinkingLevel: 'high' }
+    );
+    
+    const parsed = parseLLMJson<DiagnosticLLMResponse>(response);
+    let questions = parsed.questions || [];
+    
+    // Validate and ensure all questions have required fields
+    questions = questions.map((q, i) => ({
+      id: q.id || `q${i + 1}`,
+      area: q.area || 'General',
+      question: q.question,
+      type: q.type || 'multiple_choice',
+      options: q.options || [],
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation || '',
+      difficulty: q.difficulty || 2,
+    }));
+    
+    // Ensure minimum questions
+    if (questions.length < 5) {
+      console.log(`[ASSESS] LLM generated too few questions (${questions.length}), adding templates`);
+      const templateQuestions = generateTemplateQuestions(subskill);
+      questions = [...questions, ...templateQuestions.slice(0, 5 - questions.length)];
+    }
+    
+    console.log(`[ASSESS] Generated ${questions.length} diagnostic questions via LLM`);
+    return questions;
+    
+  } catch (error) {
+    console.error('[ASSESS] LLM generation failed, using templates:', error);
+    return generateTemplateQuestions(subskill);
+  }
 }
 
 /**
- * Generate template diagnostic when LLM unavailable
+ * Generate template questions as fallback
  */
-function generateTemplateDiagnostic(subskill: PlanSubskill): DiagnosticQuestion[] {
+function generateTemplateQuestions(subskill: PlanSubskill): DiagnosticQuestion[] {
+  console.log(`[ASSESS] Using template questions for: ${subskill.title}`);
+  
   const baseQuestions: DiagnosticQuestion[] = [
     {
       id: 'q1',
       area: 'Core Concepts',
-      question: `What is the main purpose of ${subskill.title}?`,
+      question: `What is the primary goal of "${subskill.title}"?`,
       type: 'multiple_choice',
       options: [
-        'To provide foundational understanding',
-        'To enable practical application',
-        'To support advanced techniques',
-        'None of the above',
+        'Understanding fundamental principles',
+        'Memorizing procedures',
+        'Analyzing complex scenarios',
+        'All of the above',
       ],
-      correctAnswer: 'To provide foundational understanding',
-      explanation: 'Understanding the core purpose helps frame all other learning.',
+      correctAnswer: 'Understanding fundamental principles',
+      explanation: 'The primary focus is on foundational understanding.',
       difficulty: 1,
     },
     {
       id: 'q2',
       area: 'Core Concepts',
-      question: `Which of the following is NOT typically associated with ${subskill.title}?`,
+      question: `Which of the following is NOT directly related to "${subskill.title}"?`,
       type: 'multiple_choice',
       options: [
-        'Fundamental principles',
-        'Practical techniques',
+        'Core terminology',
         'Unrelated domain knowledge',
+        'Key principles',
         'Supporting skills',
       ],
       correctAnswer: 'Unrelated domain knowledge',
@@ -341,7 +389,7 @@ function generateTemplateDiagnostic(subskill: PlanSubskill): DiagnosticQuestion[
     {
       id: 'q3',
       area: 'Application',
-      question: `In what scenario would ${subskill.title} be most useful?`,
+      question: `In what scenario would "${subskill.title}" be most useful?`,
       type: 'multiple_choice',
       options: [
         'When starting a new project',
@@ -356,7 +404,7 @@ function generateTemplateDiagnostic(subskill: PlanSubskill): DiagnosticQuestion[
     {
       id: 'q4',
       area: 'Application',
-      question: `What is a common mistake when applying ${subskill.title}?`,
+      question: `What is a common mistake when applying "${subskill.title}"?`,
       type: 'multiple_choice',
       options: [
         'Moving too quickly',
@@ -371,7 +419,7 @@ function generateTemplateDiagnostic(subskill: PlanSubskill): DiagnosticQuestion[
     {
       id: 'q5',
       area: 'Integration',
-      question: `How does ${subskill.title} relate to the overall learning goal?`,
+      question: `How does "${subskill.title}" relate to the overall learning goal?`,
       type: 'multiple_choice',
       options: [
         'It is a prerequisite skill',
@@ -402,8 +450,9 @@ function getRouteSpecificQuestions(subskill: PlanSubskill): DiagnosticQuestion[]
           id: 'r1',
           area: 'Knowledge Recall',
           question: 'Can you define the key terminology without looking it up?',
-          type: 'true_false',
-          correctAnswer: 'true',
+          type: 'multiple_choice',
+          options: ['Yes, confidently', 'Mostly', 'Only some terms', 'No, I need to learn them'],
+          correctAnswer: 'Yes, confidently',
           explanation: 'Recall requires being able to retrieve information from memory.',
           difficulty: 2,
         },
@@ -415,8 +464,9 @@ function getRouteSpecificQuestions(subskill: PlanSubskill): DiagnosticQuestion[]
           id: 'r1',
           area: 'Procedural Knowledge',
           question: 'Have you successfully completed this type of task before?',
-          type: 'true_false',
-          correctAnswer: 'true',
+          type: 'multiple_choice',
+          options: ['Many times', 'A few times', 'Once or twice', 'Never'],
+          correctAnswer: 'Many times',
           explanation: 'Practice builds on previous experience.',
           difficulty: 2,
         },
@@ -428,8 +478,9 @@ function getRouteSpecificQuestions(subskill: PlanSubskill): DiagnosticQuestion[]
           id: 'r1',
           area: 'Pattern Recognition',
           question: 'Can you identify common errors in this domain?',
-          type: 'true_false',
-          correctAnswer: 'true',
+          type: 'multiple_choice',
+          options: ['Yes, I spot them quickly', 'Usually', 'Sometimes', 'Rarely'],
+          correctAnswer: 'Yes, I spot them quickly',
           explanation: 'Diagnosis requires recognizing patterns.',
           difficulty: 2,
         },
@@ -441,10 +492,53 @@ function getRouteSpecificQuestions(subskill: PlanSubskill): DiagnosticQuestion[]
           id: 'r1',
           area: 'Creation Skills',
           question: 'Have you built something similar before?',
-          type: 'true_false',
-          correctAnswer: 'true',
+          type: 'multiple_choice',
+          options: ['Yes, multiple projects', 'One complete project', 'Partial attempts', 'Never'],
+          correctAnswer: 'Yes, multiple projects',
           explanation: 'Building requires synthesis of multiple skills.',
           difficulty: 3,
+        },
+      ];
+    
+    case 'apply':
+      return [
+        {
+          id: 'r1',
+          area: 'Transfer Skills',
+          question: 'Can you apply this knowledge to novel situations?',
+          type: 'multiple_choice',
+          options: ['Confidently', 'With some effort', 'With guidance', 'Not yet'],
+          correctAnswer: 'Confidently',
+          explanation: 'Application requires flexible understanding.',
+          difficulty: 3,
+        },
+      ];
+    
+    case 'refine':
+      return [
+        {
+          id: 'r1',
+          area: 'Quality Improvement',
+          question: 'Can you critique and improve existing work in this area?',
+          type: 'multiple_choice',
+          options: ['Yes, effectively', 'Somewhat', 'With difficulty', 'Not yet'],
+          correctAnswer: 'Yes, effectively',
+          explanation: 'Refinement requires critical evaluation skills.',
+          difficulty: 3,
+        },
+      ];
+    
+    case 'plan':
+      return [
+        {
+          id: 'r1',
+          area: 'Strategic Planning',
+          question: 'Can you create an organized approach to this topic?',
+          type: 'multiple_choice',
+          options: ['Yes, comprehensive plans', 'Basic outlines', 'Rough ideas', 'No structure'],
+          correctAnswer: 'Yes, comprehensive plans',
+          explanation: 'Planning requires organizational skills.',
+          difficulty: 2,
         },
       ];
     
@@ -529,6 +623,7 @@ function scoreAssessment(
       gaps.push({
         area,
         score: areaScore,
+        status: status as 'weak' | 'gap',
         priority: status === 'gap' ? 'high' : 'medium',
         suggestedFocus: `Review and practice ${area.toLowerCase()}`,
       });
@@ -538,7 +633,7 @@ function scoreAssessment(
   // Sort gaps by priority
   gaps.sort((a, b) => {
     const priorityOrder = { high: 0, medium: 1, low: 2 };
-    return priorityOrder[a.priority] - priorityOrder[b.priority];
+    return priorityOrder[a.priority || 'low'] - priorityOrder[b.priority || 'low'];
   });
   
   return { score, areaResults, gaps, strengths };
@@ -560,7 +655,7 @@ function checkAnswer(question: DiagnosticQuestion, answer?: UserAnswer): boolean
   }
   
   if (typeof given === 'string') {
-    return correct.toLowerCase() === given.toLowerCase();
+    return correct.toLowerCase().trim() === given.toLowerCase().trim();
   }
   
   return false;
@@ -570,8 +665,8 @@ function checkAnswer(question: DiagnosticQuestion, answer?: UserAnswer): boolean
  * Get recommendation based on score
  */
 function getRecommendation(score: number): AssessmentRecommendation {
-  if (score >= 90) return 'autopass';
-  if (score >= 40) return 'targeted';
+  if (score >= 85) return 'autopass';
+  if (score >= 50) return 'targeted';
   return 'convert_learn';
 }
 
@@ -621,6 +716,95 @@ async function updatePlanProgress(planId: string): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// GET ASSESSMENT FOR USER (strips answers)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get assessment for display (strips correct answers)
+ */
+export function getAssessmentForUser(assessment: SubskillAssessment): {
+  id: string;
+  subskillId: string;
+  questions: Array<{
+    id: string;
+    area: string;
+    question: string;
+    type: string;
+    options?: string[];
+    difficulty: number;
+  }>;
+  isCompleted: boolean;
+  score?: number;
+  recommendation?: string;
+} {
+  return {
+    id: assessment.id,
+    subskillId: assessment.subskillId,
+    questions: assessment.questions.map(q => ({
+      id: q.id,
+      area: q.area,
+      question: q.question,
+      type: q.type,
+      options: q.options,
+      difficulty: q.difficulty,
+      // Note: correctAnswer and explanation are NOT included
+    })),
+    isCompleted: !!assessment.completedAt,
+    score: assessment.score,
+    recommendation: assessment.recommendation,
+  };
+}
+
+/**
+ * Get detailed results after completion
+ */
+export function getAssessmentResults(assessment: SubskillAssessment): {
+  score: number;
+  areaResults: AreaResult[];
+  gaps: Gap[];
+  strengths: string[];
+  recommendation: AssessmentRecommendation;
+  questionResults: Array<{
+    id: string;
+    question: string;
+    userAnswer: string | undefined;
+    correctAnswer: string;
+    isCorrect: boolean;
+    explanation: string;
+  }>;
+} {
+  if (!assessment.completedAt) {
+    throw new Error('Assessment not completed');
+  }
+  
+  const answerMap = new Map(
+    (assessment.answers || []).map(a => [a.questionId, a.answer])
+  );
+  
+  const questionResults = assessment.questions.map(q => {
+    const userAnswer = answerMap.get(q.id);
+    return {
+      id: q.id,
+      question: q.question,
+      userAnswer: typeof userAnswer === 'string' ? userAnswer : undefined,
+      correctAnswer: q.correctAnswer,
+      isCorrect: typeof userAnswer === 'string' && 
+        userAnswer.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim(),
+      explanation: q.explanation,
+    };
+  });
+  
+  return {
+    score: assessment.score || 0,
+    areaResults: assessment.areaResults || [],
+    gaps: assessment.gaps || [],
+    strengths: assessment.strengths || [],
+    recommendation: assessment.recommendation || 'convert_learn',
+    questionResults,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -629,4 +813,6 @@ export const AssessmentHandler = {
   submit: submitAssessment,
   generateTest: generateDiagnosticTest,
   score: scoreAssessment,
+  getForUser: getAssessmentForUser,
+  getResults: getAssessmentResults,
 };
