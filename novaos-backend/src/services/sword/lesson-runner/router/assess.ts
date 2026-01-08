@@ -756,6 +756,14 @@ export function getAssessmentForUser(assessment: SubskillAssessment): {
 }
 
 /**
+ * Get first answer if array, otherwise return string
+ * Handles string | string[] from DiagnosticQuestion.correctAnswer
+ */
+function getCorrectAnswerString(answer: string | string[]): string {
+  return Array.isArray(answer) ? (answer[0] ?? '') : answer;
+}
+
+/**
  * Get detailed results after completion
  */
 export function getAssessmentResults(assessment: SubskillAssessment): {
@@ -783,13 +791,14 @@ export function getAssessmentResults(assessment: SubskillAssessment): {
   
   const questionResults = assessment.questions.map(q => {
     const userAnswer = answerMap.get(q.id);
+    const correctAnswerStr = getCorrectAnswerString(q.correctAnswer);
     return {
       id: q.id,
       question: q.question,
       userAnswer: typeof userAnswer === 'string' ? userAnswer : undefined,
-      correctAnswer: q.correctAnswer,
+      correctAnswer: correctAnswerStr,
       isCorrect: typeof userAnswer === 'string' && 
-        userAnswer.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim(),
+        userAnswer.toLowerCase().trim() === correctAnswerStr.toLowerCase().trim(),
       explanation: q.explanation,
     };
   });

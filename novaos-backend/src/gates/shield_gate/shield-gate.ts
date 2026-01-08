@@ -4,7 +4,7 @@
 //
 // Shield Gate evaluates safety signals and routes to Shield Service:
 // - NONE/LOW: Skip (no intervention)
-// - MEDIUM: Warn (pipeline continues, warning attached to response)
+// - MEDIUM: Block pipeline, return warning (user must confirm to continue)
 // - HIGH: Crisis (pipeline blocks until user confirms safety)
 //
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -36,6 +36,28 @@ export async function executeShieldGateAsync(
   const intent = state.intent_summary;
   const safety_signal: SafetySignal = intent?.safety_signal ?? 'none';
   const urgency: Urgency = intent?.urgency ?? 'low';
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // CHECK FOR SHIELD BYPASS — Skip evaluation if already confirmed
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  if (context.shieldBypassed) {
+    console.log(`[SHIELD] bypassed (user confirmed warning)`);
+    
+    return {
+      gateId: 'shield',
+      status: 'pass',
+      output: {
+        route: 'skip',
+        safety_signal,
+        urgency,
+        shield_acceptance: true,
+        action: 'skip',
+      },
+      action: 'continue',
+      executionTimeMs: Date.now() - start,
+    };
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════════
   // CHECK FOR ACTIVE CRISIS SESSION — Blocks ALL messages
@@ -95,7 +117,8 @@ export async function executeShieldGateAsync(
     context.userId ?? 'anonymous',
     state.userMessage,
     safety_signal,
-    urgency
+    urgency,
+    context.conversationId // Pass conversationId for pending message storage
   );
 
   console.log(`[SHIELD] ${evaluation.action} (safety_signal: ${safety_signal}, urgency: ${urgency})`);
@@ -124,12 +147,14 @@ export async function executeShieldGateAsync(
   }
 
   // ─────────────────────────────────────────────────────────────────────────────────
-  // MEDIUM — Continue pipeline, attach warning for frontend
+  // MEDIUM — Block pipeline, return short warning for user to confirm
   // ─────────────────────────────────────────────────────────────────────────────────
+  // Changed from 'continue' to 'halt' — pipeline stops here
+  // User must confirm warning via POST /shield/confirm to continue
   
   return {
     gateId: 'shield',
-    status: 'warning',
+    status: 'blocked', // Changed from 'warning' to 'blocked'
     output: {
       route: 'shield',
       safety_signal,
@@ -138,8 +163,9 @@ export async function executeShieldGateAsync(
       action: 'warn',
       riskAssessment: evaluation.riskAssessment,
       activationId: evaluation.activationId,
+      warningMessage: evaluation.warningMessage, // Short 2-3 sentence warning
     },
-    action: 'continue', // Pipeline continues - response will be generated
+    action: 'halt', // Changed from 'continue' to 'halt'
     executionTimeMs: Date.now() - start,
   };
 }

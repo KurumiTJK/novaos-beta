@@ -569,15 +569,50 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         // ═════════════════════════════════════════════════════════════════════
 
         // ═══════════════════════════════════════════════════════════════════════
-        // SHIELD BLOCKED → CRISIS MODE
-        // When user has active crisis session or HIGH safety signal detected
-        // No response generated, frontend shows crisis UI
+        // SHIELD BLOCKED — MEDIUM (warn) or HIGH (crisis)
         // ═══════════════════════════════════════════════════════════════════════
         if (result.status === 'blocked' && result.shield) {
           const { shield } = result;
           
           // Don't save messages for blocked requests
           
+          // ─────────────────────────────────────────────────────────────────────
+          // MEDIUM BLOCK — Return warning message, user must confirm to continue
+          // Frontend shows warning overlay with "I Understand" button
+          // User clicks button → POST /shield/confirm → Pipeline runs → Response
+          // ─────────────────────────────────────────────────────────────────────
+          if (shield.action === 'warn') {
+            await logAudit({
+              category: 'shield',
+              severity: 'warning',
+              action: 'warning_activated',
+              userId,
+              details: {
+                conversationId: resolvedConversationId,
+                activationId: shield.activationId,
+              },
+            });
+            
+            res.json({
+              response: '', // No response - frontend shows warning
+              stance: 'shield',
+              status: 'blocked',
+              conversationId: resolvedConversationId,
+              isNewConversation,
+              shield: {
+                action: 'warn',
+                warningMessage: shield.warningMessage, // Short 2-3 sentence warning
+                activationId: shield.activationId,
+                // riskAssessment intentionally NOT included - only warningMessage shown
+              },
+            });
+            return;
+          }
+          
+          // ─────────────────────────────────────────────────────────────────────
+          // CRISIS BLOCK — High signal or active crisis session
+          // Frontend shows crisis UI, user must confirm safety
+          // ─────────────────────────────────────────────────────────────────────
           await logAudit({
             category: 'shield',
             severity: shield.crisisBlocked ? 'info' : 'warning',
@@ -597,7 +632,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
             conversationId: resolvedConversationId,
             isNewConversation,
             shield: {
-              action: shield.action,
+              action: 'crisis',
               riskAssessment: shield.riskAssessment,
               sessionId: shield.sessionId,
               activationId: shield.activationId,

@@ -150,7 +150,7 @@ export async function fetchBestVideo(
     }
     
     // Return highest view count (already sorted) or fallback
-    return filtered.length > 0 ? filtered[0] : (videos[0] || createFallbackVideo(searchQuery));
+    return filtered.length > 0 ? filtered[0]! : (videos[0] ?? createFallbackVideo(searchQuery));
     
   } catch (error) {
     console.error('[YOUTUBE] fetchBestVideo error:', error);
@@ -192,7 +192,7 @@ export async function fetchBestArticle(
     }
   }
   
-  return articles[0];
+  return articles[0] ?? null;
 }
 
 function buildSearchQuery(subskill: PlanSubskill, plan: LessonPlan): string {
@@ -285,7 +285,7 @@ async function fetchYouTubeVideos(
       return [];
     }
     
-    const data = await response.json();
+    const data: any = await response.json();
     
     if (!data.items || data.items.length === 0) {
       console.log('[YOUTUBE] No results found');
@@ -353,7 +353,7 @@ async function fetchVideoStatistics(
       return videos;
     }
     
-    const data = await response.json();
+    const data: any = await response.json();
     
     if (!data.items) return videos;
     
@@ -407,10 +407,10 @@ function formatDuration(isoDuration?: string): string | undefined {
 function parseDurationToMinutes(duration: string): number {
   const parts = duration.split(':').map(Number);
   if (parts.length === 3) {
-    return parts[0] * 60 + parts[1] + parts[2] / 60;
+    return (parts[0] ?? 0) * 60 + (parts[1] ?? 0) + (parts[2] ?? 0) / 60;
   }
   if (parts.length === 2) {
-    return parts[0] + parts[1] / 60;
+    return (parts[0] ?? 0) + (parts[1] ?? 0) / 60;
   }
   return 0;
 }
@@ -479,7 +479,7 @@ async function fetchArticles(
       return [];
     }
     
-    const data = await response.json();
+    const data: any = await response.json();
     
     if (!data.items || data.items.length === 0) {
       console.log('[ARTICLES] No results found');

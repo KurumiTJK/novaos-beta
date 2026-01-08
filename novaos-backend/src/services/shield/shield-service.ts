@@ -4,20 +4,29 @@
 //
 // Shield provides friction before risky actions:
 // - LOW: Skip (emotional, not blocking)
-// - MEDIUM: Warning overlay with response (user must acknowledge)
+// - MEDIUM: Warning overlay, BLOCKS pipeline until user confirms
 // - HIGH: Crisis mode (blocks all messages until user confirms safety)
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { isSupabaseInitialized, getSupabase } from '../../db/index.js';
+import { getStore } from '../../storage/index.js';
+import { generateWithModelLLM } from '../../pipeline/llm_engine.js';
 import { assessRisk } from './risk-assessor.js';
+import { SHORT_WARNING_PROMPT } from './prompts.js';
 import {
   getActiveCrisisSession,
   createCrisisSession,
   resolveCrisisSession,
   getCrisisSession,
 } from './crisis-session.js';
-import type { ShieldEvaluation, ShieldAction, RiskAssessment } from './types.js';
+import type { ShieldEvaluation, ShieldAction, RiskAssessment, PendingMessage } from './types.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const PENDING_MESSAGE_TTL_SECONDS = 900; // 15 minutes
 
 export class ShieldService {
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -42,12 +51,15 @@ export class ShieldService {
   /**
    * Evaluate risk and determine shield action
    * Called by Shield Gate when safety_signal is detected
+   * 
+   * For MEDIUM: Also generates short warning and stores pending message
    */
   async evaluate(
     userId: string,
     message: string,
     safetySignal: 'none' | 'low' | 'medium' | 'high',
-    urgency: 'low' | 'medium' | 'high'
+    urgency: 'low' | 'medium' | 'high',
+    conversationId?: string
   ): Promise<ShieldEvaluation> {
     // Skip for none/low - no intervention needed
     if (safetySignal === 'none' || safetySignal === 'low') {
@@ -92,21 +104,61 @@ export class ShieldService {
       };
     }
 
-    // MEDIUM: Warning only (pipeline continues, frontend shows overlay)
-    console.log(`[SHIELD] WARNING for user: ${userId}`);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MEDIUM: Generate short warning, store pending message, BLOCK pipeline
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // Generate short warning message using LLM
+    const warningMessage = await this.generateShortWarning(message, riskAssessment);
+    
+    // Store pending message for retrieval after user confirms
+    if (activationId && conversationId) {
+      await this.storePendingMessage(activationId, userId, message, conversationId);
+    }
+
+    console.log(`[SHIELD] WARNING for user: ${userId}, activationId: ${activationId}`);
 
     return {
       action: 'warn',
       safetySignal,
       urgency,
       riskAssessment: riskAssessment ?? undefined,
+      warningMessage,
       activationId: activationId ?? undefined,
     };
   }
 
   /**
-   * Confirm acceptance of warning (medium)
+   * Confirm acceptance of warning (medium) and retrieve pending message
+   * Returns the pending message data so caller can run pipeline
+   */
+  async confirmAcceptanceAndGetMessage(activationId: string): Promise<{
+    success: boolean;
+    pendingMessage?: PendingMessage;
+  }> {
+    console.log(`[SHIELD] Warning acknowledged: ${activationId}`);
+    
+    // Get pending message before resolving
+    const pendingMessage = await this.getPendingMessage(activationId);
+    
+    // Resolve the activation (audit)
+    await this.resolveActivation(activationId);
+    
+    // Delete pending message from Redis
+    if (pendingMessage) {
+      await this.deletePendingMessage(activationId);
+    }
+    
+    return {
+      success: true,
+      pendingMessage: pendingMessage ?? undefined,
+    };
+  }
+
+  /**
+   * Legacy: Confirm acceptance of warning (medium)
    * Records resolution for audit, no other effect
+   * @deprecated Use confirmAcceptanceAndGetMessage instead
    */
   async confirmAcceptance(activationId: string): Promise<boolean> {
     console.log(`[SHIELD] Warning acknowledged: ${activationId}`);
@@ -155,6 +207,130 @@ export class ShieldService {
       };
     }
     return { inCrisis: false };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // PENDING MESSAGE STORAGE (Redis)
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Store pending message in Redis
+   * Called when MEDIUM signal blocks pipeline
+   */
+  async storePendingMessage(
+    activationId: string,
+    userId: string,
+    message: string,
+    conversationId: string
+  ): Promise<void> {
+    const store = getStore();
+    const key = `pending:${activationId}`;
+    
+    const pendingMessage: PendingMessage = {
+      activationId,
+      userId,
+      message,
+      conversationId,
+      timestamp: Date.now(),
+    };
+    
+    await store.set(key, JSON.stringify(pendingMessage), PENDING_MESSAGE_TTL_SECONDS);
+    console.log(`[SHIELD] Stored pending message: ${key}`);
+  }
+
+  /**
+   * Get pending message from Redis
+   * Called when user confirms warning
+   */
+  async getPendingMessage(activationId: string): Promise<PendingMessage | null> {
+    const store = getStore();
+    const key = `pending:${activationId}`;
+    
+    const data = await store.get(key);
+    if (!data) {
+      console.log(`[SHIELD] No pending message found: ${key}`);
+      return null;
+    }
+    
+    try {
+      return JSON.parse(data) as PendingMessage;
+    } catch (error) {
+      console.error(`[SHIELD] Failed to parse pending message: ${key}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete pending message from Redis
+   * Called after message is processed
+   */
+  async deletePendingMessage(activationId: string): Promise<void> {
+    const store = getStore();
+    const key = `pending:${activationId}`;
+    
+    await store.delete(key);
+    console.log(`[SHIELD] Deleted pending message: ${key}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SHORT WARNING GENERATION (LLM)
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Generate short warning message using model_llm
+   * Returns 2-3 sentence contextual warning
+   */
+  async generateShortWarning(
+    message: string,
+    riskAssessment: RiskAssessment | null
+  ): Promise<string> {
+    // Fallback if no risk assessment
+    if (!riskAssessment) {
+      return this.getFallbackWarning();
+    }
+
+    const prompt = SHORT_WARNING_PROMPT
+      .replace('{message}', message)
+      .replace('{domain}', riskAssessment.domain)
+      .replace('{riskExplanation}', riskAssessment.riskExplanation);
+
+    try {
+      const result = await generateWithModelLLM(prompt, message, {
+        temperature: 0.3,
+        max_tokens: 150,
+      });
+
+      if (!result || result.trim().length < 20) {
+        console.warn('[SHIELD] LLM returned empty/short warning, using fallback');
+        return this.getFallbackWarning(riskAssessment.domain);
+      }
+
+      // Clean up any formatting artifacts
+      const cleaned = result
+        .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+        .trim();
+
+      return cleaned;
+    } catch (error) {
+      console.error('[SHIELD] Short warning generation error:', error);
+      return this.getFallbackWarning(riskAssessment.domain);
+    }
+  }
+
+  /**
+   * Fallback warning when LLM fails
+   */
+  private getFallbackWarning(domain?: string): string {
+    const domainWarnings: Record<string, string> = {
+      financial: "This involves significant financial risk that could impact your stability. Are you sure you want to proceed?",
+      career: "This decision could have lasting effects on your professional reputation. Would you like to continue?",
+      legal: "This situation may have legal implications worth considering carefully. Are you sure you want advice on this?",
+      health: "I want to make sure you're approaching this safely. Are you ready to proceed?",
+      relationship: "This could significantly impact your relationships. Would you like to continue?",
+    };
+
+    return domainWarnings[domain ?? ''] ?? 
+      "This decision may have significant consequences. Are you sure you want to proceed?";
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════

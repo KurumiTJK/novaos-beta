@@ -93,6 +93,9 @@ export interface ShieldGateOutput {
   /** LLM risk assessment (medium/high only) */
   riskAssessment?: ShieldRiskAssessment;
   
+  /** Short warning message for user (medium only) */
+  warningMessage?: string;
+  
   /** Crisis session ID (high only) */
   sessionId?: string;
   
@@ -297,6 +300,12 @@ export interface PipelineContext {
   readonly actionSource?: ActionSource;
   readonly actionSources?: ActionSource[];
   timestamp?: string | number;
+  
+  /** 
+   * When true, Shield Gate skips evaluation (user already confirmed warning)
+   * Set by /shield/confirm endpoint when processing pending message
+   */
+  shieldBypassed?: boolean;
 }
 
 export interface PipelineState {
@@ -319,14 +328,17 @@ export type PipelineStatus = 'success' | 'stopped' | 'await_ack' | 'degraded' | 
 
 /**
  * Shield data attached to pipeline result
- * For medium: attached alongside response
- * For high/crisis: response is empty, only shield data returned
+ * For medium: blocked, only warningMessage returned
+ * For high/crisis: blocked, riskAssessment returned
  */
 export interface ShieldResult {
-  /** warn = show warning overlay, crisis = block all */
+  /** warn = show warning overlay (medium), crisis = block all (high) */
   action: 'warn' | 'crisis';
   
-  /** LLM-generated risk assessment */
+  /** Short 2-3 sentence warning message (for warn/medium only) */
+  warningMessage?: string;
+  
+  /** LLM-generated risk assessment (for crisis/high only) */
   riskAssessment?: ShieldRiskAssessment;
   
   /** Crisis session ID (for high) */
@@ -350,7 +362,7 @@ export interface PipelineResult {
   /** Present when status='redirect' - frontend should navigate to SwordGate */
   readonly redirect?: SwordRedirect;
   
-  /** Present when shield activated (medium=warn with response, high/blocked=crisis without response) */
+  /** Present when shield activated (medium=warn blocked, high=crisis blocked) */
   readonly shield?: ShieldResult;
   
   readonly metadata: {

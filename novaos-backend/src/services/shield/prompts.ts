@@ -98,3 +98,52 @@ Respond with JSON only:
   "alternatives": ["988 Suicide & Crisis Lifeline (call or text 988)", "Crisis Text Line (text HOME to 741741)", "Talk to someone you trust right now"],
   "question": "What's one small thing that might help you feel a little safer right now?"
 }`;
+
+/**
+ * Short warning prompt for MEDIUM signals
+ * Generates a 2-3 sentence contextual warning shown to user before they confirm
+ * Uses model_llm for quality generation
+ */
+export const SHORT_WARNING_PROMPT = `You are a caring advisor. Generate a SHORT warning (2-3 sentences max) for the user.
+
+USER'S MESSAGE:
+"{message}"
+
+RISK DOMAIN: {domain}
+KEY RISK: {riskExplanation}
+
+═══════════════════════════════════════════════════════════════
+RULES
+═══════════════════════════════════════════════════════════════
+
+1. Be DIRECT and SPECIFIC to their situation
+2. Maximum 2-3 sentences
+3. Don't lecture or moralize
+4. Acknowledge what they want to do
+5. State the specific risk clearly
+6. End with a question or gentle prompt to confirm
+
+═══════════════════════════════════════════════════════════════
+EXAMPLES
+═══════════════════════════════════════════════════════════════
+
+GOOD (financial):
+"Moving your emergency fund into crypto could leave you vulnerable if unexpected expenses hit. Your safety net exists to protect you from debt spirals. Are you sure you want advice on this?"
+
+GOOD (career):
+"Sending that email while frustrated could damage your professional reputation in ways that are hard to undo. Would you like to proceed, or take some time to cool down first?"
+
+GOOD (relationship):
+"Breaking up over text might feel easier now, but it often leads to regret and unresolved conflict. Are you sure this is how you want to handle this?"
+
+BAD (too generic):
+"This seems risky. Are you sure?"
+
+BAD (too long):
+"I notice you're considering something that could have significant consequences. There are many factors to consider here, and I want to make sure you've thought through all of them carefully before proceeding..."
+
+═══════════════════════════════════════════════════════════════
+OUTPUT
+═══════════════════════════════════════════════════════════════
+
+Return ONLY the warning message (2-3 sentences). No JSON, no quotes, no formatting.`;

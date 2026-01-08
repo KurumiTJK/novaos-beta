@@ -136,9 +136,9 @@ export function parseTimeEstimate(estimatedTime: string): {
   const monthsMatch = lower.match(/(\d+)\s*months?/);
   
   if (weeksMatch) {
-    weeks = parseInt(weeksMatch[1], 10);
+    weeks = parseInt(weeksMatch[1] ?? '0', 10);
   } else if (monthsMatch) {
-    weeks = parseInt(monthsMatch[1], 10) * 4; // 4 weeks per month
+    weeks = parseInt(monthsMatch[1] ?? '0', 10) * 4; // 4 weeks per month
   }
   
   // Parse daily time
@@ -146,14 +146,14 @@ export function parseTimeEstimate(estimatedTime: string): {
   const minuteMatch = lower.match(/(\d+)\s*minutes?/);
   
   if (hourMatch) {
-    dailyMinutes = parseInt(hourMatch[1], 10) * 60;
+    dailyMinutes = parseInt(hourMatch[1] ?? '0', 10) * 60;
   }
   if (minuteMatch) {
     // If both hour and minute, add them
     if (hourMatch) {
-      dailyMinutes += parseInt(minuteMatch[1], 10);
+      dailyMinutes += parseInt(minuteMatch[1] ?? '0', 10);
     } else {
-      dailyMinutes = parseInt(minuteMatch[1], 10);
+      dailyMinutes = parseInt(minuteMatch[1] ?? '0', 10);
     }
   }
   
@@ -669,6 +669,10 @@ async function createPlanFromSession(sessionId: string): Promise<LessonPlan> {
     sessionsCompleted: 0,
     currentSubskillIndex: 0,
     createdAt: new Date(plan.created_at),
+    // Required by LessonPlan type
+    totalNodes: nonSkipped,
+    totalSessions: timeEstimate.totalSessions,
+    sessionsSinceMethodNode: 0,
   };
 }
 

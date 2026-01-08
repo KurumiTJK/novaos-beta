@@ -36,6 +36,9 @@ export interface ShieldEvaluation {
   /** Risk assessment from LLM (only for medium/high) */
   riskAssessment?: RiskAssessment;
   
+  /** Short 2-3 sentence warning message (only for medium) */
+  warningMessage?: string;
+  
   /** Crisis session ID (only for high) */
   sessionId?: string;
   
@@ -68,4 +71,16 @@ export interface ShieldActivation {
   actionTaken: 'warning' | 'crisis';
   resolvedAt?: Date;
   createdAt: Date;
+}
+
+/**
+ * Pending message stored in Redis for MEDIUM signals
+ * User must confirm warning before message is processed
+ */
+export interface PendingMessage {
+  activationId: string;
+  userId: string;
+  message: string;
+  conversationId: string;
+  timestamp: number;
 }

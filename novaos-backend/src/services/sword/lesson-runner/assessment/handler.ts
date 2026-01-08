@@ -326,7 +326,8 @@ function scoreAssessment(
     areaData.questions.push(question);
     
     const userAnswer = answerMap.get(question.id);
-    if (userAnswer && normalizeAnswer(userAnswer) === normalizeAnswer(question.correctAnswer)) {
+    const userAnswerStr = typeof userAnswer === 'string' ? userAnswer : (Array.isArray(userAnswer) ? userAnswer[0] : '');
+    if (userAnswerStr && normalizeAnswer(userAnswerStr) === normalizeAnswer(getCorrectAnswerString(question.correctAnswer))) {
       areaData.correct++;
     }
   }
@@ -383,13 +384,14 @@ function scoreAssessment(
  */
 function getMissedConcepts(
   questions: DiagnosticQuestion[],
-  answerMap: Map<string, string>
+  answerMap: Map<string, string | string[]>
 ): string[] {
   const missed: string[] = [];
   
   for (const q of questions) {
     const userAnswer = answerMap.get(q.id);
-    if (!userAnswer || normalizeAnswer(userAnswer) !== normalizeAnswer(q.correctAnswer)) {
+    const userAnswerStr = typeof userAnswer === 'string' ? userAnswer : (Array.isArray(userAnswer) ? userAnswer[0] : '');
+    if (!userAnswerStr || normalizeAnswer(userAnswerStr) !== normalizeAnswer(getCorrectAnswerString(q.correctAnswer))) {
       // Extract concept from question (simplified)
       missed.push(q.question.slice(0, 100));
     }
@@ -403,6 +405,14 @@ function getMissedConcepts(
  */
 function normalizeAnswer(answer: string): string {
   return answer.toLowerCase().trim();
+}
+
+/**
+ * Get first answer if array, otherwise return string
+ * Handles string | string[] from DiagnosticQuestion.correctAnswer
+ */
+function getCorrectAnswerString(answer: string | string[]): string {
+  return Array.isArray(answer) ? (answer[0] ?? '') : answer;
 }
 
 /**
@@ -643,7 +653,7 @@ export function getAssessmentForUser(assessment: SubskillAssessment): {
       area: q.area,
       question: q.question,
       type: q.type,
-      options: q.options,
+      options: q.options ?? [],
       difficulty: q.difficulty,
       // Note: correctAnswer and explanation are NOT included
     })),
@@ -679,14 +689,18 @@ export function getAssessmentResults(assessment: SubskillAssessment): {
     (assessment.answers || []).map(a => [a.questionId, a.answer])
   );
   
-  const questionResults = assessment.questions.map(q => ({
-    id: q.id,
-    question: q.question,
-    userAnswer: answerMap.get(q.id),
-    correctAnswer: q.correctAnswer,
-    isCorrect: normalizeAnswer(answerMap.get(q.id) || '') === normalizeAnswer(q.correctAnswer),
-    explanation: q.explanation,
-  }));
+  const questionResults = assessment.questions.map(q => {
+    const rawAnswer = answerMap.get(q.id);
+    const userAnswer = typeof rawAnswer === 'string' ? rawAnswer : (Array.isArray(rawAnswer) ? rawAnswer[0] : undefined);
+    return {
+      id: q.id,
+      question: q.question,
+      userAnswer,
+      correctAnswer: getCorrectAnswerString(q.correctAnswer),
+      isCorrect: normalizeAnswer(userAnswer || '') === normalizeAnswer(getCorrectAnswerString(q.correctAnswer)),
+      explanation: q.explanation,
+    };
+  });
   
   return {
     score: assessment.score || 0,

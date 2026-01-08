@@ -410,7 +410,8 @@ export function getNextInternalPhase(currentPhase: InternalPhase): InternalPhase
  * Get required data for phase
  */
 export function getPhaseRequirements(phase: InternalPhase): string[] {
-  switch (phase) {
+  const phaseStr = phase as string;
+  switch (phaseStr) {
     case 'exploration':
       return [];
     case 'capstone':
@@ -476,7 +477,8 @@ export function getVisiblePhaseInfo(visiblePhase: VisiblePhase): {
 } {
   const stepNumber = VISIBLE_PHASE_ORDER.indexOf(visiblePhase) + 1;
 
-  const info: Record<VisiblePhase, { title: string; description: string }> = {
+  // Use Partial to handle cases where phases may not be defined
+  const info: Partial<Record<VisiblePhase, { title: string; description: string }>> & Record<string, { title: string; description: string }> = {
     exploration: {
       title: 'Exploration',
       description: 'Tell me what you want to learn',
@@ -495,8 +497,10 @@ export function getVisiblePhaseInfo(visiblePhase: VisiblePhase): {
     },
   };
 
+  const phaseInfo = info[visiblePhase] || { title: visiblePhase, description: '' };
+
   return {
-    ...info[visiblePhase],
+    ...phaseInfo,
     stepNumber,
     totalSteps: VISIBLE_PHASE_ORDER.length,
   };

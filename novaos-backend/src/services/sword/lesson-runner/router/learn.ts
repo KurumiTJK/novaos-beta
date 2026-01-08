@@ -20,22 +20,20 @@ export async function handleLearnFlow(
   
   console.log(`[LEARN] Starting learn flow for: ${subskill.title}`);
   
-  // Check if lesson plan already exists
+  // Check if lesson plan already exists by querying the lesson plans table by subskill_id
   let lessonPlan: SubskillLessonPlan | null = null;
   
-  if (subskill.lessonPlanId) {
-    // Fetch existing lesson plan
-    const { data: existingRow } = await supabase
-      .from('subskill_lesson_plans')
-      .select('*')
-      .eq('id', subskill.lessonPlanId)
-      .single();
-    
-    if (existingRow) {
-      const { mapSubskillLessonPlan } = await import('../types.js');
-      lessonPlan = mapSubskillLessonPlan(existingRow);
-      console.log(`[LEARN] Using existing lesson plan`);
-    }
+  // Query for existing lesson plan by subskill_id (not lessonPlanId which doesn't exist on PlanSubskill)
+  const { data: existingRow } = await supabase
+    .from('subskill_lesson_plans')
+    .select('*')
+    .eq('subskill_id', subskill.id)
+    .single();
+  
+  if (existingRow) {
+    const { mapSubskillLessonPlan } = await import('../types.js');
+    lessonPlan = mapSubskillLessonPlan(existingRow);
+    console.log(`[LEARN] Using existing lesson plan`);
   }
   
   // Generate new lesson plan if needed
@@ -43,19 +41,16 @@ export async function handleLearnFlow(
     console.log(`[LEARN] Generating new lesson plan`);
     lessonPlan = await generateLessonPlan(userId, subskill, plan);
     
-    // Update subskill with lesson plan ID
+    // Update subskill status to active
     await supabase
       .from('plan_subskills')
-      .update({
-        lesson_plan_id: lessonPlan.id,
-        status: 'active',
-      })
+      .update({ status: 'active' })
       .eq('id', subskill.id);
     
-    // Update plan's current subskill
+    // Update plan's current subskill index
     await supabase
       .from('lesson_plans')
-      .update({ current_subskill_id: subskill.id })
+      .update({ current_subskill_index: subskill.order })
       .eq('id', plan.id);
   }
   

@@ -44,12 +44,13 @@ export async function getToday(userId: string): Promise<TodayState | null> {
   // Get current subskill
   let currentSubskill: PlanSubskill | null = null;
   
-  // First try current_subskill_id
-  if (plan.currentSubskillId) {
+  // First try currentSubskillIndex - query by order field
+  if (plan.currentSubskillIndex !== undefined && plan.currentSubskillIndex >= 0) {
     const { data: subskillRow } = await supabase
       .from('plan_subskills')
       .select('*')
-      .eq('id', plan.currentSubskillId)
+      .eq('plan_id', plan.id)
+      .eq('order', plan.currentSubskillIndex)
       .single();
     
     if (subskillRow) {
@@ -88,8 +89,8 @@ export async function getToday(userId: string): Promise<TodayState | null> {
     .eq('plan_id', plan.id)
     .in('status', ['mastered', 'skipped']);
   
-  // Calculate session info
-  const sessionNumber = (currentSubskill.currentSession || 0) + 1;
+  // Calculate session info - use sessionsCompleted (correct property name)
+  const sessionNumber = (currentSubskill.sessionsCompleted || 0) + 1;
   const totalSessions = currentSubskill.estimatedSessions || 3;
   const isKnowledgeCheckDay = sessionNumber === totalSessions;
   

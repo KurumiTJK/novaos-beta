@@ -23,4 +23,5 @@ export type {
   RiskAssessment,
   CrisisSession,
   ShieldActivation,
+  PendingMessage,
 } from './types.js';

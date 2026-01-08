@@ -66,6 +66,7 @@ export class ExecutionPipeline {
       sessionId: context.sessionId,
       conversationHistory: context.conversationHistory,
       actionSources: context.actionSources,
+      shieldBypassed: context.shieldBypassed, // Pass through bypass flag
     };
 
     // Initialize state
@@ -111,18 +112,50 @@ export class ExecutionPipeline {
     // ═══════════════════════════════════════════════════════════════════════════
     // Shield evaluates safety signals:
     // - NONE/LOW: Skip (no intervention)
-    // - MEDIUM: Warn (pipeline continues, warning attached to response)
+    // - MEDIUM: Block pipeline, return warning (user must confirm to continue)
     // - HIGH: Crisis (pipeline halts, no response generated)
+    // 
+    // If context.shieldBypassed=true, Shield Gate skips evaluation
     
     state.gateResults.shield = await executeShieldGateAsync(state, context);
     state.shieldResult = state.gateResults.shield.output;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // CHECK FOR SHIELD BLOCK — High signal or active crisis session
+    // CHECK FOR SHIELD BLOCK — High signal, active crisis, OR medium warning
     // ═══════════════════════════════════════════════════════════════════════════
     
     if (state.gateResults.shield.action === 'halt') {
       const shieldOutput = state.shieldResult;
+      
+      // ─────────────────────────────────────────────────────────────────────────
+      // MEDIUM BLOCK — Return warning message, user must confirm to continue
+      // ─────────────────────────────────────────────────────────────────────────
+      if (shieldOutput.action === 'warn') {
+        console.log(`[PIPELINE] Shield BLOCK: warn (medium signal)`);
+        
+        const shieldData: ShieldResult = {
+          action: 'warn',
+          warningMessage: shieldOutput.warningMessage,
+          riskAssessment: shieldOutput.riskAssessment,
+          activationId: shieldOutput.activationId,
+        };
+        
+        return {
+          status: 'blocked',
+          response: '', // No response for blocked - frontend shows warning
+          stance: 'shield',
+          shield: shieldData,
+          gateResults: state.gateResults,
+          metadata: {
+            requestId: context.requestId,
+            totalTimeMs: Date.now() - pipelineStart,
+          },
+        };
+      }
+      
+      // ─────────────────────────────────────────────────────────────────────────
+      // CRISIS BLOCK — High signal or active crisis session
+      // ─────────────────────────────────────────────────────────────────────────
       console.log(`[PIPELINE] Shield BLOCK: ${shieldOutput.action} (crisis)`);
       
       const shieldData: ShieldResult = {
@@ -240,27 +273,10 @@ export class ExecutionPipeline {
     // ─── BUILD FINAL RESPONSE ───
     const finalText = state.validatedOutput?.text ?? state.generation?.text ?? '';
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ATTACH SHIELD WARNING (for medium signals)
-    // Pipeline completed normally, but we attach warning for frontend to show
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    let shieldWarning: ShieldResult | undefined;
-    
-    if (state.shieldResult?.action === 'warn') {
-      shieldWarning = {
-        action: 'warn',
-        riskAssessment: state.shieldResult.riskAssessment,
-        activationId: state.shieldResult.activationId,
-      };
-      console.log(`[PIPELINE] Response includes shield warning`);
-    }
-
     return {
       status: 'success',
       response: finalText,
       stance: state.stance,
-      shield: shieldWarning, // Attached for frontend to show overlay
       gateResults: state.gateResults,
       metadata: {
         requestId: context.requestId,
