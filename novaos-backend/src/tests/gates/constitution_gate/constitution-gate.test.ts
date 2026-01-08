@@ -164,7 +164,8 @@ describe('Constitution Gate', () => {
         expect(mockGenerateForConstitutionGate).not.toHaveBeenCalled();
       });
 
-      it('should skip check when safety_signal is low', async () => {
+      it('should run check when safety_signal is low', async () => {
+        // Changed: Now runs on low signal for Shield Amendment support
         const state = createMockState({
           intent_summary: { ...DEFAULT_INTENT, safety_signal: 'low' },
         });
@@ -172,8 +173,8 @@ describe('Constitution Gate', () => {
 
         const result = await executeConstitutionGateAsync(state, context);
 
-        expect(result.output.checkRun).toBe(false);
-        expect(mockGenerateForConstitutionGate).not.toHaveBeenCalled();
+        expect(result.output.checkRun).toBe(true);
+        expect(mockGenerateForConstitutionGate).toHaveBeenCalledTimes(1);
       });
 
       it('should run check when safety_signal is medium', async () => {
@@ -213,7 +214,8 @@ describe('Constitution Gate', () => {
         expect(mockGenerateForConstitutionGate).toHaveBeenCalledTimes(1);
       });
 
-      it('should skip when shield_acceptance is false and safety_signal is low', async () => {
+      it('should run check when shield_acceptance is false and safety_signal is low', async () => {
+        // Changed: Now runs on low signal for Shield Amendment support
         const state = createMockState({
           intent_summary: { ...DEFAULT_INTENT, safety_signal: 'low' },
           shieldResult: { shield_acceptance: false },
@@ -222,8 +224,8 @@ describe('Constitution Gate', () => {
 
         const result = await executeConstitutionGateAsync(state, context);
 
-        expect(result.output.checkRun).toBe(false);
-        expect(mockGenerateForConstitutionGate).not.toHaveBeenCalled();
+        expect(result.output.checkRun).toBe(true);
+        expect(mockGenerateForConstitutionGate).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -791,6 +793,7 @@ describe('Constitution Gate', () => {
   // ─────────────────────────────────────────────────────────────────────────────
 
   describe('router decision matrix', () => {
+    // Updated: Now runs check on low signal for Shield Amendment support
     const testCases: Array<{
       safety_signal: 'none' | 'low' | 'medium' | 'high';
       shield_acceptance: boolean;
@@ -798,7 +801,7 @@ describe('Constitution Gate', () => {
     }> = [
       { safety_signal: 'none', shield_acceptance: false, expectedCheck: false },
       { safety_signal: 'none', shield_acceptance: true, expectedCheck: true },
-      { safety_signal: 'low', shield_acceptance: false, expectedCheck: false },
+      { safety_signal: 'low', shield_acceptance: false, expectedCheck: true },  // Changed: now runs
       { safety_signal: 'low', shield_acceptance: true, expectedCheck: true },
       { safety_signal: 'medium', shield_acceptance: false, expectedCheck: true },
       { safety_signal: 'medium', shield_acceptance: true, expectedCheck: true },

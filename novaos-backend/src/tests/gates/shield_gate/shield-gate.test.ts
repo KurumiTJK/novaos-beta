@@ -399,7 +399,8 @@ describe('Shield Gate', () => {
   // ─────────────────────────────────────────────────────────────────────────────
 
   describe('executeShieldGateAsync', () => {
-    it('should return same result as sync version', async () => {
+    it('should return blocked status when shield route is activated', async () => {
+      // Changed: Async version now blocks for confirmation when shield is needed
       const state = createMockState({
         intent_summary: createIntentSummary({
           stance: 'SHIELD',
@@ -408,16 +409,11 @@ describe('Shield Gate', () => {
       });
       const context = createMockContext();
 
-      const syncResult = executeShieldGate(state, context);
       const asyncResult = await executeShieldGateAsync(state, context);
 
-      expect(asyncResult.gateId).toBe(syncResult.gateId);
-      expect(asyncResult.status).toBe(syncResult.status);
-      expect(asyncResult.action).toBe(syncResult.action);
-      expect(asyncResult.output.route).toBe(syncResult.output.route);
-      expect(asyncResult.output.safety_signal).toBe(syncResult.output.safety_signal);
-      expect(asyncResult.output.urgency).toBe(syncResult.output.urgency);
-      expect(asyncResult.output.shield_acceptance).toBe(syncResult.output.shield_acceptance);
+      expect(asyncResult.gateId).toBe('shield');
+      expect(asyncResult.status).toBe('blocked');
+      expect(asyncResult.output.route).toBe('shield');
     });
 
     it('should return a Promise', () => {

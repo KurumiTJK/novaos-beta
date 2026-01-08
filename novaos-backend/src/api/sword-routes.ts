@@ -11,6 +11,7 @@ import { SubskillsGenerator } from '../services/sword/lesson-designer/subskills.
 import { RoutingGenerator } from '../services/sword/lesson-designer/routing.js';
 import { updateSessionPhase, updatePhaseData } from '../services/sword/lesson-designer/session.js';
 import { AssessmentHandler } from '../services/sword/lesson-runner/router/assess.js';
+import { SparkGenerator } from '../services/sword/spark/index.js';
 import { getSupabase } from '../db/index.js';
 import { mapSubskillAssessment } from '../services/sword/lesson-runner/types.js';
 import {
@@ -1950,6 +1951,102 @@ router.post('/runner/refresh/:subskillId/skip', async (req: Request, res: Respon
     await LessonRunner.skipRefresh(userId, subskillId);
     
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SPARK ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+// POST /sword/spark - Generate new spark based on today's context
+router.post('/spark', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    
+    const result = await SparkGenerator.generate(userId);
+    
+    // No active plan → return null
+    if (!result) {
+      res.json({ success: true, data: null });
+      return;
+    }
+    
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/spark/current - Get most recent active spark
+router.get('/spark/current', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    
+    const spark = await SparkGenerator.getCurrent(userId);
+    
+    res.json({ success: true, data: spark });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/spark/:sparkId/complete - Mark spark complete
+router.post('/spark/:sparkId/complete', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { sparkId } = req.params;
+    
+    if (!sparkId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'sparkId required' },
+      });
+      return;
+    }
+    
+    const spark = await SparkGenerator.complete(userId, sparkId);
+    
+    res.json({ success: true, data: spark });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /sword/spark/:sparkId/skip - Skip spark with optional reason
+router.post('/spark/:sparkId/skip', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const { sparkId } = req.params;
+    const { reason } = req.body || {};
+    
+    if (!sparkId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'sparkId required' },
+      });
+      return;
+    }
+    
+    const spark = await SparkGenerator.skip(userId, sparkId, reason);
+    
+    res.json({ success: true, data: spark });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /sword/sparks - List all user's sparks
+router.get('/sparks', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req);
+    const limit = parseInt(req.query.limit as string) || 20;
+    const status = req.query.status as 'active' | 'completed' | 'skipped' | undefined;
+    
+    const sparks = await SparkGenerator.getAll(userId, limit, status);
+    
+    res.json({ success: true, data: sparks });
   } catch (error) {
     next(error);
   }

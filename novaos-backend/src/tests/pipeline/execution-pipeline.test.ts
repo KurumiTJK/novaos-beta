@@ -13,7 +13,7 @@ import type { PipelineContext, PipelineResult, GateResult } from '../../types/in
 
 // Mock all gate functions
 const mockExecuteIntentGateAsync = vi.fn();
-const mockExecuteShieldGate = vi.fn();
+const mockExecuteShieldGateAsync = vi.fn(); // Changed to async
 const mockExecuteToolsGate = vi.fn();
 const mockExecuteStanceGateAsync = vi.fn();
 const mockExecuteCapabilityGate = vi.fn();
@@ -24,7 +24,6 @@ const mockBuildRegenerationMessage = vi.fn();
 
 vi.mock('../../gates/index.js', () => ({
   executeIntentGateAsync: (...args: unknown[]) => mockExecuteIntentGateAsync(...args),
-  executeShieldGate: (...args: unknown[]) => mockExecuteShieldGate(...args),
   executeToolsGate: (...args: unknown[]) => mockExecuteToolsGate(...args),
   executeStanceGateAsync: (...args: unknown[]) => mockExecuteStanceGateAsync(...args),
   executeCapabilityGate: (...args: unknown[]) => mockExecuteCapabilityGate(...args),
@@ -32,6 +31,11 @@ vi.mock('../../gates/index.js', () => ({
   executeConstitutionGateAsync: (...args: unknown[]) => mockExecuteConstitutionGateAsync(...args),
   executeMemoryGateAsync: (...args: unknown[]) => mockExecuteMemoryGateAsync(...args),
   buildRegenerationMessage: (...args: unknown[]) => mockBuildRegenerationMessage(...args),
+}));
+
+// Mock shield gate separately (it's imported from a different path)
+vi.mock('../../gates/shield_gate/index.js', () => ({
+  executeShieldGateAsync: (...args: unknown[]) => mockExecuteShieldGateAsync(...args),
 }));
 
 // Mock llm_engine
@@ -170,7 +174,7 @@ function createMockMemoryResult(): GateResult<any> {
 
 function setupDefaultMocks(): void {
   mockExecuteIntentGateAsync.mockResolvedValue(createMockIntentResult());
-  mockExecuteShieldGate.mockReturnValue(createMockShieldResult());
+  mockExecuteShieldGateAsync.mockResolvedValue(createMockShieldResult()); // Changed to async
   mockExecuteToolsGate.mockReturnValue(createMockToolsResult());
   mockExecuteStanceGateAsync.mockResolvedValue(createMockStanceResult());
   mockExecuteCapabilityGate.mockReturnValue(createMockCapabilityResult());
@@ -316,7 +320,7 @@ describe('ExecutionPipeline', () => {
           callOrder.push('intent');
           return createMockIntentResult();
         });
-        mockExecuteShieldGate.mockImplementation(() => {
+        mockExecuteShieldGateAsync.mockImplementation(async () => {
           callOrder.push('shield');
           return createMockShieldResult();
         });
@@ -379,7 +383,7 @@ describe('ExecutionPipeline', () => {
         await pipeline.process('What is the weather?');
 
         // Shield gate should receive state with intent_summary
-        const shieldState = mockExecuteShieldGate.mock.calls[0][0];
+        const shieldState = mockExecuteShieldGateAsync.mock.calls[0][0];
         expect(shieldState.intent_summary).toEqual(intentOutput);
       });
 
@@ -511,7 +515,7 @@ describe('ExecutionPipeline', () => {
     });
 
     it('should preserve gate results collected before error', async () => {
-      mockExecuteShieldGate.mockImplementation(() => {
+      mockExecuteShieldGateAsync.mockImplementation(async () => {
         throw new Error('Shield failed');
       });
 
@@ -662,8 +666,10 @@ describe('ExecutionPipeline', () => {
           learning_intent: false,
         },
       });
-      mockExecuteShieldGate.mockReturnValue({
+      mockExecuteShieldGateAsync.mockResolvedValue({
         ...createMockShieldResult(),
+        status: 'pass',
+        action: 'continue',
         output: { route: 'shield', shield_acceptance: true },
       });
 
