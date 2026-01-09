@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Generated files
+*.min.js
+*.min.css
+package-lock.json
+
+# Config files that shouldn't be formatted
+*.md
+*.json
+!.prettierrc

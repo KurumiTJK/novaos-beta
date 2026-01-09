@@ -1,15 +1,16 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# NOVAOS BACKEND — Docker Compose (Development)
+# NOVAOS BACKEND — Docker Compose (Production)
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Local development with containerized Redis.
-# Uses .env file for secrets (copy .env.example to .env first)
+# Production deployment on AWS Lightsail with:
+# - NGINX reverse proxy (SSL termination via Cloudflare)
+# - External Redis (Upstash)
+# - External Database (Supabase)
 #
 # Usage:
-#   docker-compose up              # Start services
-#   docker-compose up --build      # Rebuild and start
-#   docker-compose logs -f novaos  # View logs
-#   docker-compose down            # Stop services
+#   docker-compose -f docker-compose.prod.yml up -d
+#   docker-compose -f docker-compose.prod.yml logs -f
+#   docker-compose -f docker-compose.prod.yml down
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -17,106 +18,126 @@ version: '3.8'
 
 services:
   # ─────────────────────────────────────────────────────────────────────────────
+  # NGINX — Reverse Proxy
+  # ─────────────────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      # SSL handled by Cloudflare, not here
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      novaos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: always
+    networks:
+      - novaos-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # NOVAOS BACKEND
   # ─────────────────────────────────────────────────────────────────────────────
   novaos:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
+    # DO NOT expose port 3000 publicly - only through nginx
     env_file:
-      - .env
+      - .env.production
     environment:
       # ─────────────────────────────────────────────────────────────────────────
-      # Server (override .env for Docker networking)
+      # Server
       # ─────────────────────────────────────────────────────────────────────────
-      - NODE_ENV=development
+      - NODE_ENV=production
       - PORT=3000
-      - TRUST_PROXY=false
+      - TRUST_PROXY=true
+      - SHUTDOWN_TIMEOUT_MS=30000
       
       # ─────────────────────────────────────────────────────────────────────────
-      # Redis (use local container, not Upstash)
+      # Security
       # ─────────────────────────────────────────────────────────────────────────
-      - REDIS_URL=redis://redis:6379
+      - AUTH_REQUIRED=true
       
       # ─────────────────────────────────────────────────────────────────────────
-      # Auth (relaxed for development)
+      # Observability
       # ─────────────────────────────────────────────────────────────────────────
-      - AUTH_REQUIRED=false
+      - DEBUG_MODE=false
+      - REDACT_PII=true
       
       # ─────────────────────────────────────────────────────────────────────────
-      # Debug (verbose for development)
-      # ─────────────────────────────────────────────────────────────────────────
-      - DEBUG_MODE=true
-      - REDACT_PII=false
-      - DEBUG_INTENT_GATE=false
-      - DEBUG_SHIELD_GATE=false
-      - DEBUG_RESPONSE_GATE=false
-      - DEBUG_CONSTITUTION_GATE=false
-      - DEBUG_CAPABILITY_GATE=false
-      
-      # ─────────────────────────────────────────────────────────────────────────
-      # The following are loaded from .env file:
+      # All secrets loaded from .env.production:
+      # - JWT_SECRET
       # - OPENAI_API_KEY
       # - GEMINI_API_KEY
+      # - REDIS_URL (Upstash)
       # - SUPABASE_URL
       # - SUPABASE_SERVICE_KEY
       # - GOOGLE_API_KEY
       # - GOOGLE_SEARCH_ENGINE_ID
-      # - JWT_SECRET
+      # - SENTRY_DSN
+      # - CORS_ORIGINS
       # ─────────────────────────────────────────────────────────────────────────
       
-    depends_on:
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 15s
-    restart: unless-stopped
-    volumes:
-      # Mount source for hot reload (development only)
-      - ./src:/app/src:ro
+      start_period: 30s
+    restart: always
     networks:
       - novaos-network
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # REDIS (Local Development)
-  # ─────────────────────────────────────────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - novaos-network
-
-volumes:
-  redis_data:
-    driver: local
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
 networks:
   novaos-network:
     driver: bridge
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# NOTES
+# PRODUCTION CHECKLIST
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# 1. Copy .env.example to .env and fill in your API keys
-# 2. Supabase connection goes to cloud (not containerized)
-# 3. Redis is local container (not Upstash) for development
-# 4. For production, use docker-compose.prod.yml
+# Before deploying:
+#
+# [ ] Create .env.production with all secrets
+# [ ] Verify CORS_ORIGINS matches your domain
+# [ ] Set up Cloudflare DNS pointing to Lightsail IP
+# [ ] Enable Cloudflare SSL (Full strict)
+# [ ] Enable Cloudflare WAF rules
+# [ ] Test health endpoint: curl http://your-ip/health
+# [ ] Set up Upstash Redis and get connection URL
+# [ ] Set up Supabase and run migrations
+# [ ] Configure Sentry for error tracking
+#
+# Deployment:
+#
+#   scp -r . ubuntu@your-lightsail-ip:/opt/novaos
+#   ssh ubuntu@your-lightsail-ip
+#   cd /opt/novaos
+#   docker-compose -f docker-compose.prod.yml up -d --build
 #
 # ═══════════════════════════════════════════════════════════════════════════════

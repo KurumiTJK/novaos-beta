@@ -59,6 +59,7 @@ CMD ["node", "dist/server.js"]
 # LABELS
 # ─────────────────────────────────────────────────────────────────────────────────
 LABEL org.opencontainers.image.title="NovaOS Backend"
-LABEL org.opencontainers.image.description="Nova Constitution enforcement backend"
-LABEL org.opencontainers.image.version="7.0.0"
+LABEL org.opencontainers.image.description="Constitutional AI assistant backend"
+LABEL org.opencontainers.image.version="1.0.0"
 LABEL org.opencontainers.image.vendor="NovaOS"
+LABEL org.opencontainers.image.source="https://github.com/your-org/novaos-backend"

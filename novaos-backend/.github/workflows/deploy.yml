@@ -1,0 +1,139 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOVAOS — Deploy to AWS Lightsail
+# Triggered manually or on push to main
+# ═══════════════════════════════════════════════════════════════════════════════
+
+name: Deploy
+
+on:
+  # Manual trigger with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+  
+  # Auto-deploy to staging on push to main
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DEPLOY
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'staging' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      # ─────────────────────────────────────────────────────────────────────────
+      # SETUP SSH
+      # ─────────────────────────────────────────────────────────────────────────
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" > ~/.ssh/lightsail
+          chmod 600 ~/.ssh/lightsail
+          ssh-keyscan -H ${{ secrets.LIGHTSAIL_HOST }} >> ~/.ssh/known_hosts
+      
+      # ─────────────────────────────────────────────────────────────────────────
+      # DEPLOY
+      # ─────────────────────────────────────────────────────────────────────────
+      - name: Deploy to server
+        env:
+          HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          USER: ${{ secrets.LIGHTSAIL_USER }}
+          DEPLOY_PATH: /opt/novaos
+        run: |
+          # Create deployment script
+          cat > deploy.sh << 'DEPLOY_SCRIPT'
+          #!/bin/bash
+          set -e
+          
+          cd $DEPLOY_PATH
+          
+          echo "📦 Pulling latest code..."
+          git fetch origin main
+          git reset --hard origin/main
+          
+          echo "🔧 Updating environment..."
+          # Environment file should already exist on server
+          
+          echo "🐳 Building and deploying..."
+          docker-compose -f docker-compose.prod.yml build --no-cache
+          docker-compose -f docker-compose.prod.yml down
+          docker-compose -f docker-compose.prod.yml up -d
+          
+          echo "🧹 Cleaning up old images..."
+          docker image prune -f
+          
+          echo "⏳ Waiting for health check..."
+          sleep 10
+          
+          echo "🔍 Checking health..."
+          curl -f http://localhost/health || exit 1
+          
+          echo "✅ Deployment complete!"
+          DEPLOY_SCRIPT
+          
+          # Copy and execute
+          scp -i ~/.ssh/lightsail deploy.sh $USER@$HOST:/tmp/deploy.sh
+          ssh -i ~/.ssh/lightsail $USER@$HOST "chmod +x /tmp/deploy.sh && sudo /tmp/deploy.sh"
+      
+      # ─────────────────────────────────────────────────────────────────────────
+      # NOTIFY
+      # ─────────────────────────────────────────────────────────────────────────
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Deployment to ${{ github.event.inputs.environment || 'staging' }} successful!"
+          echo "🔗 URL: https://${{ vars.APP_DOMAIN }}"
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          # Add Slack/Discord notification here if needed
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REQUIRED SECRETS (set in GitHub repo settings)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# LIGHTSAIL_HOST      - IP address or hostname of Lightsail instance
+# LIGHTSAIL_USER      - SSH user (usually 'ubuntu')
+# LIGHTSAIL_SSH_KEY   - Private SSH key for authentication
+#
+# REQUIRED VARIABLES (set in GitHub repo settings)
+#
+# APP_DOMAIN          - Your app domain (e.g., nova.yourdomain.com)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# SETUP INSTRUCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 1. Create environments in GitHub: Settings → Environments → New environment
+#    - Create "staging" and "production" environments
+#    - Add protection rules for "production" (require approval)
+#
+# 2. Add secrets to each environment:
+#    - LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY
+#
+# 3. On your Lightsail instance:
+#    - Clone repo to /opt/novaos
+#    - Create .env.production with all secrets
+#    - Run initial deployment manually
+#
+# ═══════════════════════════════════════════════════════════════════════════════

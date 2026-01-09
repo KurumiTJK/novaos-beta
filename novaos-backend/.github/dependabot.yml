@@ -1,0 +1,118 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOVAOS — Dependabot Configuration
+# Automated security and dependency updates
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: 2
+
+updates:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # NPM DEPENDENCIES
+  # ─────────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    
+    # Limit open PRs
+    open-pull-requests-limit: 10
+    
+    # Group minor and patch updates
+    groups:
+      # Production dependencies
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Dev dependencies
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # TypeScript ecosystem
+      typescript:
+        patterns:
+          - "typescript*"
+          - "@types/*"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Testing
+      testing:
+        patterns:
+          - "vitest*"
+          - "@vitest/*"
+          - "supertest"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Linting
+      linting:
+        patterns:
+          - "eslint*"
+          - "@eslint/*"
+          - "prettier"
+          - "husky"
+          - "lint-staged"
+        update-types:
+          - "minor"
+          - "patch"
+    
+    # Labels for PRs
+    labels:
+      - "dependencies"
+      - "automated"
+    
+    # Commit message format
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    
+    # Reviewers
+    reviewers:
+      - "your-github-username"  # TODO: Replace with your username
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # GITHUB ACTIONS
+  # ─────────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    
+    labels:
+      - "dependencies"
+      - "github-actions"
+    
+    commit-message:
+      prefix: "ci"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DOCKER
+  # ─────────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    
+    labels:
+      - "dependencies"
+      - "docker"
+    
+    commit-message:
+      prefix: "docker"
