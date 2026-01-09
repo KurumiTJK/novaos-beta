@@ -268,29 +268,54 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Callback ref that scrolls when a new user message mounts
+  // Track last user message ID for scroll triggering
   const lastUserMessageIdRef = useRef<string | undefined>(undefined);
+  const [debugScrollCount, setDebugScrollCount] = useState(0);
   
-  const scrollToUserMessage = useCallback((node: HTMLDivElement | null) => {
-    if (node) {
-      // Small delay to ensure layout is complete
-      setTimeout(() => {
-        node.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 50);
-    }
-  }, []);
-  
-  // Track which message ID we've already scrolled to
-  const getRefForMessage = useCallback((messageId: string, isLastUser: boolean) => {
-    if (!isLastUser) return null;
+  // Scroll to show user message at top when new message is sent
+  useEffect(() => {
+    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+    if (!lastUserMsg) return;
     
-    // Only scroll if this is a NEW user message
-    if (messageId !== lastUserMessageIdRef.current) {
-      lastUserMessageIdRef.current = messageId;
-      return scrollToUserMessage;
+    // Check if this is a NEW user message
+    if (lastUserMsg.id !== lastUserMessageIdRef.current) {
+      lastUserMessageIdRef.current = lastUserMsg.id;
+      
+      // Find the user message element and scroll container
+      const container = messagesContainerRef.current;
+      if (!container) {
+        console.log('No container ref');
+        return;
+      }
+      
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        // Find all user messages and get the last one
+        const userMessages = container.querySelectorAll('[data-user-message="true"]');
+        const lastUserElement = userMessages[userMessages.length - 1] as HTMLElement;
+        
+        console.log('Scroll attempt:', { 
+          userMessagesFound: userMessages.length, 
+          hasLastElement: !!lastUserElement 
+        });
+        
+        if (lastUserElement) {
+          // Calculate scroll position to put message at top
+          const containerRect = container.getBoundingClientRect();
+          const messageRect = lastUserElement.getBoundingClientRect();
+          const scrollOffset = messageRect.top - containerRect.top + container.scrollTop - 20; // 20px padding from top
+          
+          console.log('Scrolling to:', scrollOffset);
+          setDebugScrollCount(c => c + 1);
+          
+          container.scrollTo({
+            top: scrollOffset,
+            behavior: 'smooth'
+          });
+        }
+      }, 100);
     }
-    return null;
-  }, [scrollToUserMessage]);
+  }, [messages]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
@@ -608,7 +633,7 @@ export function ChatPage() {
               <div 
                 key={message.id} 
                 className={`mb-5 ${isLastUserMessage ? 'border-l-4 border-green-500 pl-2' : ''}`}
-                ref={getRefForMessage(message.id, isLastUserMessage)}
+                data-user-message={message.role === 'user' ? 'true' : undefined}
               >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
@@ -693,7 +718,7 @@ export function ChatPage() {
           
           {/* DEBUG */}
           <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
-            Msgs: {messages.length} | LastUserID: {messages.filter(m => m.role === 'user').pop()?.id?.slice(-6) || 'none'}
+            Msgs: {messages.length} | Scrolls: {debugScrollCount}
           </div>
           
           {/* Dark Card */}
