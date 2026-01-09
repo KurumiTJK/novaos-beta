@@ -7,6 +7,43 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useUIStore, useChatStore } from '@/shared/stores';
 import { useHaptic } from '@/shared/hooks';
 import { LoadingDots } from '@/shared/components';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// iOS KEYBOARD HEIGHT HOOK
+// Uses visualViewport API to detect keyboard and calculate offset
+// ─────────────────────────────────────────────────────────────────────────────────
+
+function useKeyboardHeight() {
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    const updateKeyboardHeight = () => {
+      // Calculate keyboard height as difference between window height and viewport height
+      const windowHeight = window.innerHeight;
+      const viewportHeight = viewport.height;
+      const offset = windowHeight - viewportHeight;
+      
+      // Only set if there's a significant difference (keyboard is likely open)
+      setKeyboardHeight(offset > 50 ? offset : 0);
+    };
+
+    viewport.addEventListener('resize', updateKeyboardHeight);
+    viewport.addEventListener('scroll', updateKeyboardHeight);
+    
+    // Initial check
+    updateKeyboardHeight();
+
+    return () => {
+      viewport.removeEventListener('resize', updateKeyboardHeight);
+      viewport.removeEventListener('scroll', updateKeyboardHeight);
+    };
+  }, []);
+
+  return keyboardHeight;
+}
 import {
   MenuIcon,
   EditIcon,
@@ -152,6 +189,7 @@ export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
   const { messages, isLoading, sendMessage } = useChatStore();
   const haptic = useHaptic();
+  const keyboardHeight = useKeyboardHeight();
   
   const [inputValue, setInputValue] = useState('');
   const [isIncognito, setIsIncognito] = useState(false);
@@ -356,8 +394,14 @@ export function ChatPage() {
 
   return (
     <div 
-      className="fixed inset-0 max-w-[430px] mx-auto flex z-50"
-      style={{ backgroundColor: '#000000' }}
+      className="fixed max-w-[430px] mx-auto flex z-50"
+      style={{ 
+        backgroundColor: '#000000',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : 0
+      }}
     >
       {/* Sidebar Overlay */}
       {isSidebarOpen && (
@@ -633,7 +677,7 @@ export function ChatPage() {
           className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
-            paddingBottom: isInputFocused ? '8px' : 'calc(8px + env(safe-area-inset-bottom))',
+            paddingBottom: keyboardHeight > 0 ? '8px' : 'calc(8px + env(safe-area-inset-bottom))',
             backgroundColor: '#000000'
           }}
         >
