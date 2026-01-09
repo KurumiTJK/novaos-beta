@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// HOME COMPONENTS — Barrel Export
+// HOME COMPONENTS EXPORTS — NovaOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export { LessonsTab } from './LessonsTab';

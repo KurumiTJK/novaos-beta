@@ -22,14 +22,47 @@ export interface Message {
   actionTaken?: 'confirmed' | 'cancelled';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────
+// SHIELD TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type ShieldDomain = 
+  | 'self_harm' 
+  | 'crisis' 
+  | 'dangerous_activity'
+  | 'medical'
+  | 'legal'
+  | 'financial'
+  | 'substance';
+
+export interface ShieldActivation {
+  activationId: string;
+  domain: ShieldDomain;
+  severity: 'low' | 'medium' | 'high';
+  warningMessage: string;
+  requiresConfirmation?: boolean;
+  buttons?: {
+    confirm?: string;
+    cancel?: string;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// CHAT RESPONSE
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export interface ChatResponse {
   response: string;
   stance: Stance;
-  status: 'completed' | 'stopped' | 'error' | 'pending_confirmation';
+  status: 'completed' | 'stopped' | 'error' | 'pending_confirmation' | 'redirect' | 'blocked';
   conversationId: string;
   isNewConversation: boolean;
   // SwordGate confirmation
   pendingAction?: PendingAction;
+  // Shield activation
+  shieldActivation?: ShieldActivation;
+  // SwordGate redirect
+  redirect?: SwordRedirect;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -121,11 +154,6 @@ export interface SwordState {
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // LESSON TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-// TODO: These types should match backend responses from:
-//   - GET /api/v1/sword/today
-//   - GET /api/v1/sword/lessons
-// ═══════════════════════════════════════════════════════════════════════════════
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export type LessonStatus = 'locked' | 'available' | 'in_progress' | 'completed';
@@ -167,24 +195,3 @@ export interface LearningStats {
   currentStreak: number;
   sparksCompletedToday: number;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TODO: Add these types when wiring to backend TodayResponse
-// 
-// export interface TodayResponse {
-//   plan: LessonPlan;
-//   currentNode: Node;
-//   nodeProgress: NodeProgress;
-//   sessionNumber: number;
-//   totalSessions: number;
-//   dailyPlan: DailyPlan;
-//   isRefreshSession: boolean;
-//   refreshReason?: string;
-//   hasOtherInProgress?: { nodeId: string; nodeTitle: string; sessionNumber: number };
-//   completedNodes: number;
-//   totalNodes: number;
-//   nextAvailableNodes: Array<{ id: string; title: string; route: string }>;
-//   methodNodeDue: boolean;
-//   nextMethodNodeType?: string;
-// }
-// ═══════════════════════════════════════════════════════════════════════════════

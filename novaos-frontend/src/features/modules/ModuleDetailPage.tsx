@@ -198,11 +198,9 @@ function LearningModuleDetail({ onClose }: { onClose: () => void }) {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 function StandardModuleDetail({ 
-  module, 
   data, 
   onClose 
 }: { 
-  module: ModuleType; 
   data: ModuleData; 
   onClose: () => void;
 }) {
@@ -289,5 +287,5 @@ export function ModuleDetailPage() {
   const data = moduleData[activeModule];
   if (!data) return null;
 
-  return <StandardModuleDetail module={activeModule} data={data} onClose={handleClose} />;
+  return <StandardModuleDetail data={data} onClose={handleClose} />;
 }

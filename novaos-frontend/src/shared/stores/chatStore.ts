@@ -1,59 +1,115 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CHAT STORE — Novaux
-// With SwordGate confirmation handling
+// CHAT STORE — NovaOS
+// Fixed to match existing ChatPage interface + added shield/stance support
+// + SwordGate redirect handling
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
 import { sendMessage as sendMessageApi } from '../api/chat';
 import { useUIStore } from './uiStore';
-import type { Message, PendingAction } from '../types';
+import type { Message as MessageType, Stance, ShieldActivation, SwordRedirect } from '../types';
 
-interface ChatStore {
-  messages: Message[];
+// ─────────────────────────────────────────────────────────────────────────────────
+// RE-EXPORT TYPES FOR CONSUMERS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type { MessageType as Message };
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// STORE INTERFACE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ChatState {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  messages: MessageType[];
+  conversationId: string | null;
   isLoading: boolean;
   error: string | null;
-  conversationId: string | null;
   
-  // Actions
+  /** Current stance */
+  currentStance: Stance | null;
+  
+  /** Shield activation (if any) */
+  shieldActivation: ShieldActivation | null;
+  isShieldOverlayOpen: boolean;
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ACTIONS
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /** Send a message */
   sendMessage: (content: string) => Promise<void>;
-  clearMessages: () => void;
-  startNewConversation: () => void;
   
-  // Confirmation actions
+  /** Confirm pending action */
   confirmPendingAction: (messageId: string) => void;
+  
+  /** Cancel pending action */
   cancelPendingAction: (messageId: string) => void;
+  
+  /** Clear all messages */
+  clearMessages: () => void;
+  
+  /** Set conversation ID */
+  setConversationId: (id: string | null) => void;
+  
+  /** Handle shield confirmation */
+  handleShieldConfirm: (response: string) => void;
+  
+  /** Handle shield cancel */
+  handleShieldCancel: () => void;
+  
+  /** Dismiss error */
+  dismissError: () => void;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────────
 
 function generateId(): string {
-  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export const useChatStore = create<ChatStore>((set, get) => ({
+// ─────────────────────────────────────────────────────────────────────────────────
+// STORE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
+  conversationId: null,
   isLoading: false,
   error: null,
-  conversationId: null,
+  currentStance: null,
+  shieldActivation: null,
+  isShieldOverlayOpen: false,
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SEND MESSAGE
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   sendMessage: async (content: string) => {
-    const { messages, conversationId } = get();
+    const { conversationId, messages } = get();
     
     // Add user message
-    const userMessage: Message = {
+    const userMessage: MessageType = {
       id: generateId(),
       role: 'user',
       content,
       timestamp: new Date(),
     };
     
-    // Add loading message
-    const loadingMessage: Message = {
+    // Add loading message (assistant typing)
+    const loadingMessage: MessageType = {
       id: generateId(),
       role: 'assistant',
       content: '',
       timestamp: new Date(),
       isLoading: true,
     };
-
+    
     set({
       messages: [...messages, userMessage, loadingMessage],
       isLoading: true,
@@ -61,95 +117,217 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
 
     try {
+      // Call API with correct format
       const response = await sendMessageApi({
         message: content,
         newConversation: !conversationId,
       });
-
-      // Create assistant message
-      const assistantMessage: Message = {
+      
+      // ─────────────────────────────────────────────────────────────────────────
+      // CHECK FOR SHIELD ACTIVATION
+      // ─────────────────────────────────────────────────────────────────────────
+      if (response.shieldActivation) {
+        set({
+          isLoading: false,
+          shieldActivation: response.shieldActivation,
+          isShieldOverlayOpen: true,
+          // Remove loading message but keep user message
+          messages: get().messages.filter(m => !m.isLoading),
+        });
+        return;
+      }
+      
+      // ─────────────────────────────────────────────────────────────────────────
+      // CHECK FOR SWORDGATE REDIRECT
+      // ─────────────────────────────────────────────────────────────────────────
+      if (response.status === 'redirect' && response.redirect) {
+        const redirect = response.redirect as SwordRedirect;
+        
+        // Add confirmation message before redirecting
+        const confirmMessage: MessageType = {
+          id: generateId(),
+          role: 'assistant',
+          content: redirect.mode === 'designer'
+            ? `I'd love to help you learn ${redirect.topic || 'that'}! Would you like me to create a personalized learning plan?`
+            : `Let's continue with your learning plan!`,
+          timestamp: new Date(),
+          stance: 'sword',
+          pendingAction: {
+            type: 'sword_redirect',
+            redirect,
+            confirmText: 'Yes, let\'s go!',
+            cancelText: 'Not now',
+          },
+        };
+        
+        set({
+          messages: get().messages
+            .filter(m => !m.isLoading)
+            .concat(confirmMessage),
+          conversationId: response.conversationId || conversationId,
+          currentStance: 'sword',
+          isLoading: false,
+        });
+        return;
+      }
+      
+      // ─────────────────────────────────────────────────────────────────────────
+      // NORMAL RESPONSE
+      // ─────────────────────────────────────────────────────────────────────────
+      const assistantMessage: MessageType = {
         id: generateId(),
         role: 'assistant',
         content: response.response,
         timestamp: new Date(),
         stance: response.stance,
+        pendingAction: response.pendingAction,
       };
-
-      // ─────────────────────────────────────────────────────────────────────────
-      // HANDLE PENDING CONFIRMATION
-      // When backend detects learning intent, it returns a pending action
-      // that requires user confirmation before navigating
-      // ─────────────────────────────────────────────────────────────────────────
-      if (response.status === 'pending_confirmation' && response.pendingAction) {
-        assistantMessage.pendingAction = response.pendingAction;
-      }
-
-      // Remove loading message and add real response
-      set((state) => ({
-        messages: state.messages
-          .filter((m) => !m.isLoading)
+      
+      set({
+        messages: get().messages
+          .filter(m => !m.isLoading)
           .concat(assistantMessage),
+        conversationId: response.conversationId || conversationId,
+        currentStance: response.stance || null,
         isLoading: false,
-        conversationId: response.conversationId,
-      }));
+      });
     } catch (error) {
-      // Remove loading message on error
-      set((state) => ({
-        messages: state.messages.filter((m) => !m.isLoading),
+      console.error('[CHAT] Send failed:', error);
+      
+      set({
+        messages: get().messages.filter(m => !m.isLoading),
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to send message',
-      }));
+      });
     }
   },
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // CONFIRMATION ACTIONS
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * User clicked "Yes" - execute the pending action
-   */
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONFIRM PENDING ACTION
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   confirmPendingAction: (messageId: string) => {
-    const { messages } = get();
-    const message = messages.find(m => m.id === messageId);
+    const message = get().messages.find(m => m.id === messageId);
+    const pendingAction = message?.pendingAction;
     
-    if (!message?.pendingAction) return;
-    
-    const { pendingAction } = message;
-    
-    // Clear the pending action from the message
-    set((state) => ({
-      messages: state.messages.map(m => 
-        m.id === messageId 
-          ? { ...m, pendingAction: undefined, actionTaken: 'confirmed' as const }
-          : m
+    // Update message state
+    set({
+      messages: get().messages.map(msg =>
+        msg.id === messageId
+          ? { ...msg, pendingAction: undefined, actionTaken: 'confirmed' as const }
+          : msg
       ),
-    }));
+    });
     
-    // Execute the action based on type
-    if (pendingAction.type === 'sword_redirect') {
-      useUIStore.getState().openSword(pendingAction.redirect);
+    // ─────────────────────────────────────────────────────────────────────────
+    // HANDLE SWORDGATE REDIRECT
+    // ─────────────────────────────────────────────────────────────────────────
+    if (pendingAction?.type === 'sword_redirect' && pendingAction.redirect) {
+      const redirect = pendingAction.redirect;
+      
+      // Use setTimeout to allow UI to update before navigation
+      setTimeout(() => {
+        useUIStore.getState().openSword(redirect);
+      }, 300);
+      return;
     }
+    
+    // TODO: Handle other action types
+    // api.post('/chat/confirm', { messageId });
   },
 
-  /**
-   * User clicked "No" - dismiss the pending action
-   */
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANCEL PENDING ACTION
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   cancelPendingAction: (messageId: string) => {
-    set((state) => ({
-      messages: state.messages.map(m => 
-        m.id === messageId 
-          ? { ...m, pendingAction: undefined, actionTaken: 'cancelled' as const }
-          : m
+    set({
+      messages: get().messages.map(msg =>
+        msg.id === messageId
+          ? { ...msg, pendingAction: undefined, actionTaken: 'cancelled' as const }
+          : msg
       ),
-    }));
+    });
   },
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLEAR MESSAGES
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   clearMessages: () => {
-    set({ messages: [], error: null });
+    set({
+      messages: [],
+      conversationId: null,
+      error: null,
+      currentStance: null,
+      shieldActivation: null,
+      isShieldOverlayOpen: false,
+    });
   },
 
-  startNewConversation: () => {
-    set({ messages: [], conversationId: null, error: null });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SET CONVERSATION ID
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  setConversationId: (id: string | null) => {
+    set({ conversationId: id });
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SHIELD CONFIRM
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  handleShieldConfirm: (response: string) => {
+    const assistantMessage: MessageType = {
+      id: generateId(),
+      role: 'assistant',
+      content: response,
+      timestamp: new Date(),
+      stance: 'shield',
+    };
+    
+    set({
+      messages: [...get().messages, assistantMessage],
+      shieldActivation: null,
+      isShieldOverlayOpen: false,
+      currentStance: 'shield',
+    });
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SHIELD CANCEL
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  handleShieldCancel: () => {
+    // Remove the last user message (that triggered shield)
+    const messages = get().messages;
+    const withoutLastUser = messages.slice(0, -1);
+    
+    set({
+      messages: withoutLastUser,
+      shieldActivation: null,
+      isShieldOverlayOpen: false,
+    });
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DISMISS ERROR
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  dismissError: () => {
+    set({ error: null });
   },
 }));
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SELECTORS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export const selectLastMessage = (state: ChatState) => 
+  state.messages[state.messages.length - 1];
+
+export const selectHasMessages = (state: ChatState) => 
+  state.messages.length > 0;
+
+export const selectIsShieldActive = (state: ChatState) => 
+  state.isShieldOverlayOpen && state.shieldActivation !== null;
