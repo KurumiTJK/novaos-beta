@@ -229,7 +229,14 @@ export function ChatPage() {
   // FIX: Scroll to bottom on initial mount (instant, no animation)
   useEffect(() => {
     const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
+      const container = messagesContainerRef.current;
+      if (container) {
+        const messageElements = container.querySelectorAll('[data-message]');
+        if (messageElements.length > 0) {
+          const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
+          lastMessage.scrollIntoView({ behavior: 'instant', block: 'end' });
+        }
+      }
     }, 50);
     return () => clearTimeout(timer);
   }, []);
@@ -239,11 +246,22 @@ export function ChatPage() {
     const container = messagesContainerRef.current;
     if (!container) return;
     
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+    // Find the last message element
+    const messageElements = container.querySelectorAll('[data-message]');
+    if (messageElements.length === 0) {
+      setShowScrollButton(false);
+      return;
+    }
     
-    setShowScrollButton(!isAtBottom);
-    userScrolledRef.current = !isAtBottom;
+    const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
+    const containerRect = container.getBoundingClientRect();
+    const lastMsgRect = lastMessage.getBoundingClientRect();
+    
+    // Show button if bottom of last message is below the visible area
+    const lastMsgBottomVisible = lastMsgRect.bottom <= containerRect.bottom + 50;
+    
+    setShowScrollButton(!lastMsgBottomVisible);
+    userScrolledRef.current = !lastMsgBottomVisible;
   }, []);
 
   // Handle scroll events
@@ -260,22 +278,29 @@ export function ChatPage() {
     checkScrollPosition();
   }, [messages, checkScrollPosition]);
 
-  // Scroll to bottom function
+  // Scroll to bottom function - scrolls to last message
   const scrollToBottom = useCallback(() => {
     haptic('light');
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const container = messagesContainerRef.current;
+    if (container) {
+      const messageElements = container.querySelectorAll('[data-message]');
+      if (messageElements.length > 0) {
+        const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
+        lastMessage.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
     setShowScrollButton(false);
     userScrolledRef.current = false;
   }, [haptic]);
 
   // Dynamic bottom padding - just enough to scroll last message to top
-  const [bottomPadding, setBottomPadding] = useState(0);
+  const [bottomPadding, setBottomPadding] = useState(500); // Start with enough padding
   const [debugPadding, setDebugPadding] = useState('');
   
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container || messages.length === 0) {
-      setBottomPadding(0);
+      setBottomPadding(500); // Keep padding for scroll room
       return;
     }
     
@@ -312,8 +337,8 @@ export function ChatPage() {
       }
     };
     
-    // Calculate after DOM settles
-    const timer = setTimeout(calculatePadding, 300);
+    // Calculate quickly after DOM updates
+    const timer = setTimeout(calculatePadding, 150);
     
     return () => clearTimeout(timer);
   }, [messages, typingMessageIds.size, bottomPadding]);
@@ -321,17 +346,23 @@ export function ChatPage() {
   // Scroll to position user message at top of viewport
   useEffect(() => {
     if (shouldScrollToUser) {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          if (lastUserMessageRef.current) {
-            lastUserMessageRef.current.scrollIntoView({ 
+      // Wait for DOM update and padding calculation
+      setTimeout(() => {
+        const container = messagesContainerRef.current;
+        if (container) {
+          // Find all user messages and get the last one
+          const userMessages = container.querySelectorAll('[data-user-message="true"]');
+          const lastUserMsg = userMessages[userMessages.length - 1] as HTMLElement;
+          
+          if (lastUserMsg) {
+            lastUserMsg.scrollIntoView({ 
               behavior: 'smooth', 
               block: 'start' 
             });
           }
-          setShouldScrollToUser(false);
-        }, 100);
-      });
+        }
+        setShouldScrollToUser(false);
+      }, 300);
     }
   }, [shouldScrollToUser, messages]);
 
@@ -659,6 +690,7 @@ export function ChatPage() {
                 className="mb-5"
                 ref={isLastUserMessage ? lastUserMessageRef : null}
                 data-message="true"
+                data-user-message={message.role === 'user' ? 'true' : undefined}
               >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
