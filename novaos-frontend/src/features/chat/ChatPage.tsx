@@ -268,8 +268,9 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Calculate bottom padding needed to scroll last message to top
+  // Calculate bottom padding needed to scroll last message to top (but no further)
   const [bottomPadding, setBottomPadding] = useState(0);
+  const [debugPadding, setDebugPadding] = useState('');
   
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -278,24 +279,32 @@ export function ChatPage() {
       return;
     }
     
-    // Wait for DOM to update
+    // Wait for DOM to update (longer delay to catch typing completion)
     const timer = setTimeout(() => {
       const containerHeight = container.clientHeight;
       
       // Find the last message element
       const messageElements = container.querySelectorAll('[data-message]');
+      if (messageElements.length === 0) {
+        setBottomPadding(0);
+        return;
+      }
+      
       const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
       
       if (lastMessage) {
-        // Padding = container height - last message height - small buffer
-        const lastMessageHeight = lastMessage.offsetHeight;
-        const neededPadding = Math.max(0, containerHeight - lastMessageHeight - 40);
+        // Padding = just enough so last message can scroll to top
+        // = viewport height - last message height - small top margin
+        const lastMsgHeight = lastMessage.offsetHeight;
+        const neededPadding = Math.max(0, containerHeight - lastMsgHeight - 24);
+        
+        setDebugPadding(`ch=${containerHeight}, lmh=${lastMsgHeight}, pad=${neededPadding}`);
         setBottomPadding(neededPadding);
       }
-    }, 50);
+    }, 150);
     
     return () => clearTimeout(timer);
-  }, [messages]);
+  }, [messages, typingMessageIds.size]); // Recalculate when typing state changes
 
   // Scroll to position user message at top of viewport
   useEffect(() => {
@@ -623,6 +632,10 @@ export function ChatPage() {
         >
           {/* Messages wrapper - dynamic bottom padding allows scrolling last message to top */}
           <div className="px-5 pt-5" style={{ paddingBottom: bottomPadding }}>
+          {/* DEBUG */}
+          <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
+            {debugPadding}
+          </div>
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
             const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
