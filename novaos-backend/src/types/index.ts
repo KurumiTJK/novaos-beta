@@ -30,6 +30,8 @@ export interface IntentSummary {
   live_data: boolean;
   external_tool: boolean;
   learning_intent: boolean;
+  /** Topic extracted from user message (e.g., "suicidal thoughts", "career change") */
+  topic?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────

@@ -164,6 +164,7 @@ export async function generateSpark(userId: string): Promise<GenerateSparkResult
   }
   
   // Store spark in DB
+  // Note: sparkContent.task is guaranteed to be a string here (validated above or from fallback)
   const { data: row, error } = await supabase
     .from('sparks')
     .insert({
@@ -172,7 +173,7 @@ export async function generateSpark(userId: string): Promise<GenerateSparkResult
       subskill_id: currentSubskill.id,
       daily_lesson_id: dailyLessonId || null,
       session_number: sessionNumber,
-      task: sparkContent.task,
+      task: sparkContent.task ?? 'Complete a quick review task',
       context: sparkContent.context || null,
       estimated_minutes: sparkContent.estimatedMinutes,
       status: 'active',
@@ -205,7 +206,7 @@ function generateFallbackSpark(subskillTitle: string, sessionGoal?: string): Spa
     `Sketch a quick diagram or mind map of ${subskillTitle} concepts.`,
   ];
   
-  const task = tasks[Math.floor(Math.random() * tasks.length)];
+  const task = tasks[Math.floor(Math.random() * tasks.length)] ?? tasks[0]!;
   
   return {
     task,

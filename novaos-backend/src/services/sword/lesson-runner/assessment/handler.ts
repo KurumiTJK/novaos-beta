@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { getSupabase } from '../../../../db/index.js';
-import { SwordGateLLM } from '../llm/swordgate-llm.js';
+import { SwordGateLLM } from '../../llm/swordgate-llm.js';
 import type { PlanSubskill, LessonPlan } from '../../types.js';
 import { mapPlanSubskill, mapLessonPlan } from '../../types.js';
 import type {

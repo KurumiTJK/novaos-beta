@@ -11,6 +11,7 @@ import type {
   GateResult,
   SwordContext,
   ShieldContext,
+  ConversationMessage,
 } from '../../types/index.js';
 
 import { PERSONALITY_DESCRIPTORS } from './personality_descriptor.js';
@@ -36,6 +37,27 @@ import { formatOutput } from './formatters/markdown.formatter.js';
 // ─────────────────────────────────────────────────────────────────────────────────
 
 const DEBUG = process.env.DEBUG_RESPONSE_GATE === 'true';
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// VERIFIED FACTS EXTRACTOR
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract verified facts from conversation history.
+ * These are assistant messages that were generated using grounded search (liveData: true).
+ * Used to prevent subsequent responses from contradicting verified information.
+ */
+function extractVerifiedFacts(history?: readonly ConversationMessage[]): string[] {
+  if (!history?.length) return [];
+  
+  const verified: string[] = [];
+  for (const msg of history) {
+    if (msg.role === 'assistant' && msg.metadata?.liveData === true) {
+      verified.push(msg.content);
+    }
+  }
+  return verified;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PROVIDER EXECUTORS REGISTRY
@@ -69,7 +91,8 @@ For lists, use simple dashes on new lines.`,
 function buildSystemPrompt(
   personality: Personality, 
   swordContext?: SwordContext,
-  shieldContext?: ShieldContext
+  shieldContext?: ShieldContext,
+  conversationHistory?: readonly ConversationMessage[]
 ): string {
   const parts: string[] = [];
 
@@ -77,11 +100,43 @@ function buildSystemPrompt(
   parts.push(`ROLE: ${personality.role}`);
   parts.push(`TONE: ${personality.tone}`);
   parts.push(`DESCRIPTORS: ${personality.descriptors}`);
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // CONVERSATION CONTINUITY — Verified Facts Injection
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // When prior messages used grounded search (liveData: true), inject those facts
+  // explicitly to prevent the model from contradicting verified information.
+  
   parts.push('');
   parts.push('CONVERSATION CONTINUITY:');
   parts.push('Your previous responses in this conversation that contain specific data (prices, statistics, facts, dates) were based on verified real-time sources at that moment.');
   parts.push('Do not contradict or disclaim your own previous statements with phrases like "I don\'t have access to real-time data."');
-  parts.push('If asked follow-up questions, build on what you already provided. The data may be slightly stale, but it was accurate when you stated it.');
+  parts.push('If asked follow-up questions, build on what you already provided.');
+
+  const verifiedFacts = extractVerifiedFacts(conversationHistory);
+
+  if (verifiedFacts.length > 0) {
+    parts.push('');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+    parts.push('VERIFIED FACTS FROM THIS CONVERSATION (from real-time search):');
+    parts.push('═══════════════════════════════════════════════════════════════════');
+    parts.push('The following previous responses were generated using live web search and contain verified information.');
+    parts.push('DO NOT contradict, disclaim, or cast doubt on these facts.');
+    parts.push('');
+    verifiedFacts.forEach((fact, i) => {
+      parts.push(`[Verified Response ${i + 1}]:`);
+      parts.push(fact);
+      parts.push('');
+    });
+    parts.push('═══════════════════════════════════════════════════════════════════');
+  }
+
+  parts.push('');
+  parts.push('RULES:');
+  parts.push('- Never say "I don\'t have access to real-time data" if you already provided that data in this conversation');
+  parts.push('- Never contradict your own previous verified statements');
+  parts.push('- If user thanks you or acknowledges info, accept gracefully without disclaimers');
+  parts.push('- Build on established facts; do not walk them back');
 
   // ═══════════════════════════════════════════════════════════════════════════════
   // SHIELD CONTEXT INJECTION — User acknowledged risk warning
@@ -201,7 +256,12 @@ export function stitchPrompt(
   // Get ShieldContext from pipeline context (set by /shield/confirm)
   const shieldContext = context?.shieldContext;
 
-  const system = buildSystemPrompt(personality, swordContext, shieldContext);
+  const system = buildSystemPrompt(
+    personality, 
+    swordContext, 
+    shieldContext,
+    context?.conversationHistory
+  );
   const user = buildUserPrompt(state.userMessage, topic);
 
   return { system, user };
@@ -250,7 +310,7 @@ export async function executeResponseGateAsync(
     };
   }
 
-  // Build prompts (now includes SwordContext and ShieldContext if present)
+  // Build prompts (now includes SwordContext, ShieldContext, and verified facts if present)
   const { system, user } = stitchPrompt(state, context, config);
 
   if (DEBUG) {
@@ -268,6 +328,12 @@ export async function executeResponseGateAsync(
   if (state.stanceResult?.swordContext?.hasActivePlan) {
     console.log(`[RESPONSE] SwordContext injected: "${state.stanceResult.swordContext.currentNode?.title}" ` +
       `(session ${state.stanceResult.swordContext.currentNode?.sessionNumber})`);
+  }
+
+  // Log if verified facts are being injected
+  const verifiedCount = extractVerifiedFacts(context.conversationHistory).length;
+  if (verifiedCount > 0) {
+    console.log(`[RESPONSE] Verified facts injected: ${verifiedCount} previous response(s)`);
   }
 
   console.log(`[RESPONSE] provider: ${provider}`);
