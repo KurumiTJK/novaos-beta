@@ -4,7 +4,6 @@
 
 export { OrientPhase } from './OrientPhase';
 export { ClarifyPhase } from './ClarifyPhase';
-export { CapstonePhase } from './CapstonePhase';
-export { SubskillsPhase } from './SubskillsPhase';
-export { RoutingPhase } from './RoutingPhase';
-export { CompletePhase } from './CompletePhase';
+export { GoalPhase } from './GoalPhase';
+export { SkillsPhase } from './SkillsPhase';
+export { PathPhase } from './PathPhase';

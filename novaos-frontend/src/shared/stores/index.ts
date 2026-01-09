@@ -32,6 +32,7 @@ export {
   useSwordDesignerStore,
   selectPhaseIndex,
   selectIsPhaseComplete,
+  selectPhaseLabel,
   type DesignerPhase,
   type OrientMessage,
 } from './swordDesignerStore';

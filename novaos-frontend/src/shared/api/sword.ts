@@ -58,20 +58,42 @@ export interface ExplorationChatResponse {
   state: ExplorationState;
 }
 
+export interface ExplorationData {
+  messages?: Array<{ role: string; content: string }>;
+  learningGoal?: string;
+  priorKnowledge?: string;
+  context?: string;
+  constraints?: string[];
+  readyForCapstone?: boolean;
+}
+
+// Constraints in ClarifyData is always string[] (tags like "30 min/day", "4 weeks")
 export interface ClarifyData {
   learningGoal: string;
   priorKnowledge: string;
   context: string;
-  constraints: {
-    dailyMinutes: number;
-    totalWeeks: number;
-    preferredStyle: string;
-  };
+  constraints: string[];
+}
+
+// The structured constraints object (used elsewhere)
+export interface StructuredConstraints {
+  dailyMinutes: number;
+  totalWeeks: number;
+  preferredStyle: string;
 }
 
 export interface ClarifyResponse {
   data: ClarifyData;
   canFinalize: boolean;
+  // Extended fields from backend (same as ClarifyData for direct access)
+  learningGoal?: string;
+  priorKnowledge?: string;
+  context?: string;
+  constraints?: string[];
+  // Extraction metadata
+  extracted?: ClarifyData;
+  fieldSources?: Record<string, string>;
+  missing?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -80,28 +102,60 @@ export interface ClarifyResponse {
 
 export type DesignerPhase = 
   | 'exploration' 
+  | 'orient'
   | 'clarify' 
   | 'capstone' 
   | 'subskills' 
+  | 'skills'
   | 'routing' 
+  | 'path'
+  | 'review'
   | 'complete';
+
+export interface CapstoneData {
+  title?: string;
+  description?: string;
+  capstoneStatement?: string;
+  successCriteria?: string[];
+}
+
+export interface SubskillsData {
+  subskills?: Subskill[];
+  totalSessions?: number;
+  estimatedWeeks?: number;
+}
+
+export interface RoutingData {
+  assignments?: SubskillRouting[];
+}
 
 export interface DesignerSession {
   id: string;
   userId: string;
   phase: DesignerPhase;
+  // Phase tracking
+  internalPhase?: string;
+  visiblePhase?: string;
+  // Basic fields
   topic?: string;
   learningGoal?: string;
   priorKnowledge?: string;
   context?: string;
-  constraints?: {
-    dailyMinutes: number;
-    totalWeeks: number;
-    preferredStyle: string;
-  };
+  constraints?: string[];
+  // Nested data from backend
+  explorationData?: ExplorationData;
+  clarifyData?: ClarifyData;
+  capstoneData?: CapstoneData;
   capstone?: Capstone;
+  subskillsData?: SubskillsData;
   subskills?: Subskill[];
+  routingData?: RoutingData;
   routing?: SubskillRouting[];
+  // Review data
+  totalSessions?: number;
+  estimatedWeeks?: number;
+  estimatedTimeDisplay?: string;
+  // Timestamps
   createdAt: string;
   updatedAt: string;
 }
@@ -115,18 +169,22 @@ export interface Capstone {
 
 export interface Subskill {
   id: string;
+  planId?: string;
   title: string;
   description: string;
   order: number;
-  status: 'locked' | 'available' | 'in_progress' | 'completed';
+  status: 'pending' | 'locked' | 'available' | 'active' | 'in_progress' | 'completed' | 'mastered' | 'skipped';
+  route?: 'recall' | 'practice' | 'build' | 'tutorial' | 'project' | 'assessment';
   progress: number;
   totalSessions: number;
-  completedSessions: number;
+  completedSessions?: number;
+  sessionsCompleted?: number;
+  estimatedSessions?: number;
 }
 
 export interface SubskillRouting {
   subskillId: string;
-  route: 'tutorial' | 'practice' | 'project' | 'assessment';
+  route: 'tutorial' | 'practice' | 'project' | 'assessment' | 'recall' | 'build';
   order: number;
 }
 
@@ -167,6 +225,8 @@ export interface MasteryQuestion {
   question: string;
   options: string[];
   correctIndex: number;
+  correctAnswer?: string;
+  explanation?: string;
 }
 
 export interface SubskillProgress {
@@ -247,12 +307,18 @@ export interface LearningPlan {
   id: string;
   userId: string;
   title: string;
-  capstone: Capstone;
-  subskills: Subskill[];
+  capstone?: Capstone;
+  subskills?: Subskill[];
   status: 'active' | 'paused' | 'completed' | 'abandoned';
-  progress: number;
+  progress?: number;
   createdAt: string;
   updatedAt: string;
+  // Extended fields
+  capstoneStatement?: string;
+  estimatedTimeDisplay?: string;
+  estimatedWeeks?: number;
+  estimatedSessions?: number;
+  totalSubskills?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -271,6 +337,185 @@ export interface AssessmentResult {
   skipToSession?: number;
 }
 
+export interface KnowledgeCheck {
+  id: string;
+  subskillId: string;
+  questions: MasteryQuestion[];
+  passingScore: number;
+}
+
+export interface KnowledgeCheckResult {
+  passed: boolean;
+  score: number;
+  correctCount: number;
+  totalQuestions: number;
+  feedback?: string;
+  needsRemediation?: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// Daily Lesson Types (NEW)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export type ActivityType = 'read' | 'watch' | 'exercise' | 'practice' | 'build' | 'quiz';
+
+export interface LessonSection {
+  title: string;
+  content: string;
+  bulletPoints?: string[];
+}
+
+export interface Activity {
+  id: string;
+  type: ActivityType;
+  title: string;
+  estimatedMinutes: number;
+  completed: boolean;
+  completedAt?: string;
+  
+  // Read
+  explanation?: string;
+  article?: { title: string; url: string; snippet?: string };
+  
+  // Watch
+  video?: { 
+    title: string; 
+    url: string; 
+    thumbnailUrl?: string;
+    channelName?: string;
+    duration?: string;
+    viewCount?: number;
+  };
+  focusPoints?: string[];
+  
+  // Exercise
+  prompt?: string;
+  expectedOutcome?: string;
+  hints?: string[];
+  solution?: string;
+  
+  // Practice
+  steps?: string[];
+  checklist?: string[];
+  tips?: string[];
+  
+  // Build
+  objective?: string;
+  requirements?: string[];
+  guidance?: string[];
+  
+  // Quiz
+  questions?: Array<{
+    id: string;
+    question: string;
+    options: string[];
+    correctAnswer: string;
+    explanation?: string;
+  }>;
+}
+
+export interface DailyLesson {
+  id: string;
+  subskillId: string;
+  lessonPlanId?: string;
+  userId?: string;
+  sessionNumber: number;
+  sessionGoal?: string;
+  content?: LessonSection[];
+  activities?: Activity[];
+  keyPoints?: string[];
+  generatedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface SessionSummary {
+  id: string;
+  subskillId: string;
+  dailyLessonId?: string;
+  userId?: string;
+  sessionNumber: number;
+  summary: string;
+  keyConcepts: string[];
+  createdAt?: string;
+}
+
+export interface SessionOutline {
+  sessionNumber: number;
+  title: string;
+  focus: string;
+  objectives?: string[];
+  estimatedMinutes: number;
+}
+
+export interface SubskillLessonPlan {
+  id: string;
+  subskillId: string;
+  planId: string;
+  learningObjectives?: string[];
+  prerequisites?: string[];
+  sessionOutline?: SessionOutline[];
+  isRemediationPlan?: boolean;
+  assessmentId?: string;
+  generatedAt?: string;
+  generationSource?: string;
+}
+
+export interface StartSubskillResult {
+  routeType: 'skip' | 'assess' | 'learn';
+  subskill: Subskill;
+  nextSubskill?: Subskill;
+  assessment?: InitialAssessment;
+  lessonPlan?: SubskillLessonPlan;
+}
+
+export interface StartSessionResult {
+  dailyLesson: DailyLesson;
+  previousSummaries?: SessionSummary[];
+  refreshContent?: RefreshContent;
+}
+
+export interface CompleteSessionResult {
+  subskill: Subskill;
+  sessionCompleted: number;
+  totalSessions: number;
+  isSubskillComplete: boolean;
+  isKnowledgeCheckNext: boolean;
+  isPlanComplete: boolean;
+  nextSubskill?: Subskill;
+}
+
+export interface RunnerStats {
+  totalPlans: number;
+  activePlan: boolean;
+  subskillsCompleted: number;
+  subskillsTotal: number;
+  subskillsInProgress: number;
+  sessionsCompletedTotal: number;
+  sessionsCompletedThisWeek: number;
+  currentStreak: number;
+  longestStreak: number;
+  totalMinutesLearned: number;
+  averageSessionMinutes: number;
+  knowledgeChecksPassed: number;
+  knowledgeChecksFailed: number;
+  averageScore: number;
+  // LearningStats compatibility fields (required for type compatibility)
+  totalPlansCompleted: number;
+  totalSubskillsCompleted: number;
+  sparksCompletedToday: number;
+}
+
+// Aliases for backwards compatibility
+export type GoalState = DesignerSession;
+export interface GoalGenerateResponse {
+  capstone: Capstone;
+  subskills?: Subskill[];
+  routing?: SubskillRouting[];
+}
+export type ReviewState = DesignerSession;
+export type ReviewConfirmResponse = { plan: LearningPlan };
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN STATE ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -288,6 +533,11 @@ export async function getSwordState(): Promise<SwordState> {
 export async function getToday(): Promise<TodayState> {
   return api.get<TodayState>('/sword/today');
 }
+
+/**
+ * Alias for getToday
+ */
+export const getTodayState = getToday;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPLORATION ENDPOINTS (Orient + Clarify)
@@ -343,9 +593,23 @@ export async function updateClarifyField(
  */
 export async function updateConstraints(
   sessionId: string,
-  constraints: Partial<ClarifyData['constraints']>
+  constraints: string[]
 ): Promise<ClarifyData> {
   return api.patch<ClarifyData>('/sword/explore/constraints', { sessionId, constraints });
+}
+
+/**
+ * POST /sword/explore/back - Go back to Orient
+ */
+export async function backToOrient(sessionId: string): Promise<{ success: boolean }> {
+  return api.post<{ success: boolean }>('/sword/explore/back', { sessionId });
+}
+
+/**
+ * POST /sword/explore/continue - Continue to Goal
+ */
+export async function continueToGoal(sessionId: string): Promise<{ success: boolean }> {
+  return api.post<{ success: boolean }>('/sword/explore/continue', { sessionId });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -395,10 +659,10 @@ export async function confirmRouting(sessionId: string): Promise<{ plan: Learnin
 }
 
 /**
- * GET /sword/designer/session - Get active designer session
+ * GET /sword/designer - Get active designer session
  */
 export async function getActiveSession(): Promise<DesignerSession | null> {
-  return api.get<DesignerSession | null>('/sword/designer/session');
+  return api.get<DesignerSession | null>('/sword/designer');
 }
 
 /**
@@ -409,10 +673,38 @@ export async function getSessions(): Promise<DesignerSession[]> {
 }
 
 /**
- * DELETE /sword/designer/session/:id - Delete a designer session
+ * DELETE /sword/designer - Delete current designer session
  */
-export async function deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
-  return api.delete<{ deleted: boolean }>(`/sword/designer/session/${sessionId}`);
+export async function deleteSession(): Promise<{ deleted: boolean }> {
+  return api.delete<{ deleted: boolean }>('/sword/designer');
+}
+
+/**
+ * GET /sword/goal - Get goal state
+ */
+export async function getGoalState(sessionId: string): Promise<GoalState> {
+  return api.get<GoalState>(`/sword/goal?sessionId=${sessionId}`);
+}
+
+/**
+ * POST /sword/goal/generate - Generate goal/capstone
+ */
+export async function generateGoal(sessionId: string): Promise<GoalGenerateResponse> {
+  return api.post<GoalGenerateResponse>('/sword/goal/generate', { sessionId });
+}
+
+/**
+ * GET /sword/review - Get review state
+ */
+export async function getReview(sessionId: string): Promise<ReviewState> {
+  return api.get<ReviewState>(`/sword/review?sessionId=${sessionId}`);
+}
+
+/**
+ * POST /sword/review/confirm - Confirm review
+ */
+export async function confirmReview(sessionId: string): Promise<ReviewConfirmResponse> {
+  return api.post<ReviewConfirmResponse>('/sword/review/confirm', { sessionId });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -420,7 +712,7 @@ export async function deleteSession(sessionId: string): Promise<{ deleted: boole
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * POST /sword/runner/start - Start learning session
+ * POST /sword/runner/start - Start learning session (legacy)
  */
 export async function startRunner(subskillId: string): Promise<RunnerStartResponse> {
   return api.post<RunnerStartResponse>('/sword/runner/start', { subskillId });
@@ -496,6 +788,107 @@ export async function getRefreshContent(subskillId: string): Promise<RefreshCont
  */
 export async function skipRefresh(subskillId: string): Promise<{ skipped: boolean }> {
   return api.post<{ skipped: boolean }>(`/sword/runner/refresh/${subskillId}/skip`);
+}
+
+/**
+ * GET /sword/plans/:planId/subskills - Get all subskills for a plan
+ */
+export async function getRunnerSubskills(planId: string): Promise<Subskill[]> {
+  return api.get<Subskill[]>(`/sword/plans/${planId}/subskills`);
+}
+
+/**
+ * Alias for getRunnerSubskills
+ */
+export const getAllSubskills = getRunnerSubskills;
+
+/**
+ * GET /sword/runner/stats - Get runner statistics
+ * 
+ * NOTE: This endpoint does NOT exist on the backend.
+ * Use getToday() instead and derive stats from the response.
+ * 
+ * Stats can be derived from:
+ * - getToday().progress.streak → currentStreak
+ * - getToday().progress.completedToday → sparksCompletedToday
+ * - getPlans() + count completed subskills → totalSubskillsCompleted
+ */
+// export async function getStats(): Promise<RunnerStats> {
+//   return api.get<RunnerStats>('/sword/runner/stats');
+// }
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// NEW Daily Lesson Endpoints
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /sword/runner/subskill/:id/start - Start a subskill (generates lesson plan)
+ */
+export async function startSubskillLearning(subskillId: string): Promise<StartSubskillResult> {
+  return api.post<StartSubskillResult>(`/sword/runner/subskill/${subskillId}/start`);
+}
+
+/**
+ * POST /sword/runner/session/start - Start a daily session (generates lesson content)
+ */
+export async function startSession(subskillId: string): Promise<StartSessionResult> {
+  return api.post<StartSessionResult>('/sword/runner/session/start', { subskillId });
+}
+
+/**
+ * GET /sword/runner/session/:subskillId/:sessionNumber - Get cached session
+ */
+export async function getSession(
+  subskillId: string,
+  sessionNumber: number
+): Promise<DailyLesson | null> {
+  try {
+    return await api.get<DailyLesson>(`/sword/runner/session/${subskillId}/${sessionNumber}`);
+  } catch (err: any) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
+/**
+ * POST /sword/runner/session/regenerate - Regenerate a session
+ */
+export async function regenerateSession(
+  subskillId: string,
+  sessionNumber: number
+): Promise<DailyLesson> {
+  return api.post<DailyLesson>('/sword/runner/session/regenerate', { subskillId, sessionNumber });
+}
+
+/**
+ * POST /sword/runner/session/:id/complete - Complete a session
+ */
+export async function completeSession(dailyLessonId: string): Promise<CompleteSessionResult> {
+  return api.post<CompleteSessionResult>(`/sword/runner/session/${dailyLessonId}/complete`);
+}
+
+/**
+ * POST /sword/runner/session/:dailyLessonId/activity/:activityId/complete - Complete activity
+ */
+export async function completeActivity(
+  dailyLessonId: string,
+  activityId: string
+): Promise<{ completed: boolean }> {
+  return api.post<{ completed: boolean }>(
+    `/sword/runner/session/${dailyLessonId}/activity/${activityId}/complete`
+  );
+}
+
+/**
+ * GET /sword/runner/subskill-lesson-plan/:subskillId - Get subskill lesson plan
+ */
+export async function getSubskillLessonPlan(subskillId: string): Promise<SubskillLessonPlan | null> {
+  try {
+    return await api.get<SubskillLessonPlan>(`/sword/runner/subskill-lesson-plan/${subskillId}`);
+  } catch (err: any) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -582,7 +975,14 @@ export async function completePlan(planId: string): Promise<LearningPlan> {
 }
 
 /**
- * POST /sword/subskills/:id/start - Start a subskill
+ * DELETE /sword/plans/:id - Delete plan
+ */
+export async function deletePlan(planId: string): Promise<{ deleted: boolean }> {
+  return api.delete<{ deleted: boolean }>(`/sword/plans/${planId}`);
+}
+
+/**
+ * POST /sword/subskills/:id/start - Start a subskill (legacy)
  */
 export async function startSubskill(subskillId: string): Promise<Subskill> {
   return api.post<Subskill>(`/sword/subskills/${subskillId}/start`);
@@ -607,4 +1007,25 @@ export async function submitAssessment(
   answers: Record<string, number>
 ): Promise<AssessmentResult> {
   return api.post<AssessmentResult>('/sword/assess/submit', { subskillId, answers });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KNOWLEDGE CHECK ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /sword/runner/knowledge-check/:subskillId - Get knowledge check for subskill
+ */
+export async function getKnowledgeCheck(subskillId: string): Promise<KnowledgeCheck> {
+  return api.get<KnowledgeCheck>(`/sword/runner/knowledge-check/${subskillId}`);
+}
+
+/**
+ * POST /sword/runner/knowledge-check/:checkId/submit - Submit knowledge check answers
+ */
+export async function submitKnowledgeCheck(
+  checkId: string,
+  answers: Array<{ questionId: string; answer: string | string[] }>
+): Promise<KnowledgeCheckResult> {
+  return api.post<KnowledgeCheckResult>(`/sword/runner/knowledge-check/${checkId}/submit`, { answers });
 }

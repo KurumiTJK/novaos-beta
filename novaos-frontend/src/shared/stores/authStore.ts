@@ -12,6 +12,7 @@ import {
   clearToken, 
   onAuthLogout,
   getRefreshToken,
+  ApiError,
 } from '../api/client';
 import { register, getAuthStatus, logout as logoutApi } from '../api/auth';
 
@@ -77,9 +78,28 @@ export const useAuthStore = create<AuthStore>()(
               });
               return;
             }
-          } catch {
-            // Token invalid, clear it
+            // Status returned but not authenticated - clear and re-register
+            console.log('[AUTH] Token not authenticated, will re-register');
             clearToken();
+          } catch (error) {
+            // FIXED: Only clear token on actual auth failures (401/403)
+            // Don't clear on network errors or server errors - just use existing token
+            if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+              console.log('[AUTH] Token rejected by server, clearing');
+              clearToken();
+            } else {
+              // Network error or server error - keep the token and try to continue
+              console.warn('[AUTH] Could not verify token (network/server error), keeping existing token:', error);
+              set({
+                token: existingToken,
+                refreshToken: getRefreshToken(),
+                userId: null, // We don't know the userId but keep the token
+                tier: 'free',
+                isAuthenticated: true, // Assume authenticated, will fail on actual API calls if not
+                isLoading: false,
+              });
+              return;
+            }
           }
         }
 

@@ -129,7 +129,8 @@ interface PlanCardProps {
 }
 
 function PlanCard({ plan, onClick, isCompleted }: PlanCardProps) {
-  const progressPercent = Math.round(plan.progress * 100);
+  // Handle undefined progress
+  const progressPercent = Math.round((plan.progress ?? 0) * 100);
   
   return (
     <button

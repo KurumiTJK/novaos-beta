@@ -1,9 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MODULES FEATURE — Exports
+// MODULES COMPONENTS — Exports
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { ModulesPage } from './ModulesPage';
-export { ModuleDetailPage } from './ModuleDetailPage';
-
-// Components
-export { LearningModule, PlanCard } from './components';
+export { LearningModule } from './LearningModule';
+export { PlanCard } from './PlanCard';

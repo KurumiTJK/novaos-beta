@@ -25,9 +25,15 @@ export interface RefreshResponse {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export async function register(): Promise<RegisterResponse> {
-  const response = await api.post<RegisterResponse>('/auth/register', {}, { 
+  // Generate anonymous email for auto-registration
+  // Backend requires email field to create userId
+  const anonymousEmail = `anon_${Date.now()}_${Math.random().toString(36).slice(2)}@nova.local`;
+  
+  const response = await api.post<RegisterResponse>('/auth/register', {
+    email: anonymousEmail,
+  }, { 
     requiresAuth: false,
-    skipIdempotency: true, // Registration should be idempotent by nature
+    skipIdempotency: true,
   });
   
   // If response includes refresh token, store both

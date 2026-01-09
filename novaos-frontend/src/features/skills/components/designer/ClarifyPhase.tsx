@@ -1,14 +1,32 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CLARIFY PHASE — Edit learning details
 // User reviews and edits extracted information before plan generation
+// Constraints are now a string[] array
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState } from 'react';
 import { useSwordDesignerStore } from '@/shared/stores/swordDesignerStore';
 
+// Predefined constraint options
+const CONSTRAINT_PRESETS = [
+  '15 minutes per day',
+  '30 minutes per day',
+  '45 minutes per day',
+  '1 hour per day',
+  'Weekends only',
+  '2 weeks to complete',
+  '4 weeks to complete',
+  '8 weeks to complete',
+  '12 weeks to complete',
+  'Visual learning preferred',
+  'Hands-on learning preferred',
+  'Reading-based learning',
+];
+
 export function ClarifyPhase() {
   const {
     clarifyData,
+    fieldSources,
     canFinalize,
     isLoading,
     updateField,
@@ -17,6 +35,7 @@ export function ClarifyPhase() {
   } = useSwordDesignerStore();
 
   const [editingField, setEditingField] = useState<string | null>(null);
+  const [newConstraint, setNewConstraint] = useState('');
 
   if (!clarifyData) {
     return (
@@ -31,13 +50,32 @@ export function ClarifyPhase() {
     await finalizeClarify();
   };
 
+  const handleAddConstraint = (constraint: string) => {
+    if (!constraint.trim()) return;
+    const currentConstraints = clarifyData.constraints || [];
+    if (!currentConstraints.includes(constraint)) {
+      updateConstraintsAction([...currentConstraints, constraint]);
+    }
+    setNewConstraint('');
+  };
+
+  const handleRemoveConstraint = (constraint: string) => {
+    const currentConstraints = clarifyData.constraints || [];
+    updateConstraintsAction(currentConstraints.filter(c => c !== constraint));
+  };
+
+  // Get available presets (not already added)
+  const availablePresets = CONSTRAINT_PRESETS.filter(
+    p => !(clarifyData.constraints || []).includes(p)
+  );
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="px-5 py-3">
-        <h2 className="text-lg font-semibold text-white">Review Your Plan</h2>
+        <h2 className="text-lg font-semibold text-white">Clarify Your Learning</h2>
         <p className="text-sm text-white/50 mt-1">
-          Edit any details before we create your learning path
+          Fill in the details so we can create your personalized learning path
         </p>
       </div>
 
@@ -48,7 +86,9 @@ export function ClarifyPhase() {
           label="Learning Goal"
           value={clarifyData.learningGoal}
           placeholder="What do you want to achieve?"
+          source={fieldSources?.learningGoal}
           isEditing={editingField === 'learningGoal'}
+          isRequired={true}
           onStartEdit={() => setEditingField('learningGoal')}
           onSave={async (value) => {
             await updateField('learningGoal', value);
@@ -62,7 +102,9 @@ export function ClarifyPhase() {
           label="Your Experience"
           value={clarifyData.priorKnowledge}
           placeholder="What do you already know?"
+          source={fieldSources?.priorKnowledge}
           isEditing={editingField === 'priorKnowledge'}
+          isRequired={true}
           onStartEdit={() => setEditingField('priorKnowledge')}
           onSave={async (value) => {
             await updateField('priorKnowledge', value);
@@ -75,8 +117,10 @@ export function ClarifyPhase() {
         <EditableField
           label="Additional Context"
           value={clarifyData.context}
-          placeholder="Any other details?"
+          placeholder="Any other details? (career, school, hobby, etc.)"
+          source={fieldSources?.context}
           isEditing={editingField === 'context'}
+          isRequired={false}
           onStartEdit={() => setEditingField('context')}
           onSave={async (value) => {
             await updateField('context', value);
@@ -87,79 +131,64 @@ export function ClarifyPhase() {
 
         {/* Constraints */}
         <div className="bg-[#1C1C1E] rounded-2xl p-4">
-          <h3 className="text-sm font-medium text-white/70 mb-3">⏱️ Time Commitment</h3>
+          <h3 className="text-sm font-medium text-white/70 mb-3">⏱️ Constraints</h3>
           
-          <div className="space-y-4">
-            {/* Daily Minutes */}
-            <div>
-              <label className="text-xs text-white/50 mb-1 block">Minutes per day</label>
-              <div className="flex items-center gap-2">
-                {[15, 30, 45, 60].map((mins) => (
+          {/* Current constraints */}
+          {clarifyData.constraints && clarifyData.constraints.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {clarifyData.constraints.map((constraint, index) => (
+                <div
+                  key={index}
+                  className="flex items-center gap-1 bg-green-500/20 text-green-400 px-3 py-1.5 rounded-full text-sm"
+                >
+                  <span>{constraint}</span>
                   <button
-                    key={mins}
-                    onClick={() => updateConstraintsAction({ dailyMinutes: mins })}
-                    className={`
-                      flex-1 py-2 rounded-xl text-sm font-medium transition-all
-                      ${clarifyData.constraints.dailyMinutes === mins
-                        ? 'bg-green-500 text-black'
-                        : 'bg-white/5 text-white/70 active:bg-white/10'
-                      }
-                    `}
+                    onClick={() => handleRemoveConstraint(constraint)}
+                    className="ml-1 hover:text-green-200"
                   >
-                    {mins}
+                    ×
                   </button>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
+          )}
 
-            {/* Total Weeks */}
-            <div>
-              <label className="text-xs text-white/50 mb-1 block">Weeks to complete</label>
-              <div className="flex items-center gap-2">
-                {[2, 4, 8, 12].map((weeks) => (
-                  <button
-                    key={weeks}
-                    onClick={() => updateConstraintsAction({ totalWeeks: weeks })}
-                    className={`
-                      flex-1 py-2 rounded-xl text-sm font-medium transition-all
-                      ${clarifyData.constraints.totalWeeks === weeks
-                        ? 'bg-green-500 text-black'
-                        : 'bg-white/5 text-white/70 active:bg-white/10'
-                      }
-                    `}
-                  >
-                    {weeks}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Learning Style */}
-            <div>
-              <label className="text-xs text-white/50 mb-1 block">Preferred style</label>
-              <div className="flex items-center gap-2">
-                {[
-                  { value: 'visual', label: '👁️ Visual' },
-                  { value: 'reading', label: '📖 Reading' },
-                  { value: 'hands-on', label: '🛠️ Hands-on' },
-                ].map((style) => (
-                  <button
-                    key={style.value}
-                    onClick={() => updateConstraintsAction({ preferredStyle: style.value })}
-                    className={`
-                      flex-1 py-2 rounded-xl text-sm font-medium transition-all
-                      ${clarifyData.constraints.preferredStyle === style.value
-                        ? 'bg-green-500 text-black'
-                        : 'bg-white/5 text-white/70 active:bg-white/10'
-                      }
-                    `}
-                  >
-                    {style.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+          {/* Add constraint input */}
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={newConstraint}
+              onChange={(e) => setNewConstraint(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleAddConstraint(newConstraint)}
+              placeholder="Add a constraint..."
+              className="flex-1 bg-white/5 rounded-xl px-3 py-2 text-white text-sm placeholder-white/30 outline-none focus:ring-1 focus:ring-green-500/50"
+            />
+            <button
+              onClick={() => handleAddConstraint(newConstraint)}
+              disabled={!newConstraint.trim()}
+              className="px-4 py-2 bg-green-500/20 text-green-400 rounded-xl text-sm font-medium disabled:opacity-50"
+            >
+              Add
+            </button>
           </div>
+
+          {/* Preset buttons */}
+          {availablePresets.length > 0 && (
+            <div>
+              <p className="text-xs text-white/40 mb-2">Quick add:</p>
+              <div className="flex flex-wrap gap-2">
+                {availablePresets.slice(0, 6).map((preset) => (
+                  <button
+                    key={preset}
+                    onClick={() => handleAddConstraint(preset)}
+                    className="px-3 py-1.5 bg-white/5 text-white/70 rounded-full text-xs hover:bg-white/10 transition-colors"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -173,12 +202,17 @@ export function ClarifyPhase() {
           {isLoading ? (
             <span className="flex items-center justify-center gap-2">
               <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-              Generating capstone...
+              Generating plan...
             </span>
           ) : (
             'Continue'
           )}
         </button>
+        {!canFinalize && (
+          <p className="text-center text-white/40 text-xs mt-2">
+            Fill in <span className="text-white/60">Learning Goal</span> and <span className="text-white/60">Your Experience</span> to continue
+          </p>
+        )}
       </div>
     </div>
   );
@@ -192,7 +226,9 @@ interface EditableFieldProps {
   label: string;
   value: string;
   placeholder: string;
+  source?: string;
   isEditing: boolean;
+  isRequired?: boolean;
   onStartEdit: () => void;
   onSave: (value: string) => Promise<void>;
   onCancel: () => void;
@@ -202,7 +238,9 @@ function EditableField({
   label,
   value,
   placeholder,
+  source,
   isEditing,
+  isRequired = false,
   onStartEdit,
   onSave,
   onCancel,
@@ -225,10 +263,16 @@ function EditableField({
     onStartEdit();
   };
 
+  const isEmpty = !value || value.trim() === '';
+  const showRequiredBadge = isRequired && isEmpty;
+
   if (isEditing) {
     return (
       <div className="bg-[#1C1C1E] rounded-2xl p-4">
-        <label className="text-xs text-white/50 mb-2 block">{label}</label>
+        <div className="flex items-center gap-2 mb-2">
+          <label className="text-xs text-white/50">{label}</label>
+          {isRequired && <span className="text-[10px] text-red-400">*</span>}
+        </div>
         <textarea
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
@@ -260,16 +304,32 @@ function EditableField({
   return (
     <button
       onClick={handleStartEdit}
-      className="w-full bg-[#1C1C1E] rounded-2xl p-4 text-left active:bg-[#2C2C2E] transition-colors"
+      className={`w-full bg-[#1C1C1E] rounded-2xl p-4 text-left active:bg-[#2C2C2E] transition-colors ${
+        showRequiredBadge ? 'ring-1 ring-red-500/30' : ''
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
-          <label className="text-xs text-white/50 mb-1 block">{label}</label>
-          <p className={`text-sm ${value ? 'text-white' : 'text-white/30'}`}>
+          <div className="flex items-center gap-2 mb-1">
+            <label className="text-xs text-white/50">{label}</label>
+            {showRequiredBadge && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">
+                Required
+              </span>
+            )}
+            {source && !showRequiredBadge && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                source === 'extracted' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'
+              }`}>
+                {source === 'extracted' ? 'AI extracted' : 'Edited'}
+              </span>
+            )}
+          </div>
+          <p className={`text-sm ${value ? 'text-white' : 'text-white/30 italic'}`}>
             {value || placeholder}
           </p>
         </div>
-        <span className="text-white/30 text-sm">Edit</span>
+        <span className="text-white/30 text-sm">{value ? 'Edit' : 'Add'}</span>
       </div>
     </button>
   );

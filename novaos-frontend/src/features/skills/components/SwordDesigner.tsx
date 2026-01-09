@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORD DESIGNER — Create Learning Plan
-// Flow: Orient → Clarify → Capstone → Subskills → Routing → Complete
+// Flow: Orient → Clarify → Goal → Skills → Path
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useEffect } from 'react';
@@ -8,10 +8,9 @@ import { useUIStore } from '@/shared/stores';
 import { useSwordDesignerStore, selectPhaseIndex, type DesignerPhase } from '@/shared/stores/swordDesignerStore';
 import { OrientPhase } from './designer/OrientPhase';
 import { ClarifyPhase } from './designer/ClarifyPhase';
-import { CapstonePhase } from './designer/CapstonePhase';
-import { SubskillsPhase } from './designer/SubskillsPhase';
-import { RoutingPhase } from './designer/RoutingPhase';
-import { CompletePhase } from './designer/CompletePhase';
+import { GoalPhase } from './designer/GoalPhase';
+import { SkillsPhase } from './designer/SkillsPhase';
+import { PathPhase } from './designer/PathPhase';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // PHASE CONFIG
@@ -27,9 +26,9 @@ interface PhaseInfo {
 const PHASES: PhaseInfo[] = [
   { id: 'orient', title: 'Explore', shortTitle: 'Explore', icon: '💭' },
   { id: 'clarify', title: 'Clarify', shortTitle: 'Clarify', icon: '✏️' },
-  { id: 'capstone', title: 'Capstone', shortTitle: 'Goal', icon: '🎯' },
-  { id: 'subskills', title: 'Skills', shortTitle: 'Skills', icon: '🧩' },
-  { id: 'routing', title: 'Path', shortTitle: 'Path', icon: '🗺️' },
+  { id: 'goal', title: 'Goal', shortTitle: 'Goal', icon: '🎯' },
+  { id: 'skills', title: 'Skills', shortTitle: 'Skills', icon: '🧩' },
+  { id: 'path', title: 'Path', shortTitle: 'Path', icon: '🗺️' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -48,7 +47,9 @@ export function SwordDesigner({ topic }: SwordDesignerProps) {
   const { openSwordRunner, closeSword } = useUIStore();
   const { 
     phase, 
+    sessionId,
     isLoading, 
+    isGenerating,
     error,
     plan,
     initialize, 
@@ -84,11 +85,12 @@ export function SwordDesigner({ topic }: SwordDesignerProps) {
 
   const currentPhaseIndex = selectPhaseIndex(phase);
 
-  // Show complete phase
-  if (phase === 'complete' && plan) {
+  // Show loading while initializing (no sessionId yet and no error)
+  if (!sessionId && !error) {
     return (
-      <div className="flex flex-col h-full p-5">
-        <CompletePhase plan={plan} onStart={handleComplete} />
+      <div className="flex flex-col h-full items-center justify-center">
+        <div className="w-10 h-10 border-2 border-white/20 border-t-green-500 rounded-full animate-spin mb-4" />
+        <p className="text-white/50 text-sm">Loading...</p>
       </div>
     );
   }
@@ -97,7 +99,11 @@ export function SwordDesigner({ topic }: SwordDesignerProps) {
     <div className="flex flex-col h-full">
       {/* Phase Progress Bar */}
       <div className="px-5 pt-4 pb-2">
-        <PhaseProgress phases={PHASES} currentIndex={currentPhaseIndex} />
+        <PhaseProgress 
+          phases={PHASES} 
+          currentIndex={currentPhaseIndex} 
+          isGenerating={isGenerating}
+        />
       </div>
 
       {/* Error Banner */}
@@ -111,13 +117,13 @@ export function SwordDesigner({ topic }: SwordDesignerProps) {
       <div className="flex-1 overflow-y-auto">
         {phase === 'orient' && <OrientPhase />}
         {phase === 'clarify' && <ClarifyPhase />}
-        {phase === 'capstone' && <CapstonePhase />}
-        {phase === 'subskills' && <SubskillsPhase />}
-        {phase === 'routing' && <RoutingPhase />}
+        {phase === 'goal' && <GoalPhase />}
+        {phase === 'skills' && <SkillsPhase />}
+        {phase === 'path' && <PathPhase plan={plan} onStart={handleComplete} />}
       </div>
 
       {/* Footer with abandon option */}
-      {!isLoading && phase !== 'orient' && (
+      {!isLoading && !isGenerating && phase !== 'orient' && phase !== 'path' && (
         <div className="px-5 py-3 border-t border-white/5">
           <button
             onClick={handleAbandon}
@@ -138,9 +144,10 @@ export function SwordDesigner({ topic }: SwordDesignerProps) {
 interface PhaseProgressProps {
   phases: PhaseInfo[];
   currentIndex: number;
+  isGenerating?: boolean;
 }
 
-function PhaseProgress({ phases, currentIndex }: PhaseProgressProps) {
+function PhaseProgress({ phases, currentIndex, isGenerating }: PhaseProgressProps) {
   return (
     <div className="flex items-center justify-between">
       {phases.map((phase, index) => (
@@ -153,7 +160,9 @@ function PhaseProgress({ phases, currentIndex }: PhaseProgressProps) {
                 ${index < currentIndex 
                   ? 'bg-green-500 text-black' 
                   : index === currentIndex 
-                    ? 'bg-green-500/20 text-green-400 ring-2 ring-green-500' 
+                    ? isGenerating && phase.id === 'goal'
+                      ? 'bg-yellow-500/20 text-yellow-400 ring-2 ring-yellow-500 animate-pulse'
+                      : 'bg-green-500/20 text-green-400 ring-2 ring-green-500' 
                     : 'bg-white/10 text-white/30'
                 }
               `}

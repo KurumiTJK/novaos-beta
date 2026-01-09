@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // SWORD DESIGNER STORE — NovaOS
-// Manages the lesson plan creation flow
+// Updated to match backend flow: Orient → Clarify → Goal → Skills → Path
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
@@ -8,37 +8,44 @@ import {
   startExploration,
   exploreChat,
   confirmExploration,
-  getClarifyData,
   updateClarifyField,
   updateConstraints,
-  finalizeExploration,
-  confirmCapstone,
-  generateSubskills,
-  confirmSubskills,
-  generateRouting,
-  confirmRouting,
+  continueToGoal,
+  generateGoal,
+  getReview,
+  confirmReview,
   getActiveSession,
   deleteSession,
+  activatePlan,
   type DesignerSession,
   type ClarifyData,
+  type ClarifyResponse,
   type Capstone,
   type Subskill,
   type SubskillRouting,
   type LearningPlan,
   type ExplorationState,
+  type ReviewState,
 } from '../api/sword';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Designer phases matching backend flow:
+ * - orient: Chat-based exploration (POST /explore/start, /explore/chat)
+ * - clarify: Edit extracted fields (POST /explore/confirm, PATCH /explore/field)
+ * - goal: Auto-generate capstone+subskills+routing (POST /explore/continue, /goal/generate)
+ * - skills: Review generated plan (GET /review)
+ * - path: Plan created, ready to activate (POST /review/confirm)
+ */
 export type DesignerPhase = 
   | 'orient'      // Chat-based exploration
   | 'clarify'     // Edit fields
-  | 'capstone'    // Review/confirm capstone
-  | 'subskills'   // Review/confirm subskills
-  | 'routing'     // Review/confirm routing
-  | 'complete';   // Plan created
+  | 'goal'        // Auto-generating (loading state)
+  | 'skills'      // Review subskills + routing
+  | 'path';       // Plan created
 
 export interface OrientMessage {
   role: 'user' | 'assistant';
@@ -56,6 +63,8 @@ interface DesignerStore {
   sessionId: string | null;
   /** Whether we're loading/processing */
   isLoading: boolean;
+  /** Whether goal is being generated (long operation) */
+  isGenerating: boolean;
   /** Error message if any */
   error: string | null;
   
@@ -68,22 +77,26 @@ interface DesignerStore {
   // Clarify phase state
   /** Clarify form data */
   clarifyData: ClarifyData | null;
+  /** Field sources (extracted vs user_edited) */
+  fieldSources: Record<string, string>;
+  /** Missing required fields */
+  missingFields: string[];
   /** Whether clarify data can be finalized */
   canFinalize: boolean;
   
-  // Capstone phase state
+  // Goal phase state (auto-generated)
   /** Generated capstone */
   capstone: Capstone | null;
-  
-  // Subskills phase state
   /** Generated subskills */
   subskills: Subskill[];
-  
-  // Routing phase state
   /** Generated routing */
   routing: SubskillRouting[];
   
-  // Complete phase state
+  // Skills/Review phase state
+  /** Review data from backend */
+  reviewData: ReviewState | null;
+  
+  // Path phase state
   /** Created learning plan */
   plan: LearningPlan | null;
   
@@ -108,21 +121,19 @@ interface DesignerStore {
   /** Update a clarify field */
   updateField: (field: 'learningGoal' | 'priorKnowledge' | 'context', value: string) => Promise<void>;
   /** Update constraints */
-  updateConstraintsAction: (constraints: Partial<ClarifyData['constraints']>) => Promise<void>;
-  /** Finalize clarify and generate capstone */
+  updateConstraintsAction: (constraints: string[]) => Promise<void>;
+  /** Finalize clarify → auto-generate goal */
   finalizeClarify: () => Promise<void>;
   
-  // Capstone phase actions
-  /** Confirm capstone and generate subskills */
-  confirmCapstoneAction: () => Promise<void>;
+  // Skills phase actions
+  /** Load review data (called after goal generation) */
+  loadReview: () => Promise<void>;
   
-  // Subskills phase actions
-  /** Confirm subskills and generate routing */
-  confirmSubskillsAction: () => Promise<void>;
-  
-  // Routing phase actions
-  /** Confirm routing and create plan */
-  confirmRoutingAction: () => Promise<void>;
+  // Path phase actions
+  /** Confirm skills and create plan */
+  confirmSkills: () => Promise<void>;
+  /** Activate the created plan */
+  activateCreatedPlan: () => Promise<void>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -133,16 +144,36 @@ const initialState = {
   phase: 'orient' as DesignerPhase,
   sessionId: null,
   isLoading: false,
+  isGenerating: false,
   error: null,
   orientMessages: [],
   explorationState: null,
   clarifyData: null,
+  fieldSources: {},
+  missingFields: [],
   canFinalize: false,
   capstone: null,
   subskills: [],
   routing: [],
+  reviewData: null,
   plan: null,
 };
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// HELPER: Extract ClarifyData from various response formats
+// ─────────────────────────────────────────────────────────────────────────────────
+
+function extractClarifyData(result: ClarifyResponse): ClarifyData {
+  // Backend might return { extracted: {...} }, { data: {...} }, or direct fields
+  const source = result.extracted || result.data || result;
+  
+  return {
+    learningGoal: (source as any).learningGoal || '',
+    priorKnowledge: (source as any).priorKnowledge || '',
+    context: (source as any).context || '',
+    constraints: (source as any).constraints || [],
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // STORE
@@ -163,12 +194,14 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
       const existingSession = await getActiveSession();
       
       if (existingSession) {
+        console.log('[DESIGNER] Found existing session:', existingSession.id, existingSession.phase);
         // Restore state from existing session
         await restoreSessionState(existingSession, set);
         return;
       }
       
       // Start new exploration
+      console.log('[DESIGNER] Starting new exploration with topic:', topic);
       const result = await startExploration(topic);
       
       set({
@@ -181,6 +214,7 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
         isLoading: false,
       });
     } catch (error) {
+      console.error('[DESIGNER] Initialize failed:', error);
       set({
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to initialize designer',
@@ -205,7 +239,7 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
     
     if (sessionId) {
       try {
-        await deleteSession(sessionId);
+        await deleteSession();
       } catch (error) {
         console.warn('[DESIGNER] Failed to delete session:', error);
       }
@@ -265,10 +299,21 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
     try {
       const result = await confirmExploration(sessionId);
       
+      // Extract clarify data from response (handles multiple formats)
+      const clarifyData = extractClarifyData(result);
+      
+      // Calculate canFinalize locally
+      const canFinalize = !!(clarifyData.learningGoal && clarifyData.priorKnowledge);
+      
+      console.log('[DESIGNER] Confirm orient result:', result);
+      console.log('[DESIGNER] Clarify data:', clarifyData, 'canFinalize:', canFinalize);
+      
       set({
         phase: 'clarify',
-        clarifyData: result.data,
-        canFinalize: result.canFinalize,
+        clarifyData,
+        fieldSources: (result as any).fieldSources || {},
+        missingFields: (result as any).missing || [],
+        canFinalize,
         isLoading: false,
       });
     } catch (error) {
@@ -284,33 +329,42 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
   // ═══════════════════════════════════════════════════════════════════════════
   
   updateField: async (field, value) => {
-    const { sessionId } = get();
+    const { sessionId, clarifyData } = get();
     
     if (!sessionId) {
       set({ error: 'No active session' });
       return;
     }
     
-    // Optimistic update
-    set((state) => ({
-      clarifyData: state.clarifyData 
-        ? { ...state.clarifyData, [field]: value }
-        : null,
-    }));
+    // Optimistic update with local canFinalize calculation
+    const newClarifyData = clarifyData 
+      ? { ...clarifyData, [field]: value }
+      : { learningGoal: '', priorKnowledge: '', context: '', constraints: [], [field]: value };
+    
+    const newCanFinalize = !!(newClarifyData.learningGoal && newClarifyData.priorKnowledge);
+    
+    set({
+      clarifyData: newClarifyData,
+      fieldSources: { ...get().fieldSources, [field]: 'user_edited' },
+      canFinalize: newCanFinalize,
+    });
     
     try {
-      const result = await updateClarifyField(sessionId, field, value);
-      set({ clarifyData: result });
+      // API call - we don't need to use the response for state since we've already updated optimistically
+      await updateClarifyField(sessionId, field, value);
+      console.log('[DESIGNER] Field updated:', field, '→', value, 'canFinalize:', newCanFinalize);
     } catch (error) {
-      // Revert on error (would need to store previous value)
+      // Revert on error
       set({
+        clarifyData,
+        canFinalize: !!(clarifyData?.learningGoal && clarifyData?.priorKnowledge),
         error: error instanceof Error ? error.message : 'Failed to update field',
       });
     }
   },
 
   updateConstraintsAction: async (constraints) => {
-    const { sessionId } = get();
+    const { sessionId, clarifyData } = get();
     
     if (!sessionId) {
       set({ error: 'No active session' });
@@ -318,25 +372,30 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
     }
     
     // Optimistic update
-    set((state) => ({
-      clarifyData: state.clarifyData 
-        ? { 
-            ...state.clarifyData, 
-            constraints: { ...state.clarifyData.constraints, ...constraints }
-          }
-        : null,
-    }));
+    const newClarifyData = clarifyData 
+      ? { ...clarifyData, constraints }
+      : { learningGoal: '', priorKnowledge: '', context: '', constraints };
+    
+    set({
+      clarifyData: newClarifyData,
+    });
     
     try {
-      const result = await updateConstraints(sessionId, constraints);
-      set({ clarifyData: result });
+      await updateConstraints(sessionId, constraints);
+      console.log('[DESIGNER] Constraints updated:', constraints);
     } catch (error) {
+      // Revert on error
       set({
+        clarifyData,
         error: error instanceof Error ? error.message : 'Failed to update constraints',
       });
     }
   },
 
+  /**
+   * Finalize clarify → moves to goal phase → auto-generates everything
+   * Flow: POST /explore/continue → POST /goal/generate → GET /review
+   */
   finalizeClarify: async () => {
     const { sessionId } = get();
     
@@ -345,29 +404,54 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
       return;
     }
     
-    set({ isLoading: true, error: null });
+    set({ 
+      phase: 'goal',
+      isLoading: true, 
+      isGenerating: true,
+      error: null 
+    });
     
     try {
-      const result = await finalizeExploration(sessionId);
+      // Step 1: Move to goal phase
+      console.log('[DESIGNER] Moving to goal phase...');
+      await continueToGoal(sessionId);
+      
+      // Step 2: Generate capstone + subskills + routing
+      console.log('[DESIGNER] Generating goal (this may take ~60s)...');
+      const goalResult = await generateGoal(sessionId);
       
       set({
-        phase: 'capstone',
-        capstone: result.capstone,
+        capstone: goalResult.capstone,
+        subskills: goalResult.subskills || [],
+        routing: goalResult.routing || [],
+      });
+      
+      // Step 3: Get review data with session distribution
+      console.log('[DESIGNER] Loading review data...');
+      const reviewResult = await getReview(sessionId);
+      
+      set({
+        phase: 'skills',
+        reviewData: reviewResult,
         isLoading: false,
+        isGenerating: false,
       });
     } catch (error) {
+      console.error('[DESIGNER] Goal generation failed:', error);
       set({
+        phase: 'clarify', // Go back to clarify on error
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to generate capstone',
+        isGenerating: false,
+        error: error instanceof Error ? error.message : 'Failed to generate learning plan',
       });
     }
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // CAPSTONE PHASE
+  // SKILLS PHASE (Review)
   // ═══════════════════════════════════════════════════════════════════════════
   
-  confirmCapstoneAction: async () => {
+  loadReview: async () => {
     const { sessionId } = get();
     
     if (!sessionId) {
@@ -378,27 +462,25 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
     set({ isLoading: true, error: null });
     
     try {
-      await confirmCapstone(sessionId);
-      const result = await generateSubskills(sessionId);
+      const reviewResult = await getReview(sessionId);
       
       set({
-        phase: 'subskills',
-        subskills: result.subskills,
+        reviewData: reviewResult,
         isLoading: false,
       });
     } catch (error) {
       set({
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to generate subskills',
+        error: error instanceof Error ? error.message : 'Failed to load review',
       });
     }
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SUBSKILLS PHASE
+  // PATH PHASE (Create Plan)
   // ═══════════════════════════════════════════════════════════════════════════
   
-  confirmSubskillsAction: async () => {
+  confirmSkills: async () => {
     const { sessionId } = get();
     
     if (!sessionId) {
@@ -409,48 +491,43 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
     set({ isLoading: true, error: null });
     
     try {
-      await confirmSubskills(sessionId);
-      const result = await generateRouting(sessionId);
+      console.log('[DESIGNER] Creating plan...');
+      const result = await confirmReview(sessionId);
       
       set({
-        phase: 'routing',
-        routing: result.routing,
-        isLoading: false,
-      });
-    } catch (error) {
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to generate routing',
-      });
-    }
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ROUTING PHASE
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  confirmRoutingAction: async () => {
-    const { sessionId } = get();
-    
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-    
-    set({ isLoading: true, error: null });
-    
-    try {
-      const result = await confirmRouting(sessionId);
-      
-      set({
-        phase: 'complete',
+        phase: 'path',
         plan: result.plan,
         isLoading: false,
       });
     } catch (error) {
+      console.error('[DESIGNER] Plan creation failed:', error);
       set({
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to create plan',
+      });
+    }
+  },
+
+  activateCreatedPlan: async () => {
+    const { plan } = get();
+    
+    if (!plan) {
+      set({ error: 'No plan to activate' });
+      return;
+    }
+    
+    set({ isLoading: true, error: null });
+    
+    try {
+      await activatePlan(plan.id);
+      console.log('[DESIGNER] Plan activated:', plan.id);
+      
+      // Reset designer state after activation
+      set(initialState);
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to activate plan',
       });
     }
   },
@@ -462,38 +539,77 @@ export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
 
 async function restoreSessionState(
   session: DesignerSession,
-  set: (state: Partial<DesignerStore>) => void
+  set: (state: Partial<DesignerStore> | ((state: DesignerStore) => Partial<DesignerStore>)) => void
 ) {
-  const phase = mapBackendPhaseToLocal(session.phase);
+  // Backend uses visiblePhase and internalPhase, NOT phase
+  const backendPhase = session.internalPhase || session.visiblePhase || session.phase || 'exploration';
   
-  // Build state based on session data
+  // Determine frontend phase based on backend state
+  let phase = mapBackendPhaseToLocal(backendPhase);
+  
+  // Special case: 'exploration' can be either orient or clarify
+  // Check explorationData to determine which one
+  if (backendPhase === 'exploration' && session.explorationData) {
+    // If we have exploration data with learningGoal filled, we're in clarify
+    if (session.explorationData.learningGoal || session.explorationData.readyForCapstone) {
+      phase = 'clarify';
+    }
+  }
+  
+  console.log('[DESIGNER] Restoring session to phase:', phase, 'backendPhase:', backendPhase, 'session:', session);
+  
+  // Build base state
   const state: Partial<DesignerStore> = {
     sessionId: session.id,
     phase,
     isLoading: false,
   };
   
-  // Restore phase-specific data
-  if (session.capstone) {
-    state.capstone = session.capstone;
+  // Restore capstone from either capstoneData or capstone field
+  const capstoneSource = session.capstoneData || session.capstone;
+  if (capstoneSource) {
+    state.capstone = {
+      id: (capstoneSource as any).id || session.id,
+      title: (capstoneSource as any).title || '',
+      description: (capstoneSource as any).capstoneStatement || (capstoneSource as any).description || '',
+      successCriteria: (capstoneSource as any).successCriteria || [],
+    };
   }
   
-  if (session.subskills && session.subskills.length > 0) {
-    state.subskills = session.subskills;
+  // Restore subskills from either subskillsData or subskills field
+  const subskillsSource = session.subskillsData?.subskills || session.subskills;
+  if (subskillsSource && subskillsSource.length > 0) {
+    state.subskills = subskillsSource;
   }
   
-  if (session.routing && session.routing.length > 0) {
-    state.routing = session.routing;
+  // Restore routing from either routingData or routing field
+  const routingSource = session.routingData?.assignments || session.routing;
+  if (routingSource && routingSource.length > 0) {
+    state.routing = routingSource;
   }
   
-  // If in clarify phase, fetch clarify data
+  // Handle clarify phase - use explorationData from session
+  // Always initialize clarifyData when in clarify phase
   if (phase === 'clarify') {
+    const data = session.explorationData || {};
+    state.clarifyData = {
+      learningGoal: data.learningGoal || '',
+      priorKnowledge: data.priorKnowledge || '',
+      context: data.context || '',
+      constraints: data.constraints || [],
+    };
+    // Check if we can finalize (learningGoal AND priorKnowledge are required)
+    state.canFinalize = !!(state.clarifyData.learningGoal && state.clarifyData.priorKnowledge);
+    console.log('[DESIGNER] Restored clarify data:', state.clarifyData, 'canFinalize:', state.canFinalize);
+  }
+  
+  // Handle skills/review phase - fetch review data
+  if (phase === 'skills') {
     try {
-      const clarifyResult = await getClarifyData(session.id);
-      state.clarifyData = clarifyResult.data;
-      state.canFinalize = clarifyResult.canFinalize;
+      const reviewResult = await getReview(session.id);
+      state.reviewData = reviewResult;
     } catch (error) {
-      console.warn('[DESIGNER] Failed to fetch clarify data:', error);
+      console.warn('[DESIGNER] Failed to fetch review data:', error);
     }
   }
   
@@ -501,14 +617,28 @@ async function restoreSessionState(
 }
 
 // Map backend phase to local phase
+// Backend internalPhase values: exploration, capstone, subskills, routing
+// Backend visiblePhase values: exploration, define_goal, research, review
 function mapBackendPhaseToLocal(backendPhase: string): DesignerPhase {
   const mapping: Record<string, DesignerPhase> = {
-    'exploration': 'orient',
+    // Internal phases
+    'exploration': 'orient',  // Will be overridden to 'clarify' if has explorationData
+    'capstone': 'goal',
+    'subskills': 'goal',
+    'routing': 'skills',
+    
+    // Visible phases
+    'define_goal': 'goal',
+    'research': 'goal',
+    'review': 'skills',
+    
+    // Frontend phases (for completeness)
+    'orient': 'orient',
     'clarify': 'clarify',
-    'capstone': 'capstone',
-    'subskills': 'subskills',
-    'routing': 'routing',
-    'complete': 'complete',
+    'goal': 'goal',
+    'skills': 'skills',
+    'path': 'path',
+    'complete': 'path',
   };
   
   return mapping[backendPhase] || 'orient';
@@ -519,10 +649,21 @@ function mapBackendPhaseToLocal(backendPhase: string): DesignerPhase {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export const selectPhaseIndex = (phase: DesignerPhase): number => {
-  const phases: DesignerPhase[] = ['orient', 'clarify', 'capstone', 'subskills', 'routing', 'complete'];
+  const phases: DesignerPhase[] = ['orient', 'clarify', 'goal', 'skills', 'path'];
   return phases.indexOf(phase);
 };
 
 export const selectIsPhaseComplete = (currentPhase: DesignerPhase, targetPhase: DesignerPhase): boolean => {
   return selectPhaseIndex(currentPhase) > selectPhaseIndex(targetPhase);
+};
+
+export const selectPhaseLabel = (phase: DesignerPhase): string => {
+  const labels: Record<DesignerPhase, string> = {
+    'orient': 'Explore',
+    'clarify': 'Clarify',
+    'goal': 'Goal',
+    'skills': 'Skills',
+    'path': 'Path',
+  };
+  return labels[phase];
 };

@@ -46,6 +46,7 @@ export {
   // Main state
   getSwordState,
   getToday,
+  getTodayState,
   
   // Exploration
   startExploration,
@@ -54,26 +55,33 @@ export {
   getClarifyData,
   updateClarifyField,
   updateConstraints,
+  continueToGoal,
+  backToOrient,
   
-  // Designer
-  finalizeExploration,
-  confirmCapstone,
-  generateSubskills,
-  confirmSubskills,
-  generateRouting,
-  confirmRouting,
+  // Goal (auto-generation)
+  getGoalState,
+  generateGoal,
+  
+  // Review
+  getReview,
+  confirmReview,
+  
+  // Designer session
   getActiveSession,
   getSessions,
   deleteSession,
   
   // Runner
   startRunner,
-  completeContent,
-  submitMastery,
+  startSession,
+  completeSession,
+  getRunnerSubskills,
   getSubskillProgress,
   getPlanProgress,
   getSessionHistory,
   getLessonPlan,
+  getKnowledgeCheck,
+  submitKnowledgeCheck,
   checkNeedsRefresh,
   getRefreshContent,
   skipRefresh,
@@ -91,11 +99,11 @@ export {
   activatePlan,
   pausePlan,
   completePlan,
+  deletePlan,
   startSubskill,
   
-  // Assessment
-  getInitialAssessment,
-  submitAssessment,
+  // NOTE: getStats removed - endpoint does not exist on backend
+  // Use getToday() and derive stats from plans + today.progress
   
   // Types
   type SwordState,
@@ -111,6 +119,10 @@ export {
   type Capstone,
   type Subskill,
   type SubskillRouting,
+  type GoalState,
+  type GoalGenerateResponse,
+  type ReviewState,
+  type ReviewConfirmResponse,
   type RunnerStartResponse,
   type LessonContent,
   type Asset,

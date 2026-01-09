@@ -88,6 +88,27 @@ function mapApiSparkToSpark(apiSpark: ApiSpark | null | undefined): Spark | null
   };
 }
 
+/**
+ * Maps API Subskill status (8 values) to UI LessonStatus (4 values)
+ */
+function mapApiStatusToLessonStatus(apiStatus: Subskill['status']): LessonStatus {
+  switch (apiStatus) {
+    case 'completed':
+    case 'mastered':
+      return 'completed';
+    case 'in_progress':
+    case 'active':
+      return 'in_progress';
+    case 'available':
+      return 'available';
+    case 'locked':
+    case 'pending':
+    case 'skipped':
+    default:
+      return 'locked';
+  }
+}
+
 function mapSubskillToLesson(subskill: Subskill, index: number): Lesson {
   // Generate emoji based on order/type
   const emojis = ['🎯', '📚', '🧩', '💡', '🔧', '🎨', '🚀', '⚡', '🌟', '🎸'];
@@ -97,9 +118,9 @@ function mapSubskillToLesson(subskill: Subskill, index: number): Lesson {
     title: subskill.title,
     description: subskill.description,
     progress: subskill.progress,
-    status: subskill.status,
+    status: mapApiStatusToLessonStatus(subskill.status),
     totalSessions: subskill.totalSessions,
-    completedSessions: subskill.completedSessions,
+    completedSessions: subskill.completedSessions ?? 0,
     emoji: emojis[index % emojis.length],
   };
 }
@@ -117,7 +138,7 @@ function mapPlanToPath(plan: LearningPlan | null | undefined): LearningPath | nu
   return {
     id: plan.id,
     goal: plan.capstone?.title || plan.title,
-    progress: plan.progress,
+    progress: plan.progress ?? 0,
     milestones,
   };
 }
@@ -127,7 +148,7 @@ function mapTodayToStats(today: TodayState | null): LearningStats {
   
   const plan = today.plan;
   const completedSubskills = plan?.subskills?.filter(s => s.status === 'completed').length || 0;
-  const totalSessions = plan?.subskills?.reduce((sum, s) => sum + s.completedSessions, 0) || 0;
+  const totalSessions = plan?.subskills?.reduce((sum, s) => sum + (s.completedSessions ?? 0), 0) || 0;
   
   return {
     totalLessonsCompleted: completedSubskills,

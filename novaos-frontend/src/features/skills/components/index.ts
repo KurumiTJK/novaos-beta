@@ -1,17 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SKILLS COMPONENTS EXPORTS — NovaOS
+// SKILLS COMPONENTS EXPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export { SwordDesigner } from './SwordDesigner';
-export { SwordHome } from './SwordHome';
 export { SwordRunner } from './SwordRunner';
 
-// Designer phase components (for direct access if needed)
+// Designer phase components
 export {
   OrientPhase,
   ClarifyPhase,
-  CapstonePhase,
-  SubskillsPhase,
-  RoutingPhase,
-  CompletePhase,
+  GoalPhase,
+  SkillsPhase,
+  PathPhase,
 } from './designer';
