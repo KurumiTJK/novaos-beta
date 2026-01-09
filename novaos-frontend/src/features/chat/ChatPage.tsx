@@ -204,7 +204,6 @@ export function ChatPage() {
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const lastUserMessageRef = useRef<HTMLDivElement>(null);
 
   // Track which messages are new (for typing animation)
   const seenMessagesRef = useRef<Set<string>>(new Set());
@@ -269,36 +268,29 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Scroll to position user message at top of viewport when a new user message is added
-  const lastUserMessageId = messages.filter(m => m.role === 'user').pop()?.id;
-  const prevUserMessageIdRef = useRef<string | undefined>(undefined);
+  // Callback ref that scrolls when a new user message mounts
+  const lastUserMessageIdRef = useRef<string | undefined>(undefined);
   
-  useEffect(() => {
-    console.log('Scroll effect:', { 
-      lastUserMessageId, 
-      prevId: prevUserMessageIdRef.current,
-      hasRef: !!lastUserMessageRef.current 
-    });
-    
-    // Check if we have a new user message
-    if (lastUserMessageId && lastUserMessageId !== prevUserMessageIdRef.current) {
-      console.log('New user message detected, scrolling...');
-      prevUserMessageIdRef.current = lastUserMessageId;
-      
-      // Delay to ensure DOM has updated
-      const timer = setTimeout(() => {
-        console.log('Timer fired, ref exists:', !!lastUserMessageRef.current);
-        if (lastUserMessageRef.current) {
-          lastUserMessageRef.current.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'start' 
-          });
-          console.log('scrollIntoView called');
-        }
-      }, 150);
-      return () => clearTimeout(timer);
+  const scrollToUserMessage = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      // Small delay to ensure layout is complete
+      setTimeout(() => {
+        node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
     }
-  }, [lastUserMessageId]);
+  }, []);
+  
+  // Track which message ID we've already scrolled to
+  const getRefForMessage = useCallback((messageId: string, isLastUser: boolean) => {
+    if (!isLastUser) return null;
+    
+    // Only scroll if this is a NEW user message
+    if (messageId !== lastUserMessageIdRef.current) {
+      lastUserMessageIdRef.current = messageId;
+      return scrollToUserMessage;
+    }
+    return null;
+  }, [scrollToUserMessage]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
@@ -377,7 +369,7 @@ export function ChatPage() {
     }
 
     // Start sending (don't await - let it happen in background)
-    // Scroll to user message is handled automatically by the lastUserMessageId effect
+    // Scroll to user message is handled by the callback ref when the message mounts
     sendMessage(text);
   };
 
@@ -616,7 +608,7 @@ export function ChatPage() {
               <div 
                 key={message.id} 
                 className={`mb-5 ${isLastUserMessage ? 'border-l-4 border-green-500 pl-2' : ''}`}
-                ref={isLastUserMessage ? lastUserMessageRef : null}
+                ref={getRefForMessage(message.id, isLastUserMessage)}
               >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
@@ -701,7 +693,7 @@ export function ChatPage() {
           
           {/* DEBUG */}
           <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
-            Msgs: {messages.length} | LastUserID: {lastUserMessageId?.slice(-6) || 'none'}
+            Msgs: {messages.length} | LastUserID: {messages.filter(m => m.role === 'user').pop()?.id?.slice(-6) || 'none'}
           </div>
           
           {/* Dark Card */}
