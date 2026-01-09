@@ -10,7 +10,6 @@ import { LoadingDots } from '@/shared/components';
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // iOS KEYBOARD DETECTION HOOK
-// In PWA mode, visualViewport doesn't work, so we use focus detection
 // ─────────────────────────────────────────────────────────────────────────────────
 
 function useKeyboardOpen() {
@@ -27,7 +26,6 @@ function useKeyboardOpen() {
     const handleFocusOut = (e: FocusEvent) => {
       const target = e.target as HTMLElement;
       if (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        // Small delay to handle focus switching between inputs
         setTimeout(() => {
           const active = document.activeElement as HTMLElement;
           if (!active?.isContentEditable && active?.tagName !== 'INPUT' && active?.tagName !== 'TEXTAREA') {
@@ -201,9 +199,11 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [shouldScrollToUser, setShouldScrollToUser] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const lastUserMessageRef = useRef<HTMLDivElement>(null);
 
   // Track which messages are new (for typing animation)
   const seenMessagesRef = useRef<Set<string>>(new Set());
@@ -268,54 +268,22 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Track last user message ID for scroll triggering
-  const lastUserMessageIdRef = useRef<string | undefined>(undefined);
-  const [debugScrollCount, setDebugScrollCount] = useState(0);
-  
-  // Scroll to show user message at top when new message is sent
+  // Scroll to position user message at top of viewport
   useEffect(() => {
-    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-    if (!lastUserMsg) return;
-    
-    // Check if this is a NEW user message
-    if (lastUserMsg.id !== lastUserMessageIdRef.current) {
-      lastUserMessageIdRef.current = lastUserMsg.id;
-      
-      // Find the user message element and scroll container
-      const container = messagesContainerRef.current;
-      if (!container) {
-        console.log('No container ref');
-        return;
-      }
-      
-      // Small delay to ensure DOM is updated
-      setTimeout(() => {
-        // Find all user messages and get the last one
-        const userMessages = container.querySelectorAll('[data-user-message="true"]');
-        const lastUserElement = userMessages[userMessages.length - 1] as HTMLElement;
-        
-        console.log('Scroll attempt:', { 
-          userMessagesFound: userMessages.length, 
-          hasLastElement: !!lastUserElement 
-        });
-        
-        if (lastUserElement) {
-          // Calculate scroll position to put message at top
-          const containerRect = container.getBoundingClientRect();
-          const messageRect = lastUserElement.getBoundingClientRect();
-          const scrollOffset = messageRect.top - containerRect.top + container.scrollTop - 20; // 20px padding from top
-          
-          console.log('Scrolling to:', scrollOffset);
-          setDebugScrollCount(c => c + 1);
-          
-          container.scrollTo({
-            top: scrollOffset,
-            behavior: 'smooth'
-          });
-        }
-      }, 100);
+    if (shouldScrollToUser) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          if (lastUserMessageRef.current) {
+            lastUserMessageRef.current.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'start' 
+            });
+          }
+          setShouldScrollToUser(false);
+        }, 100);
+      });
     }
-  }, [messages]);
+  }, [shouldScrollToUser, messages]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
@@ -393,8 +361,10 @@ export function ChatPage() {
       inputRef.current.blur(); // Close keyboard
     }
 
+    // Set flag to scroll after message is added
+    setShouldScrollToUser(true);
+
     // Start sending (don't await - let it happen in background)
-    // Scroll to user message is handled by the callback ref when the message mounts
     sendMessage(text);
   };
 
@@ -617,13 +587,13 @@ export function ChatPage() {
           </>
         )}
 
-        {/* Messages - Scrollable, takes remaining space */}
+        {/* Messages - Scrollable, ChatGPT style with bottom padding for scroll room */}
         <div 
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {/* Messages wrapper with padding */}
-          <div className="px-5 pt-5 pb-6">
+          {/* Messages wrapper - large bottom padding allows scrolling any message to top */}
+          <div className="px-5 pt-5" style={{ paddingBottom: '70vh' }}>
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
             const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
@@ -632,14 +602,14 @@ export function ChatPage() {
             return (
               <div 
                 key={message.id} 
-                className={`mb-5 ${isLastUserMessage ? 'border-l-4 border-green-500 pl-2' : ''}`}
-                data-user-message={message.role === 'user' ? 'true' : undefined}
+                className="mb-5"
+                ref={isLastUserMessage ? lastUserMessageRef : null}
               >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
                     <div 
                       className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
-                      style={{ backgroundColor: isLastUserMessage ? '#2a4a2a' : '#1C1C1E', color: '#FFFFFF' }}
+                      style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
                     >
                       {message.content}
                     </div>
@@ -715,12 +685,6 @@ export function ChatPage() {
               </svg>
             </button>
           )}
-          
-          {/* DEBUG */}
-          <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
-            Msgs: {messages.length} | Scrolls: {debugScrollCount}
-          </div>
-          
           {/* Dark Card */}
           <div 
             className="rounded-[28px] overflow-hidden"
