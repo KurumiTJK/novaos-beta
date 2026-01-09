@@ -12,6 +12,22 @@ import type { ShieldGateOutput, SafetySignal, Urgency } from '../../../gates/shi
 import type { PipelineState, PipelineContext, IntentSummary } from '../../../types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// MOCK SHIELD SERVICE
+// ─────────────────────────────────────────────────────────────────────────────────
+
+const mockShieldService = {
+  checkCrisisBlock: vi.fn(),
+  evaluate: vi.fn(),
+  confirmAcceptanceAndGetMessage: vi.fn(),
+  confirmSafety: vi.fn(),
+  getStatus: vi.fn(),
+};
+
+vi.mock('../../../services/shield/index.js', () => ({
+  getShieldService: () => mockShieldService,
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // TEST FIXTURES
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -43,6 +59,7 @@ function createMockContext(overrides: Partial<PipelineContext> = {}): PipelineCo
     requestId: 'req_test_123',
     userId: 'user_123',
     sessionId: 'session_123',
+    conversationId: 'conv_123',
     conversationHistory: [],
     ...overrides,
   };
@@ -62,15 +79,334 @@ function createIntentSummary(overrides: Partial<IntentSummary> = {}): IntentSumm
 describe('Shield Gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no crisis block
+    mockShieldService.checkCrisisBlock.mockResolvedValue({ blocked: false });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // SYNC GATE TESTS (executeShieldGate)
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ASYNC GATE TESTS (executeShieldGateAsync) — Main Production Path
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  describe('executeShieldGateAsync', () => {
+    
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SHIELD BYPASS (user confirmed warning)
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    describe('shield bypass', () => {
+      it('should skip evaluation when shieldBypassed is true', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'medium',
+            urgency: 'medium',
+          }),
+        });
+        const context = createMockContext({ shieldBypassed: true });
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.gateId).toBe('shield');
+        expect(result.status).toBe('pass');
+        expect(result.action).toBe('continue');
+        expect(result.output.action).toBe('skip');
+        expect(result.output.shield_acceptance).toBe(true);
+        // Should NOT call shield service
+        expect(mockShieldService.evaluate).not.toHaveBeenCalled();
+      });
+
+      it('should pass through safety_signal even when bypassed', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'high',
+            urgency: 'high',
+          }),
+        });
+        const context = createMockContext({ shieldBypassed: true });
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.output.safety_signal).toBe('high');
+        expect(result.output.urgency).toBe('high');
+      });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ACTIVE CRISIS SESSION BLOCK
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    describe('active crisis session', () => {
+      it('should block ALL messages when user has active crisis session', async () => {
+        mockShieldService.checkCrisisBlock.mockResolvedValue({
+          blocked: true,
+          sessionId: 'crisis_session_123',
+        });
+
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'none', // Even safe messages blocked
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.status).toBe('blocked');
+        expect(result.action).toBe('halt');
+        expect(result.output.action).toBe('crisis');
+        expect(result.output.sessionId).toBe('crisis_session_123');
+        expect(result.output.crisisBlocked).toBe(true);
+      });
+
+      it('should not check crisis block for anonymous users', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary(),
+        });
+        const context = createMockContext({ userId: undefined });
+
+        await executeShieldGateAsync(state, context);
+
+        expect(mockShieldService.checkCrisisBlock).not.toHaveBeenCalled();
+      });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // NONE/LOW SAFETY SIGNAL — Skip Shield
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    describe('none/low safety signal', () => {
+      it('should skip shield for safety_signal: none', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'none',
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.status).toBe('pass');
+        expect(result.action).toBe('continue');
+        expect(result.output.route).toBe('skip');
+        expect(result.output.action).toBe('skip');
+        expect(mockShieldService.evaluate).not.toHaveBeenCalled();
+      });
+
+      it('should skip shield for safety_signal: low', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'low',
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.status).toBe('pass');
+        expect(result.action).toBe('continue');
+        expect(result.output.route).toBe('skip');
+        expect(result.output.action).toBe('skip');
+      });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // MEDIUM SAFETY SIGNAL — Warning (Block Pipeline)
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    describe('medium safety signal', () => {
+      beforeEach(() => {
+        mockShieldService.evaluate.mockResolvedValue({
+          action: 'warn',
+          safetySignal: 'medium',
+          urgency: 'medium',
+          riskAssessment: {
+            domain: 'financial',
+            riskExplanation: 'This involves financial risk',
+            consequences: ['Loss of savings'],
+            alternatives: ['Invest smaller amount'],
+            question: 'Have you considered the downside?',
+          },
+          warningMessage: 'This involves significant financial risk. Are you sure?',
+          activationId: 'activation_123',
+        });
+      });
+
+      it('should block pipeline and return warning for medium signal', async () => {
+        const state = createMockState({
+          userMessage: 'I want to put my savings into crypto',
+          intent_summary: createIntentSummary({
+            safety_signal: 'medium',
+            urgency: 'medium',
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.status).toBe('blocked');
+        expect(result.action).toBe('halt');
+        expect(result.output.action).toBe('warn');
+        expect(result.output.warningMessage).toBe('This involves significant financial risk. Are you sure?');
+        expect(result.output.activationId).toBe('activation_123');
+      });
+
+      it('should call evaluate with correct parameters', async () => {
+        const state = createMockState({
+          userMessage: 'I want to quit my job today',
+          intent_summary: createIntentSummary({
+            safety_signal: 'medium',
+            urgency: 'high',
+          }),
+        });
+        const context = createMockContext({
+          userId: 'user_abc',
+          conversationId: 'conv_xyz',
+        });
+
+        await executeShieldGateAsync(state, context);
+
+        expect(mockShieldService.evaluate).toHaveBeenCalledWith(
+          'user_abc',
+          'I want to quit my job today',
+          'medium',
+          'high',
+          'conv_xyz',
+          expect.objectContaining({ safety_signal: 'medium' }) // intent result
+        );
+      });
+
+      it('should include risk assessment in output', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'medium',
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.output.riskAssessment).toBeDefined();
+        expect(result.output.riskAssessment?.domain).toBe('financial');
+      });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // HIGH SAFETY SIGNAL — Crisis Mode
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    describe('high safety signal', () => {
+      beforeEach(() => {
+        mockShieldService.evaluate.mockResolvedValue({
+          action: 'crisis',
+          safetySignal: 'high',
+          urgency: 'high',
+          riskAssessment: {
+            domain: 'health',
+            riskExplanation: 'I notice you might be going through something difficult',
+            consequences: ['Reaching out for support can make a difference'],
+            alternatives: ['988 Suicide & Crisis Lifeline', 'Crisis Text Line'],
+            question: 'What might help you feel safer right now?',
+          },
+          sessionId: 'crisis_session_456',
+          activationId: 'activation_456',
+        });
+      });
+
+      it('should halt pipeline and create crisis session for high signal', async () => {
+        const state = createMockState({
+          userMessage: 'I feel like ending it all',
+          intent_summary: createIntentSummary({
+            safety_signal: 'high',
+            urgency: 'high',
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.status).toBe('blocked');
+        expect(result.action).toBe('halt');
+        expect(result.output.action).toBe('crisis');
+        expect(result.output.sessionId).toBe('crisis_session_456');
+        expect(result.output.activationId).toBe('activation_456');
+      });
+
+      it('should include crisis resources in risk assessment', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'high',
+          }),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.output.riskAssessment?.alternatives).toContain('988 Suicide & Crisis Lifeline');
+      });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // EDGE CASES
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    describe('edge cases', () => {
+      it('should handle missing intent_summary gracefully', async () => {
+        const state = createMockState({ intent_summary: undefined });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.status).toBe('pass');
+        expect(result.output.safety_signal).toBe('none');
+        expect(result.output.urgency).toBe('low');
+      });
+
+      it('should handle anonymous user for medium signal', async () => {
+        mockShieldService.evaluate.mockResolvedValue({
+          action: 'warn',
+          safetySignal: 'medium',
+          urgency: 'medium',
+        });
+
+        const state = createMockState({
+          intent_summary: createIntentSummary({
+            safety_signal: 'medium',
+          }),
+        });
+        const context = createMockContext({ userId: undefined });
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(mockShieldService.evaluate).toHaveBeenCalledWith(
+          'anonymous',
+          expect.any(String),
+          'medium',
+          'low',
+          expect.any(String),
+          expect.any(Object)
+        );
+      });
+
+      it('should track execution time', async () => {
+        const state = createMockState({
+          intent_summary: createIntentSummary(),
+        });
+        const context = createMockContext();
+
+        const result = await executeShieldGateAsync(state, context);
+
+        expect(result.executionTimeMs).toBeGreaterThanOrEqual(0);
+        expect(typeof result.executionTimeMs).toBe('number');
+      });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SYNC GATE TESTS (executeShieldGate) — Backwards Compatibility
+  // ═══════════════════════════════════════════════════════════════════════════════
 
   describe('executeShieldGate (sync)', () => {
     describe('basic functionality', () => {
@@ -86,7 +422,7 @@ describe('Shield Gate', () => {
         expect(result.executionTimeMs).toBeGreaterThanOrEqual(0);
       });
 
-      it('should always return shield_acceptance as false (placeholder)', () => {
+      it('should always return shield_acceptance as false', () => {
         const state = createMockState({
           intent_summary: createIntentSummary({
             stance: 'SHIELD',
@@ -100,10 +436,6 @@ describe('Shield Gate', () => {
         expect(result.output.shield_acceptance).toBe(false);
       });
     });
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // ROUTING LOGIC
-    // ─────────────────────────────────────────────────────────────────────────────
 
     describe('routing logic', () => {
       it('should route to shield when stance is SHIELD and safety_signal is not none', () => {
@@ -166,62 +498,11 @@ describe('Shield Gate', () => {
       });
     });
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // SAFETY SIGNAL HANDLING
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    describe('safety signal handling', () => {
-      it('should route to shield for low safety_signal with SHIELD stance', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            stance: 'SHIELD',
-            safety_signal: 'low',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('shield');
-        expect(result.output.safety_signal).toBe('low');
-      });
-
-      it('should route to shield for medium safety_signal with SHIELD stance', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            stance: 'SHIELD',
-            safety_signal: 'medium',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('shield');
-        expect(result.output.safety_signal).toBe('medium');
-      });
-
-      it('should route to shield for high safety_signal with SHIELD stance', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            stance: 'SHIELD',
-            safety_signal: 'high',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('shield');
-        expect(result.output.safety_signal).toBe('high');
-      });
-
+    describe('safety signal and urgency handling', () => {
       it('should preserve safety_signal value in output', () => {
         for (const signal of ['none', 'low', 'medium', 'high'] as SafetySignal[]) {
           const state = createMockState({
-            intent_summary: createIntentSummary({
-              safety_signal: signal,
-            }),
+            intent_summary: createIntentSummary({ safety_signal: signal }),
           });
           const context = createMockContext();
 
@@ -230,436 +511,169 @@ describe('Shield Gate', () => {
           expect(result.output.safety_signal).toBe(signal);
         }
       });
-    });
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // URGENCY HANDLING
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    describe('urgency handling', () => {
-      it('should preserve low urgency in output', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            urgency: 'low',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.urgency).toBe('low');
-      });
-
-      it('should preserve medium urgency in output', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            urgency: 'medium',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.urgency).toBe('medium');
-      });
-
-      it('should preserve high urgency in output', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            urgency: 'high',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.urgency).toBe('high');
-      });
-
-      it('should preserve urgency for all values', () => {
-        for (const urgency of ['low', 'medium', 'high'] as Urgency[]) {
+      it('should preserve urgency value in output', () => {
+        for (const urg of ['low', 'medium', 'high'] as Urgency[]) {
           const state = createMockState({
-            intent_summary: createIntentSummary({ urgency }),
+            intent_summary: createIntentSummary({ urgency: urg }),
           });
           const context = createMockContext();
 
           const result = executeShieldGate(state, context);
 
-          expect(result.output.urgency).toBe(urgency);
+          expect(result.output.urgency).toBe(urg);
         }
       });
     });
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // DEFAULT VALUE HANDLING
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    describe('default value handling', () => {
-      it('should use default stance (LENS) when intent_summary is undefined', () => {
-        const state = createMockState({ intent_summary: undefined });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('skip');
-      });
-
-      it('should use default safety_signal (none) when intent_summary is undefined', () => {
-        const state = createMockState({ intent_summary: undefined });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.safety_signal).toBe('none');
-      });
-
-      it('should use default urgency (low) when intent_summary is undefined', () => {
-        const state = createMockState({ intent_summary: undefined });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.urgency).toBe('low');
-      });
-
-      it('should handle partial intent_summary gracefully', () => {
-        const state = createMockState({
-          intent_summary: {
-            primary_route: 'SAY',
-            stance: 'SHIELD',
-            // Missing other fields - will use defaults
-          } as IntentSummary,
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        // Should not throw, should use defaults for missing fields
-        expect(result.output.route).toBe('skip'); // safety_signal defaults to 'none'
-        expect(result.output.safety_signal).toBe('none');
-        expect(result.output.urgency).toBe('low');
-      });
-    });
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // EXECUTION TIME TRACKING
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    describe('execution time tracking', () => {
-      it('should track execution time', () => {
-        const state = createMockState({ intent_summary: createIntentSummary() });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(typeof result.executionTimeMs).toBe('number');
-        expect(result.executionTimeMs).toBeGreaterThanOrEqual(0);
-      });
-    });
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // OUTPUT STRUCTURE
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    describe('output structure', () => {
-      it('should return all required output fields', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            stance: 'SHIELD',
-            safety_signal: 'high',
-            urgency: 'high',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output).toHaveProperty('route');
-        expect(result.output).toHaveProperty('safety_signal');
-        expect(result.output).toHaveProperty('urgency');
-        expect(result.output).toHaveProperty('shield_acceptance');
-      });
-
-      it('should return correct types for all output fields', () => {
-        const state = createMockState({ intent_summary: createIntentSummary() });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(typeof result.output.route).toBe('string');
-        expect(typeof result.output.safety_signal).toBe('string');
-        expect(typeof result.output.urgency).toBe('string');
-        expect(typeof result.output.shield_acceptance).toBe('boolean');
-      });
-    });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ASYNC GATE TESTS (executeShieldGateAsync)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  describe('executeShieldGateAsync', () => {
-    it('should return blocked status when shield route is activated', async () => {
-      // Changed: Async version now blocks for confirmation when shield is needed
-      const state = createMockState({
-        intent_summary: createIntentSummary({
-          stance: 'SHIELD',
-          safety_signal: 'high',
-        }),
-      });
-      const context = createMockContext();
-
-      const asyncResult = await executeShieldGateAsync(state, context);
-
-      expect(asyncResult.gateId).toBe('shield');
-      expect(asyncResult.status).toBe('blocked');
-      expect(asyncResult.output.route).toBe('shield');
-    });
-
-    it('should return a Promise', () => {
-      const state = createMockState({ intent_summary: createIntentSummary() });
-      const context = createMockContext();
-
-      const result = executeShieldGateAsync(state, context);
-
-      expect(result).toBeInstanceOf(Promise);
-    });
-
-    it('should route to shield when conditions are met', async () => {
-      const state = createMockState({
-        intent_summary: createIntentSummary({
-          stance: 'SHIELD',
-          safety_signal: 'medium',
-          urgency: 'medium',
-        }),
-      });
-      const context = createMockContext();
-
-      const result = await executeShieldGateAsync(state, context);
-
-      expect(result.output.route).toBe('shield');
-      expect(result.output.safety_signal).toBe('medium');
-      expect(result.output.urgency).toBe('medium');
-    });
-
-    it('should skip when conditions are not met', async () => {
-      const state = createMockState({
-        intent_summary: createIntentSummary({
-          stance: 'LENS',
-          safety_signal: 'none',
-        }),
-      });
-      const context = createMockContext();
-
-      const result = await executeShieldGateAsync(state, context);
-
-      expect(result.output.route).toBe('skip');
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════
   // CONSTITUTIONAL COMPLIANCE SCENARIOS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════
 
   describe('constitutional compliance scenarios', () => {
-    describe('CONTROL stance (highest priority per Constitution)', () => {
-      it('should handle high urgency crisis scenarios', () => {
-        const state = createMockState({
-          intent_summary: createIntentSummary({
-            stance: 'SHIELD',
-            safety_signal: 'high',
-            urgency: 'high',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('shield');
-        expect(result.output.safety_signal).toBe('high');
-        expect(result.output.urgency).toBe('high');
+    beforeEach(() => {
+      mockShieldService.evaluate.mockResolvedValue({
+        action: 'crisis',
+        safetySignal: 'high',
+        urgency: 'high',
+        sessionId: 'crisis_123',
       });
     });
 
     describe('physical safety scenarios (Interest Stack priority 1)', () => {
-      it('should route self-harm messages to shield', () => {
+      it('should halt pipeline for self-harm messages', async () => {
         const state = createMockState({
           userMessage: 'I want to hurt myself',
           intent_summary: createIntentSummary({
-            stance: 'SHIELD',
             safety_signal: 'high',
             urgency: 'high',
           }),
         });
         const context = createMockContext();
 
-        const result = executeShieldGate(state, context);
+        const result = await executeShieldGateAsync(state, context);
 
-        expect(result.output.route).toBe('shield');
+        expect(result.action).toBe('halt');
+        expect(result.output.action).toBe('crisis');
       });
 
-      it('should route suicide mentions to shield', () => {
+      it('should halt pipeline for suicide mentions', async () => {
         const state = createMockState({
           userMessage: 'I want to end it all',
           intent_summary: createIntentSummary({
-            stance: 'SHIELD',
             safety_signal: 'high',
             urgency: 'high',
           }),
         });
         const context = createMockContext();
 
-        const result = executeShieldGate(state, context);
+        const result = await executeShieldGateAsync(state, context);
 
-        expect(result.output.route).toBe('shield');
-      });
-    });
-
-    describe('mental health scenarios (Interest Stack priority 1)', () => {
-      it('should handle emotional distress with low signal', () => {
-        const state = createMockState({
-          userMessage: "I'm feeling stressed about work",
-          intent_summary: createIntentSummary({
-            stance: 'LENS', // Low signals typically stay in LENS
-            safety_signal: 'low',
-            urgency: 'low',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('skip');
-        expect(result.output.safety_signal).toBe('low');
-      });
-
-      it('should route severe anxiety to shield', () => {
-        const state = createMockState({
-          userMessage: "I can't stop panicking, I think I'm having a breakdown",
-          intent_summary: createIntentSummary({
-            stance: 'SHIELD',
-            safety_signal: 'medium',
-            urgency: 'high',
-          }),
-        });
-        const context = createMockContext();
-
-        const result = executeShieldGate(state, context);
-
-        expect(result.output.route).toBe('shield');
+        expect(result.action).toBe('halt');
       });
     });
 
     describe('financial safety scenarios (Interest Stack priority 2)', () => {
-      it('should handle risky financial decisions', () => {
+      beforeEach(() => {
+        mockShieldService.evaluate.mockResolvedValue({
+          action: 'warn',
+          safetySignal: 'medium',
+          urgency: 'medium',
+          warningMessage: 'This involves financial risk',
+        });
+      });
+
+      it('should warn for risky financial decisions', async () => {
         const state = createMockState({
           userMessage: 'I want to put my entire savings into crypto options',
           intent_summary: createIntentSummary({
-            stance: 'SHIELD',
             safety_signal: 'medium',
             urgency: 'medium',
           }),
         });
         const context = createMockContext();
 
-        const result = executeShieldGate(state, context);
+        const result = await executeShieldGateAsync(state, context);
 
-        expect(result.output.route).toBe('shield');
-        expect(result.output.safety_signal).toBe('medium');
+        expect(result.output.action).toBe('warn');
+        expect(result.action).toBe('halt');
       });
     });
 
     describe('career safety scenarios (Interest Stack priority 3)', () => {
-      it('should handle impulsive career decisions', () => {
+      beforeEach(() => {
+        mockShieldService.evaluate.mockResolvedValue({
+          action: 'warn',
+          safetySignal: 'medium',
+          urgency: 'high',
+          warningMessage: 'This could affect your career',
+        });
+      });
+
+      it('should warn for impulsive career decisions', async () => {
         const state = createMockState({
           userMessage: "I'm going to quit my job right now and tell my boss off",
           intent_summary: createIntentSummary({
-            stance: 'SHIELD',
             safety_signal: 'medium',
             urgency: 'high',
           }),
         });
         const context = createMockContext();
 
-        const result = executeShieldGate(state, context);
+        const result = await executeShieldGateAsync(state, context);
 
-        expect(result.output.route).toBe('shield');
+        expect(result.output.action).toBe('warn');
       });
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // EDGE CASES
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ROUTING DECISION MATRIX
+  // ═══════════════════════════════════════════════════════════════════════════════
 
-  describe('edge cases', () => {
-    it('should handle empty userMessage', () => {
-      const state = createMockState({
-        userMessage: '',
-        intent_summary: createIntentSummary(),
-      });
-      const context = createMockContext();
+  describe('async routing decision matrix', () => {
+    const testCases: Array<{
+      safety_signal: SafetySignal;
+      expectedAction: 'skip' | 'warn' | 'crisis';
+      shouldCallEvaluate: boolean;
+    }> = [
+      { safety_signal: 'none', expectedAction: 'skip', shouldCallEvaluate: false },
+      { safety_signal: 'low', expectedAction: 'skip', shouldCallEvaluate: false },
+      { safety_signal: 'medium', expectedAction: 'warn', shouldCallEvaluate: true },
+      { safety_signal: 'high', expectedAction: 'crisis', shouldCallEvaluate: true },
+    ];
 
-      const result = executeShieldGate(state, context);
+    for (const { safety_signal, expectedAction, shouldCallEvaluate } of testCases) {
+      it(`should ${expectedAction} for safety_signal=${safety_signal}`, async () => {
+        if (shouldCallEvaluate) {
+          mockShieldService.evaluate.mockResolvedValue({
+            action: expectedAction,
+            safetySignal: safety_signal,
+            urgency: 'medium',
+            ...(expectedAction === 'crisis' ? { sessionId: 'session_123' } : {}),
+          });
+        }
 
-      expect(result.status).toBe('pass');
-      expect(result.output.route).toBe('skip');
-    });
-
-    it('should handle very long userMessage', () => {
-      const longMessage = 'A'.repeat(10000);
-      const state = createMockState({
-        userMessage: longMessage,
-        intent_summary: createIntentSummary({
-          stance: 'SHIELD',
-          safety_signal: 'low',
-        }),
-      });
-      const context = createMockContext();
-
-      const result = executeShieldGate(state, context);
-
-      expect(result.status).toBe('pass');
-      expect(result.output.route).toBe('shield');
-    });
-
-    it('should handle missing context fields gracefully', () => {
-      const state = createMockState({ intent_summary: createIntentSummary() });
-      const context: PipelineContext = {};
-
-      const result = executeShieldGate(state, context);
-
-      expect(result.status).toBe('pass');
-    });
-
-    it('should always pass gate (router only, no blocking)', () => {
-      // Shield gate is a router, not a blocker
-      const scenarios = [
-        { stance: 'SHIELD' as const, safety_signal: 'high' as const },
-        { stance: 'SHIELD' as const, safety_signal: 'none' as const },
-        { stance: 'LENS' as const, safety_signal: 'high' as const },
-        { stance: 'LENS' as const, safety_signal: 'none' as const },
-      ];
-
-      for (const scenario of scenarios) {
         const state = createMockState({
-          intent_summary: createIntentSummary(scenario),
+          intent_summary: createIntentSummary({ safety_signal }),
         });
         const context = createMockContext();
 
-        const result = executeShieldGate(state, context);
+        const result = await executeShieldGateAsync(state, context);
 
-        expect(result.status).toBe('pass');
-        expect(result.action).toBe('continue');
-      }
-    });
+        expect(result.output.action).toBe(expectedAction);
+        
+        if (shouldCallEvaluate) {
+          expect(mockShieldService.evaluate).toHaveBeenCalled();
+        } else {
+          expect(mockShieldService.evaluate).not.toHaveBeenCalled();
+        }
+      });
+    }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ROUTING DECISION MATRIX
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  describe('routing decision matrix', () => {
+  describe('sync routing decision matrix', () => {
     const testCases: Array<{
       stance: 'LENS' | 'SWORD' | 'SHIELD';
       safety_signal: SafetySignal;

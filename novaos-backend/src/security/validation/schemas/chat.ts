@@ -18,6 +18,15 @@ export const ChatMessageSchema = z.object({
   // .nullish() accepts string | null | undefined (fixes frontend sending null)
   conversationId: z.string().nullish(),
   
+  // NEW: Force start a new conversation (ignores conversationId)
+  newConversation: z.boolean().optional(),
+  
+  // NEW: Manual stance override (lens, sword, shield)
+  stance: z.string().nullish(),
+  
+  // NEW: Action source tracking (ui_button, voice, etc.)
+  actionSource: z.string().nullish(),
+  
   ackToken: z.string().nullish(),
   
   context: z.object({
