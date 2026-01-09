@@ -201,7 +201,6 @@ export function ChatPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [typingMessageIds, setTypingMessageIds] = useState<Set<string>>(new Set());
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [shouldScrollToUser, setShouldScrollToUser] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -270,10 +269,16 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Scroll to position user message at top of viewport when sending
+  // Scroll to position user message at top of viewport when a new user message is added
+  const lastUserMessageId = messages.filter(m => m.role === 'user').pop()?.id;
+  const prevUserMessageIdRef = useRef<string | undefined>(undefined);
+  
   useEffect(() => {
-    if (shouldScrollToUser && messages.length > 0) {
-      // Wait for DOM to update with the new message
+    // Check if we have a new user message
+    if (lastUserMessageId && lastUserMessageId !== prevUserMessageIdRef.current) {
+      prevUserMessageIdRef.current = lastUserMessageId;
+      
+      // Delay to ensure DOM has updated
       const timer = setTimeout(() => {
         if (lastUserMessageRef.current) {
           lastUserMessageRef.current.scrollIntoView({ 
@@ -281,11 +286,10 @@ export function ChatPage() {
             block: 'start' 
           });
         }
-        setShouldScrollToUser(false);
-      }, 100);
+      }, 150);
       return () => clearTimeout(timer);
     }
-  }, [shouldScrollToUser, messages.length]);
+  }, [lastUserMessageId]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
@@ -363,10 +367,8 @@ export function ChatPage() {
       inputRef.current.blur(); // Close keyboard
     }
 
-    // Set flag to scroll after message is added
-    setShouldScrollToUser(true);
-
     // Start sending (don't await - let it happen in background)
+    // Scroll to user message is handled automatically by the lastUserMessageId effect
     sendMessage(text);
   };
 
