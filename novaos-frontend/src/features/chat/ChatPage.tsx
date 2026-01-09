@@ -691,11 +691,6 @@ export function ChatPage() {
             </button>
           )}
           
-          {/* DEBUG: Remove after testing */}
-          <div className="bg-red-500 text-white px-3 py-1 rounded-lg text-xs mb-2 text-center">
-            Keyboard: {isKeyboardOpen ? 'OPEN' : 'CLOSED'}
-          </div>
-          
           {/* Dark Card */}
           <div 
             className="rounded-[28px] overflow-hidden"
