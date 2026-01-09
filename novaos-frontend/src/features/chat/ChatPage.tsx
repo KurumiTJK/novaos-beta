@@ -402,6 +402,10 @@ export function ChatPage() {
         bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : 0
       }}
     >
+      {/* DEBUG: Remove after testing */}
+      <div className="absolute top-20 left-4 bg-red-500 text-white px-3 py-2 rounded-lg z-[100] text-xs">
+        KB: {keyboardHeight}px | Win: {typeof window !== 'undefined' ? window.innerHeight : 0} | VV: {typeof window !== 'undefined' && window.visualViewport ? Math.round(window.visualViewport.height) : 0}
+      </div>
       {/* Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
