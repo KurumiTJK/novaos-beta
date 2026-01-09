@@ -589,16 +589,13 @@ export function ChatPage() {
           </>
         )}
 
-        {/* Messages - Scrollable, content pushed to bottom when sparse */}
+        {/* Messages - Scrollable, takes remaining space */}
         <div 
           ref={messagesContainerRef}
-          className="flex-1 overflow-y-auto min-h-0 flex flex-col"
+          className="flex-1 overflow-y-auto min-h-0"
         >
-          {/* Spacer - pushes messages to bottom when content doesn't fill screen */}
-          <div className="flex-grow" />
-          
-          {/* Messages wrapper */}
-          <div className="px-5 pt-5 pb-6 flex-shrink-0">
+          {/* Messages wrapper with padding */}
+          <div className="px-5 pt-5 pb-6">
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
             const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
