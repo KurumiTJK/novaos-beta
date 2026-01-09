@@ -190,7 +190,7 @@ export function ChatPage() {
   // FIX: Scroll to bottom on initial mount (instant, no animation)
   useEffect(() => {
     const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
     }, 50);
     return () => clearTimeout(timer);
   }, []);
@@ -224,7 +224,7 @@ export function ChatPage() {
   // Scroll to bottom function
   const scrollToBottom = useCallback(() => {
     haptic('light');
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     setShowScrollButton(false);
     userScrolledRef.current = false;
   }, [haptic]);
@@ -548,13 +548,16 @@ export function ChatPage() {
           </>
         )}
 
-        {/* Messages - Scrollable, takes remaining space */}
-        {/* FIX: Changed paddingBottom from '60vh' to '24px' to prevent over-scrolling */}
+        {/* Messages - Scrollable, content pushed to bottom when sparse */}
         <div 
           ref={messagesContainerRef}
-          className="flex-1 overflow-y-auto px-5 pt-5 min-h-0"
-          style={{ paddingBottom: '24px' }}
+          className="flex-1 overflow-y-auto min-h-0 flex flex-col"
         >
+          {/* Spacer - pushes messages to bottom when content doesn't fill screen */}
+          <div className="flex-grow" />
+          
+          {/* Messages wrapper */}
+          <div className="px-5 pt-5 pb-6 flex-shrink-0">
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
             const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
@@ -622,6 +625,7 @@ export function ChatPage() {
             );
           })}
           <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Input Container - Fixed at bottom */}
