@@ -268,43 +268,44 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Calculate bottom padding needed to scroll last message to top (but no further)
-  const [bottomPadding, setBottomPadding] = useState(0);
+  // Max scroll position - updated when messages change
+  const maxScrollRef = useRef(0);
   const [debugPadding, setDebugPadding] = useState('');
   
+  // Calculate max scroll position (last message at top)
   useEffect(() => {
     const container = messagesContainerRef.current;
-    if (!container || messages.length === 0) {
-      setBottomPadding(0);
-      return;
-    }
+    if (!container || messages.length === 0) return;
     
-    // Wait for DOM to update (longer delay to catch typing completion)
     const timer = setTimeout(() => {
-      const containerHeight = container.clientHeight;
-      
-      // Find the last message element
       const messageElements = container.querySelectorAll('[data-message]');
-      if (messageElements.length === 0) {
-        setBottomPadding(0);
-        return;
-      }
+      if (messageElements.length === 0) return;
       
       const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
-      
       if (lastMessage) {
-        // Padding = just enough so last message can scroll to top
-        // = viewport height - last message height - small top margin
-        const lastMsgHeight = lastMessage.offsetHeight;
-        const neededPadding = Math.max(0, containerHeight - lastMsgHeight - 24);
-        
-        setDebugPadding(`ch=${containerHeight}, lmh=${lastMsgHeight}, pad=${neededPadding}`);
-        setBottomPadding(neededPadding);
+        // Max scroll = position where last message is at top + small buffer
+        maxScrollRef.current = lastMessage.offsetTop - 20;
+        setDebugPadding(`maxScroll=${maxScrollRef.current}`);
       }
-    }, 150);
+    }, 200);
     
     return () => clearTimeout(timer);
-  }, [messages, typingMessageIds.size]); // Recalculate when typing state changes
+  }, [messages, typingMessageIds.size]);
+  
+  // Clamp scroll position to not go past last message
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    const handleScroll = () => {
+      if (container.scrollTop > maxScrollRef.current && maxScrollRef.current > 0) {
+        container.scrollTop = maxScrollRef.current;
+      }
+    };
+    
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Scroll to position user message at top of viewport
   useEffect(() => {
@@ -630,8 +631,8 @@ export function ChatPage() {
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {/* Messages wrapper - dynamic bottom padding allows scrolling last message to top */}
-          <div className="px-5 pt-5" style={{ paddingBottom: bottomPadding }}>
+          {/* Messages wrapper - large bottom padding for scroll room, clamped by scroll handler */}
+          <div className="px-5 pt-5" style={{ paddingBottom: '70vh' }}>
           {/* DEBUG */}
           <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
             {debugPadding}
