@@ -292,19 +292,46 @@ export function ChatPage() {
     return () => clearTimeout(timer);
   }, [messages, typingMessageIds.size]);
   
-  // Clamp scroll position to not go past last message
+  // Clamp scroll position - check repeatedly during and after scroll
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
     
-    const handleScroll = () => {
-      if (container.scrollTop > maxScrollRef.current && maxScrollRef.current > 0) {
+    let scrollCheckInterval: NodeJS.Timeout | null = null;
+    
+    const clampScroll = () => {
+      if (maxScrollRef.current > 0 && container.scrollTop > maxScrollRef.current) {
         container.scrollTop = maxScrollRef.current;
       }
     };
     
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    const handleScrollStart = () => {
+      // Check position repeatedly while scrolling
+      if (scrollCheckInterval) clearInterval(scrollCheckInterval);
+      scrollCheckInterval = setInterval(clampScroll, 16); // ~60fps
+    };
+    
+    const handleScrollEnd = () => {
+      // Final clamp after scroll ends
+      setTimeout(() => {
+        clampScroll();
+        if (scrollCheckInterval) {
+          clearInterval(scrollCheckInterval);
+          scrollCheckInterval = null;
+        }
+      }, 100);
+    };
+    
+    container.addEventListener('touchstart', handleScrollStart, { passive: true });
+    container.addEventListener('touchend', handleScrollEnd, { passive: true });
+    container.addEventListener('scroll', clampScroll, { passive: true });
+    
+    return () => {
+      container.removeEventListener('touchstart', handleScrollStart);
+      container.removeEventListener('touchend', handleScrollEnd);
+      container.removeEventListener('scroll', clampScroll);
+      if (scrollCheckInterval) clearInterval(scrollCheckInterval);
+    };
   }, []);
 
   // Scroll to position user message at top of viewport
