@@ -268,71 +268,57 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Max scroll position - updated when messages change
-  const maxScrollRef = useRef(0);
+  // Dynamic bottom padding - just enough to scroll last message to top
+  const [bottomPadding, setBottomPadding] = useState(0);
   const [debugPadding, setDebugPadding] = useState('');
   
-  // Calculate max scroll position (last message at top)
   useEffect(() => {
     const container = messagesContainerRef.current;
-    if (!container || messages.length === 0) return;
+    if (!container || messages.length === 0) {
+      setBottomPadding(0);
+      return;
+    }
     
-    const timer = setTimeout(() => {
+    const calculatePadding = () => {
+      const wrapper = container.firstElementChild as HTMLElement;
+      if (!wrapper) return;
+      
+      const containerHeight = container.clientHeight;
       const messageElements = container.querySelectorAll('[data-message]');
       if (messageElements.length === 0) return;
       
       const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
-      if (lastMessage) {
-        // Max scroll = position where last message is at top + small buffer
-        maxScrollRef.current = lastMessage.offsetTop - 20;
-        setDebugPadding(`maxScroll=${maxScrollRef.current}`);
+      if (!lastMessage) return;
+      
+      // Get current values
+      const lastMsgTop = lastMessage.offsetTop;
+      const currentScrollHeight = wrapper.scrollHeight;
+      const currentPad = bottomPadding;
+      
+      // Content height without our dynamic padding
+      const contentHeight = currentScrollHeight - currentPad;
+      
+      // We want: maxScroll = lastMsgTop - 20 (buffer from top)
+      // maxScroll = newScrollHeight - containerHeight
+      // newScrollHeight = contentHeight + newPadding
+      // So: lastMsgTop - 20 = contentHeight + newPadding - containerHeight
+      // newPadding = lastMsgTop - 20 + containerHeight - contentHeight
+      
+      const neededPadding = Math.max(0, lastMsgTop - 20 + containerHeight - contentHeight);
+      
+      setDebugPadding(`ch=${containerHeight}, top=${lastMsgTop}, content=${contentHeight}, pad=${neededPadding}`);
+      
+      // Only update if significantly different to avoid loops
+      if (Math.abs(neededPadding - currentPad) > 5) {
+        setBottomPadding(neededPadding);
       }
-    }, 200);
+    };
+    
+    // Calculate after DOM settles
+    const timer = setTimeout(calculatePadding, 300);
     
     return () => clearTimeout(timer);
-  }, [messages, typingMessageIds.size]);
-  
-  // Clamp scroll position - check repeatedly during and after scroll
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    
-    let scrollCheckInterval: NodeJS.Timeout | null = null;
-    
-    const clampScroll = () => {
-      if (maxScrollRef.current > 0 && container.scrollTop > maxScrollRef.current) {
-        container.scrollTop = maxScrollRef.current;
-      }
-    };
-    
-    const handleScrollStart = () => {
-      // Check position repeatedly while scrolling
-      if (scrollCheckInterval) clearInterval(scrollCheckInterval);
-      scrollCheckInterval = setInterval(clampScroll, 16); // ~60fps
-    };
-    
-    const handleScrollEnd = () => {
-      // Final clamp after scroll ends
-      setTimeout(() => {
-        clampScroll();
-        if (scrollCheckInterval) {
-          clearInterval(scrollCheckInterval);
-          scrollCheckInterval = null;
-        }
-      }, 100);
-    };
-    
-    container.addEventListener('touchstart', handleScrollStart, { passive: true });
-    container.addEventListener('touchend', handleScrollEnd, { passive: true });
-    container.addEventListener('scroll', clampScroll, { passive: true });
-    
-    return () => {
-      container.removeEventListener('touchstart', handleScrollStart);
-      container.removeEventListener('touchend', handleScrollEnd);
-      container.removeEventListener('scroll', clampScroll);
-      if (scrollCheckInterval) clearInterval(scrollCheckInterval);
-    };
-  }, []);
+  }, [messages, typingMessageIds.size, bottomPadding]);
 
   // Scroll to position user message at top of viewport
   useEffect(() => {
@@ -658,8 +644,8 @@ export function ChatPage() {
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {/* Messages wrapper - large bottom padding for scroll room, clamped by scroll handler */}
-          <div className="px-5 pt-5" style={{ paddingBottom: '70vh' }}>
+          {/* Messages wrapper - dynamic bottom padding allows scrolling last message to top */}
+          <div className="px-5 pt-5" style={{ paddingBottom: bottomPadding }}>
           {/* DEBUG */}
           <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
             {debugPadding}
