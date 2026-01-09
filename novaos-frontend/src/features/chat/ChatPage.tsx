@@ -268,6 +268,35 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
+  // Calculate bottom padding needed to scroll last message to top
+  const [bottomPadding, setBottomPadding] = useState(0);
+  
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || messages.length === 0) {
+      setBottomPadding(0);
+      return;
+    }
+    
+    // Wait for DOM to update
+    const timer = setTimeout(() => {
+      const containerHeight = container.clientHeight;
+      
+      // Find the last message element
+      const messageElements = container.querySelectorAll('[data-message]');
+      const lastMessage = messageElements[messageElements.length - 1] as HTMLElement;
+      
+      if (lastMessage) {
+        // Padding = container height - last message height - small buffer
+        const lastMessageHeight = lastMessage.offsetHeight;
+        const neededPadding = Math.max(0, containerHeight - lastMessageHeight - 40);
+        setBottomPadding(neededPadding);
+      }
+    }, 50);
+    
+    return () => clearTimeout(timer);
+  }, [messages]);
+
   // Scroll to position user message at top of viewport
   useEffect(() => {
     if (shouldScrollToUser) {
@@ -592,8 +621,8 @@ export function ChatPage() {
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {/* Messages wrapper - large bottom padding allows scrolling any message to top */}
-          <div className="px-5 pt-5" style={{ paddingBottom: '70vh' }}>
+          {/* Messages wrapper - dynamic bottom padding allows scrolling last message to top */}
+          <div className="px-5 pt-5" style={{ paddingBottom: bottomPadding }}>
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
             const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
@@ -604,6 +633,7 @@ export function ChatPage() {
                 key={message.id} 
                 className="mb-5"
                 ref={isLastUserMessage ? lastUserMessageRef : null}
+                data-message="true"
               >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
