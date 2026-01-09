@@ -295,7 +295,6 @@ export function ChatPage() {
 
   // Dynamic bottom padding - just enough to scroll last message to top
   const [bottomPadding, setBottomPadding] = useState(500); // Start with enough padding
-  const [debugPadding, setDebugPadding] = useState('');
   
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -328,8 +327,6 @@ export function ChatPage() {
       const buffer = lastMsgHeight + 40;
       
       const neededPadding = Math.max(0, lastMsgTop - buffer + containerHeight - contentHeight);
-      
-      setDebugPadding(`msgH=${lastMsgHeight}, pad=${neededPadding}`);
       
       // Only update if significantly different to avoid loops
       if (Math.abs(neededPadding - currentPad) > 5) {
@@ -675,10 +672,6 @@ export function ChatPage() {
         >
           {/* Messages wrapper - dynamic bottom padding allows scrolling last message to top */}
           <div className="px-5 pt-5" style={{ paddingBottom: bottomPadding }}>
-          {/* DEBUG */}
-          <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
-            {debugPadding}
-          </div>
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
             const lastUserIndex = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i !== -1).pop();
