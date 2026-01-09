@@ -633,7 +633,7 @@ export function ChatPage() {
           className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
-            paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
+            paddingBottom: isInputFocused ? '8px' : 'calc(8px + env(safe-area-inset-bottom))',
             backgroundColor: '#000000'
           }}
         >
@@ -654,8 +654,7 @@ export function ChatPage() {
             className="rounded-[28px] overflow-hidden"
             style={{ 
               backgroundColor: '#1C1C1E',
-              border: '1px solid rgba(255,255,255,0.1)',
-              marginBottom: isInputFocused ? '20px' : '0'
+              border: '1px solid rgba(255,255,255,0.1)'
             }}
           >
             {/* Input area */}
