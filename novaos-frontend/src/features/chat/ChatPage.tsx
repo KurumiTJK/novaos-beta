@@ -274,17 +274,26 @@ export function ChatPage() {
   const prevUserMessageIdRef = useRef<string | undefined>(undefined);
   
   useEffect(() => {
+    console.log('Scroll effect:', { 
+      lastUserMessageId, 
+      prevId: prevUserMessageIdRef.current,
+      hasRef: !!lastUserMessageRef.current 
+    });
+    
     // Check if we have a new user message
     if (lastUserMessageId && lastUserMessageId !== prevUserMessageIdRef.current) {
+      console.log('New user message detected, scrolling...');
       prevUserMessageIdRef.current = lastUserMessageId;
       
       // Delay to ensure DOM has updated
       const timer = setTimeout(() => {
+        console.log('Timer fired, ref exists:', !!lastUserMessageRef.current);
         if (lastUserMessageRef.current) {
           lastUserMessageRef.current.scrollIntoView({ 
             behavior: 'smooth', 
             block: 'start' 
           });
+          console.log('scrollIntoView called');
         }
       }, 150);
       return () => clearTimeout(timer);
@@ -606,14 +615,14 @@ export function ChatPage() {
             return (
               <div 
                 key={message.id} 
-                className="mb-5"
+                className={`mb-5 ${isLastUserMessage ? 'border-l-4 border-green-500 pl-2' : ''}`}
                 ref={isLastUserMessage ? lastUserMessageRef : null}
               >
                 {message.role === 'user' ? (
                   <div className="flex justify-end">
                     <div 
                       className="max-w-[85%] px-5 py-3.5 rounded-3xl text-[17px] leading-relaxed"
-                      style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
+                      style={{ backgroundColor: isLastUserMessage ? '#2a4a2a' : '#1C1C1E', color: '#FFFFFF' }}
                     >
                       {message.content}
                     </div>
@@ -689,6 +698,11 @@ export function ChatPage() {
               </svg>
             </button>
           )}
+          
+          {/* DEBUG */}
+          <div className="bg-red-500 text-white px-2 py-1 rounded text-xs mb-2">
+            Msgs: {messages.length} | LastUserID: {lastUserMessageId?.slice(-6) || 'none'}
+          </div>
           
           {/* Dark Card */}
           <div 
