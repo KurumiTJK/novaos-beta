@@ -9,40 +9,44 @@ import { useHaptic } from '@/shared/hooks';
 import { LoadingDots } from '@/shared/components';
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// iOS KEYBOARD HEIGHT HOOK
-// Uses visualViewport API to detect keyboard and calculate offset
+// iOS KEYBOARD DETECTION HOOK
+// In PWA mode, visualViewport doesn't work, so we use focus detection
 // ─────────────────────────────────────────────────────────────────────────────────
 
-function useKeyboardHeight() {
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+function useKeyboardOpen() {
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
   useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-
-    const updateKeyboardHeight = () => {
-      // Calculate keyboard height as difference between window height and viewport height
-      const windowHeight = window.innerHeight;
-      const viewportHeight = viewport.height;
-      const offset = windowHeight - viewportHeight;
-      
-      // Only set if there's a significant difference (keyboard is likely open)
-      setKeyboardHeight(offset > 50 ? offset : 0);
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        setIsKeyboardOpen(true);
+      }
     };
 
-    viewport.addEventListener('resize', updateKeyboardHeight);
-    viewport.addEventListener('scroll', updateKeyboardHeight);
-    
-    // Initial check
-    updateKeyboardHeight();
+    const handleFocusOut = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        // Small delay to handle focus switching between inputs
+        setTimeout(() => {
+          const active = document.activeElement as HTMLElement;
+          if (!active?.isContentEditable && active?.tagName !== 'INPUT' && active?.tagName !== 'TEXTAREA') {
+            setIsKeyboardOpen(false);
+          }
+        }, 100);
+      }
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
 
     return () => {
-      viewport.removeEventListener('resize', updateKeyboardHeight);
-      viewport.removeEventListener('scroll', updateKeyboardHeight);
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
     };
   }, []);
 
-  return keyboardHeight;
+  return isKeyboardOpen;
 }
 import {
   MenuIcon,
@@ -189,7 +193,7 @@ export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
   const { messages, isLoading, sendMessage } = useChatStore();
   const haptic = useHaptic();
-  const keyboardHeight = useKeyboardHeight();
+  const isKeyboardOpen = useKeyboardOpen();
   
   const [inputValue, setInputValue] = useState('');
   const [isIncognito, setIsIncognito] = useState(false);
@@ -393,14 +397,8 @@ export function ChatPage() {
 
   return (
     <div 
-      className="fixed max-w-[430px] mx-auto flex z-50"
-      style={{ 
-        backgroundColor: '#000000',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : 0
-      }}
+      className="fixed inset-0 max-w-[430px] mx-auto flex z-50"
+      style={{ backgroundColor: '#000000' }}
     >
       {/* Sidebar Overlay */}
       {isSidebarOpen && (
@@ -676,7 +674,7 @@ export function ChatPage() {
           className="flex-shrink-0 px-3 relative"
           style={{ 
             paddingTop: '8px',
-            paddingBottom: keyboardHeight > 0 ? '8px' : 'calc(8px + env(safe-area-inset-bottom))',
+            paddingBottom: isKeyboardOpen ? '0px' : 'calc(8px + env(safe-area-inset-bottom))',
             backgroundColor: '#000000'
           }}
         >
@@ -695,7 +693,7 @@ export function ChatPage() {
           
           {/* DEBUG: Remove after testing */}
           <div className="bg-red-500 text-white px-3 py-1 rounded-lg text-xs mb-2 text-center">
-            KB: {keyboardHeight}px | Bottom: {keyboardHeight > 0 ? keyboardHeight : 0}
+            Keyboard: {isKeyboardOpen ? 'OPEN' : 'CLOSED'}
           </div>
           
           {/* Dark Card */}
