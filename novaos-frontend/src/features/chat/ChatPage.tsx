@@ -270,22 +270,22 @@ export function ChatPage() {
     userScrolledRef.current = false;
   }, [haptic]);
 
-  // Scroll to position user message at top of viewport
+  // Scroll to position user message at top of viewport when sending
   useEffect(() => {
-    if (shouldScrollToUser) {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          if (lastUserMessageRef.current) {
-            lastUserMessageRef.current.scrollIntoView({ 
-              behavior: 'smooth', 
-              block: 'start' 
-            });
-          }
-          setShouldScrollToUser(false);
-        }, 100);
-      });
+    if (shouldScrollToUser && messages.length > 0) {
+      // Wait for DOM to update with the new message
+      const timer = setTimeout(() => {
+        if (lastUserMessageRef.current) {
+          lastUserMessageRef.current.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start' 
+          });
+        }
+        setShouldScrollToUser(false);
+      }, 100);
+      return () => clearTimeout(timer);
     }
-  }, [shouldScrollToUser, messages]);
+  }, [shouldScrollToUser, messages.length]);
 
   // Track new assistant messages for typing animation
   useEffect(() => {
