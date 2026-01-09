@@ -292,21 +292,19 @@ export function ChatPage() {
       
       // Get current values
       const lastMsgTop = lastMessage.offsetTop;
+      const lastMsgHeight = lastMessage.offsetHeight;
       const currentScrollHeight = wrapper.scrollHeight;
       const currentPad = bottomPadding;
       
       // Content height without our dynamic padding
       const contentHeight = currentScrollHeight - currentPad;
       
-      // We want: maxScroll = lastMsgTop - 20 (buffer from top)
-      // maxScroll = newScrollHeight - containerHeight
-      // newScrollHeight = contentHeight + newPadding
-      // So: lastMsgTop - 20 = contentHeight + newPadding - containerHeight
-      // newPadding = lastMsgTop - 20 + containerHeight - contentHeight
+      // Buffer = last message height + margin, so the whole last message stays visible
+      const buffer = lastMsgHeight + 40;
       
-      const neededPadding = Math.max(0, lastMsgTop - 20 + containerHeight - contentHeight);
+      const neededPadding = Math.max(0, lastMsgTop - buffer + containerHeight - contentHeight);
       
-      setDebugPadding(`ch=${containerHeight}, top=${lastMsgTop}, content=${contentHeight}, pad=${neededPadding}`);
+      setDebugPadding(`msgH=${lastMsgHeight}, pad=${neededPadding}`);
       
       // Only update if significantly different to avoid loops
       if (Math.abs(neededPadding - currentPad) > 5) {
