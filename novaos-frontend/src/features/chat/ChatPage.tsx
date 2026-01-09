@@ -187,6 +187,14 @@ export function ChatPage() {
     }
   }, []);
 
+  // FIX: Scroll to bottom on initial mount (instant, no animation)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Check if scrolled to bottom
   const checkScrollPosition = useCallback(() => {
     const container = messagesContainerRef.current;
@@ -541,10 +549,11 @@ export function ChatPage() {
         )}
 
         {/* Messages - Scrollable, takes remaining space */}
+        {/* FIX: Changed paddingBottom from '60vh' to '24px' to prevent over-scrolling */}
         <div 
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto px-5 pt-5 min-h-0"
-          style={{ paddingBottom: '60vh' }}
+          style={{ paddingBottom: '24px' }}
         >
           {messages.map((message, index) => {
             // Check if this is the last user message in the array
