@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT STORE — NovaOS
 // Fixed to match existing ChatPage interface + added shield/stance support
-// + SwordGate redirect handling
+// + SwordGate redirect handling + Streaming support
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
-import { sendMessage as sendMessageApi } from '../api/chat';
+import { sendMessage as sendMessageApi, sendMessageStream as sendMessageStreamApi } from '../api/chat';
 import { useUIStore } from './uiStore';
 import type { Message as MessageType, Stance, ShieldActivation, SwordRedirect } from '../types';
 
@@ -27,6 +27,7 @@ export interface ChatState {
   messages: MessageType[];
   conversationId: string | null;
   isLoading: boolean;
+  isStreaming: boolean;
   error: string | null;
   
   /** Current stance */
@@ -40,8 +41,11 @@ export interface ChatState {
   // ACTIONS
   // ─────────────────────────────────────────────────────────────────────────────
   
-  /** Send a message */
+  /** Send a message (non-streaming) */
   sendMessage: (content: string) => Promise<void>;
+  
+  /** Send a message with streaming response */
+  sendMessageStream: (content: string) => Promise<void>;
   
   /** Confirm pending action */
   confirmPendingAction: (messageId: string) => void;
@@ -81,13 +85,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   conversationId: null,
   isLoading: false,
+  isStreaming: false,
   error: null,
   currentStance: null,
   shieldActivation: null,
   isShieldOverlayOpen: false,
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SEND MESSAGE
+  // SEND MESSAGE (non-streaming - kept for backwards compatibility)
   // ═══════════════════════════════════════════════════════════════════════════
   
   sendMessage: async (content: string) => {
@@ -197,6 +202,217 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         messages: get().messages.filter(m => !m.isLoading),
         isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to send message',
+      });
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SEND MESSAGE WITH STREAMING
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  sendMessageStream: async (content: string) => {
+    const { conversationId, messages } = get();
+    
+    // Add user message
+    const userMessage: MessageType = {
+      id: generateId(),
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    };
+    
+    // Add assistant message (will be updated with streamed content)
+    const assistantMessageId = generateId();
+    const assistantMessage: MessageType = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true, // New flag for streaming state
+    };
+    
+    set({
+      messages: [...messages, userMessage, assistantMessage],
+      isLoading: true,
+      isStreaming: true,
+      error: null,
+    });
+
+    try {
+      await sendMessageStreamApi(
+        {
+          message: content,
+          newConversation: !conversationId,
+        },
+        {
+          // ─────────────────────────────────────────────────────────────────────
+          // ON TOKEN — Update message content incrementally
+          // ─────────────────────────────────────────────────────────────────────
+          onToken: (text: string) => {
+            set({
+              messages: get().messages.map(msg =>
+                msg.id === assistantMessageId
+                  ? { ...msg, content: msg.content + text }
+                  : msg
+              ),
+            });
+          },
+          
+          // ─────────────────────────────────────────────────────────────────────
+          // ON DONE — Finalize the message
+          // ─────────────────────────────────────────────────────────────────────
+          onDone: (data) => {
+            set({
+              messages: get().messages.map(msg =>
+                msg.id === assistantMessageId
+                  ? { ...msg, isStreaming: false, stance: data.stance as Stance | undefined }
+                  : msg
+              ),
+              conversationId: data.conversationId || conversationId,
+              currentStance: (data.stance as Stance) || null,
+              isLoading: false,
+              isStreaming: false,
+            });
+          },
+          
+          // ─────────────────────────────────────────────────────────────────────
+          // ON ERROR — Handle streaming errors
+          // ─────────────────────────────────────────────────────────────────────
+          onError: (error: string) => {
+            console.error('[CHAT] Stream error:', error);
+            
+            // Remove the empty assistant message on error
+            set({
+              messages: get().messages.filter(m => 
+                m.id !== assistantMessageId || m.content.length > 0
+              ),
+              isLoading: false,
+              isStreaming: false,
+              error,
+            });
+          },
+          
+          // ─────────────────────────────────────────────────────────────────────
+          // ON START — Handle stream metadata
+          // ─────────────────────────────────────────────────────────────────────
+          onStart: (data) => {
+            if (data.conversationId) {
+              set({ conversationId: data.conversationId });
+            }
+          },
+          
+          // ─────────────────────────────────────────────────────────────────────
+          // ON THINKING — Server is processing (high-risk path)
+          // UI already shows loading state, this is mainly for logging
+          // ─────────────────────────────────────────────────────────────────────
+          onThinking: () => {
+            console.log('[CHAT] Server is thinking (high-risk pipeline)...');
+            // Could add a different state here in the future
+            // e.g., set({ isThinking: true }) for a special "AI is thinking..." indicator
+          },
+          
+          // ─────────────────────────────────────────────────────────────────────
+          // ON JSON RESPONSE — Handle non-streaming responses (shield, redirect)
+          // ─────────────────────────────────────────────────────────────────────
+          onJsonResponse: (response) => {
+            // ─── SHIELD ACTIVATION ───
+            if (response.shieldActivation) {
+              set({
+                isLoading: false,
+                isStreaming: false,
+                shieldActivation: response.shieldActivation,
+                isShieldOverlayOpen: true,
+                // Remove assistant message but keep user message
+                messages: get().messages.filter(m => m.id !== assistantMessageId),
+              });
+              return;
+            }
+            
+            // ─── SWORDGATE REDIRECT ───
+            if (response.status === 'redirect' && response.redirect) {
+              const redirect = response.redirect as SwordRedirect;
+              
+              const confirmMessage: MessageType = {
+                id: assistantMessageId,
+                role: 'assistant',
+                content: redirect.mode === 'designer'
+                  ? `I'd love to help you learn ${redirect.topic || 'that'}! Would you like me to create a personalized learning plan?`
+                  : `Let's continue with your learning plan!`,
+                timestamp: new Date(),
+                stance: 'sword',
+                isStreaming: false,
+                pendingAction: {
+                  type: 'sword_redirect',
+                  redirect,
+                  confirmText: 'Yes, let\'s go!',
+                  cancelText: 'Not now',
+                },
+              };
+              
+              set({
+                messages: get().messages.map(m =>
+                  m.id === assistantMessageId ? confirmMessage : m
+                ),
+                conversationId: response.conversationId || conversationId,
+                currentStance: 'sword',
+                isLoading: false,
+                isStreaming: false,
+              });
+              return;
+            }
+            
+            // ─── BLOCKED (shield warn/crisis) ───
+            if (response.status === 'blocked') {
+              // Use shieldActivation if present (properly typed), otherwise build from shield object
+              const activation = response.shieldActivation ?? (response.shield ? {
+                activationId: response.shield.activationId ?? `shield_${Date.now()}`,
+                domain: 'crisis' as const,
+                severity: response.shield.action === 'crisis' ? 'high' as const : 'medium' as const,
+                warningMessage: response.shield.warningMessage ?? 'This request has been blocked.',
+                requiresConfirmation: response.shield.action !== 'crisis',
+              } : null);
+              
+              if (activation) {
+                set({
+                  isLoading: false,
+                  isStreaming: false,
+                  shieldActivation: activation,
+                  isShieldOverlayOpen: true,
+                  messages: get().messages.filter(m => m.id !== assistantMessageId),
+                });
+                return;
+              }
+            }
+            
+            // ─── NORMAL JSON RESPONSE (fallback) ───
+            set({
+              messages: get().messages.map(m =>
+                m.id === assistantMessageId
+                  ? { 
+                      ...m, 
+                      content: response.response, 
+                      isStreaming: false,
+                      stance: response.stance,
+                      pendingAction: response.pendingAction,
+                    }
+                  : m
+              ),
+              conversationId: response.conversationId || conversationId,
+              currentStance: response.stance || null,
+              isLoading: false,
+              isStreaming: false,
+            });
+          },
+        }
+      );
+    } catch (error) {
+      console.error('[CHAT] Stream failed:', error);
+      
+      set({
+        messages: get().messages.filter(m => m.id !== assistantMessageId),
+        isLoading: false,
+        isStreaming: false,
         error: error instanceof Error ? error.message : 'Failed to send message',
       });
     }

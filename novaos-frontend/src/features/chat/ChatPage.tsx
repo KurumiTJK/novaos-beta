@@ -189,7 +189,7 @@ const chatHistory = [
 
 export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
-  const { messages, isLoading, sendMessage, clearMessages } = useChatStore();
+  const { messages, isLoading, sendMessageStream, clearMessages } = useChatStore();
   const haptic = useHaptic();
   const isKeyboardOpen = useKeyboardOpen();
   
@@ -442,8 +442,8 @@ export function ChatPage() {
     // Set flag to scroll after message is added
     setShouldScrollToUser(true);
 
-    // Start sending (don't await - let it happen in background)
-    sendMessage(text);
+    // Start sending with streaming (don't await - let it happen in background)
+    sendMessageStream(text);
   };
 
   const handleNewChat = () => {
@@ -692,6 +692,19 @@ export function ChatPage() {
                       style={{ backgroundColor: '#1C1C1E', color: '#FFFFFF' }}
                     >
                       {message.content}
+                    </div>
+                  </div>
+                ) : message.isStreaming ? (
+                  // ═══════════════════════════════════════════════════════════════
+                  // STREAMING MESSAGE - Show content with blinking cursor
+                  // ═══════════════════════════════════════════════════════════════
+                  <div className="pr-10">
+                    <div 
+                      className="text-[17px] leading-[1.7]"
+                      style={{ color: '#FFFFFF' }}
+                    >
+                      <span dangerouslySetInnerHTML={{ __html: formatResponse(message.content) }} />
+                      <span className="inline-block w-0.5 h-5 bg-white/70 ml-0.5 animate-pulse" />
                     </div>
                   </div>
                 ) : message.isLoading ? (

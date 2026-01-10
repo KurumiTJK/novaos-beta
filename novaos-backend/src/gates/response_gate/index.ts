@@ -14,3 +14,18 @@ export {
 } from './response-gate.js';
 
 export { PERSONALITY_DESCRIPTORS } from './personality_descriptor.js';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STREAMING EXPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export {
+  executeStreamingResponse,
+  executeFakeStreamingResponse,
+  sendThinkingEvent,
+  isHighRisk,
+  type StreamEvent,
+  type StreamExecutor,
+  type StreamingResult,
+  type FakeStreamOptions,
+} from './streaming/index.js';

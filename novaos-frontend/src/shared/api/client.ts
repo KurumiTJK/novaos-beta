@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // API CLIENT — NovaOS
-// With token refresh interceptor and idempotency keys
+// With token refresh interceptor, idempotency keys, and SSE streaming
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const API_BASE = '/api/v1';
@@ -239,6 +239,159 @@ async function request<T>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// SSE STREAMING TYPES
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export interface StreamEvent {
+  type: 'meta' | 'token' | 'done' | 'error' | 'thinking';
+  text?: string;
+  conversationId?: string;
+  stance?: string;
+  tokensUsed?: number;
+  model?: string;
+  isNewConversation?: boolean;
+  provider?: string;
+  error?: string;
+  code?: string;
+}
+
+export interface StreamCallbacks {
+  onToken: (text: string) => void;
+  onDone: (data: { conversationId: string; stance?: string; tokensUsed: number; isNewConversation: boolean }) => void;
+  onError: (error: string) => void;
+  onMeta?: (data: { provider: string; conversationId: string; isNewConversation: boolean }) => void;
+  onThinking?: () => void;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// SSE STREAMING FUNCTION
+// ─────────────────────────────────────────────────────────────────────────────────
+
+export async function streamRequest(
+  endpoint: string,
+  body: unknown,
+  callbacks: StreamCallbacks
+): Promise<void> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Add idempotency key
+  headers['Idempotency-Key'] = generateIdempotencyKey();
+
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CHECK FOR NON-STREAMING RESPONSE (shield block, redirect, etc.)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const contentType = response.headers.get('content-type');
+  
+  if (contentType?.includes('application/json')) {
+    // Server returned JSON instead of SSE - handle special cases
+    const data = await response.json();
+    
+    // Return the JSON data for the caller to handle
+    throw { isJsonResponse: true, data };
+  }
+
+  if (!response.ok) {
+    throw new ApiError('Stream request failed', response.status);
+  }
+
+  if (!response.body) {
+    throw new ApiError('No response body', 500);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PROCESS SSE STREAM
+  // ─────────────────────────────────────────────────────────────────────────────
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete events in buffer
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+      
+      let currentData = '';
+      
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          // Event type line - we use parsed.type from JSON data instead
+          continue;
+        } else if (line.startsWith('data: ')) {
+          currentData = line.slice(6);
+          
+          // Process event
+          if (currentData) {
+            try {
+              const parsed: StreamEvent = JSON.parse(currentData);
+              
+              switch (parsed.type) {
+                case 'meta':
+                  callbacks.onMeta?.({
+                    provider: parsed.provider!,
+                    conversationId: parsed.conversationId!,
+                    isNewConversation: parsed.isNewConversation!,
+                  });
+                  break;
+                
+                case 'thinking':
+                  // Server is processing (high-risk path)
+                  // Frontend can show a different indicator
+                  callbacks.onThinking?.();
+                  break;
+                  
+                case 'token':
+                  callbacks.onToken(parsed.text || '');
+                  break;
+                  
+                case 'done':
+                  callbacks.onDone({
+                    conversationId: parsed.conversationId!,
+                    stance: parsed.stance,
+                    tokensUsed: parsed.tokensUsed || 0,
+                    isNewConversation: parsed.isNewConversation!,
+                  });
+                  break;
+                  
+                case 'error':
+                  callbacks.onError(parsed.error || 'Unknown error');
+                  break;
+              }
+            } catch (e) {
+              console.warn('[STREAM] Failed to parse event:', currentData);
+            }
+          }
+          
+          currentData = '';
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // API METHODS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -257,6 +410,8 @@ export const api = {
     
   delete: <T>(endpoint: string, options?: RequestOptions) => 
     request<T>('DELETE', endpoint, undefined, options),
+    
+  stream: streamRequest,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────────

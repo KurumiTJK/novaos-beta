@@ -14,7 +14,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { ExecutionPipeline } from '../pipeline/execution-pipeline.js';
 import { pipeline_model, model_llm, isOpenAIAvailable } from '../pipeline/llm_engine.js';
-import type { PipelineContext, ActionSource, ConversationMessage } from '../types/index.js';
+import type { PipelineContext, ActionSource, ConversationMessage, PipelineState } from '../types/index.js';
 import { storeManager } from '../storage/index.js';
 import { workingMemory } from '../core/memory/working_memory/index.js';
 import { loadConfig, canVerify } from '../config/index.js';
@@ -96,6 +96,27 @@ import { swordRoutes } from './sword-routes.js';
 import { shieldRoutes } from './shield-routes.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────
+// STREAMING IMPORTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+import { 
+  executeStreamingResponse,
+  executeFakeStreamingResponse,
+  sendThinkingEvent,
+  isHighRisk,
+} from '../gates/response_gate/index.js';
+import {
+  executeIntentGateAsync,
+  executeToolsGate,
+  executeStanceGateAsync,
+  executeCapabilityGate,
+} from '../gates/index.js';
+import { executeShieldGateAsync } from '../gates/shield_gate/index.js';
+import { executeConstitutionGateAsync } from '../gates/constitution_gate/index.js';
+import { executeMemoryGateAsync } from '../gates/memory_gate/index.js';
+import { executeResponseGateAsync } from '../gates/response_gate/response-gate.js';
+
+// ─────────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────────
 
@@ -174,6 +195,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         'pipeline-integration',
         'swordgate-v2',
         'shield-protection',
+        'streaming',
         isSupabaseInitialized() ? 'supabase' : null,
         appConfig.verification.enabled ? 'verification' : null,
         appConfig.webFetch.enabled ? 'web-fetch' : null,
@@ -736,6 +758,309 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // STREAMING CHAT ENDPOINT
+  // Same as /chat but streams response via Server-Sent Events
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  router.post('/chat/stream',
+    ...chatMiddleware,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { message, newConversation = false, stance, actionSource } = req.body;
+        const userId = req.userId ?? 'anonymous';
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 1: Resolve conversation (same as regular /chat)
+        // ═════════════════════════════════════════════════════════════════════
+        let resolvedConversationId: string;
+        let isNewConversation = false;
+
+        if (newConversation) {
+          resolvedConversationId = `conv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+          await workingMemory.getOrCreate(userId, resolvedConversationId);
+          isNewConversation = true;
+        } else {
+          const recentConversations = await workingMemory.list(userId, 1);
+          const lastConversation = recentConversations[0];
+          
+          const now = Date.now();
+          const isWithinTimeout = lastConversation && 
+            (now - lastConversation.updatedAt) < CONVERSATION_TIMEOUT_MS;
+
+          if (lastConversation && isWithinTimeout) {
+            resolvedConversationId = lastConversation.id;
+          } else {
+            resolvedConversationId = `conv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+            await workingMemory.getOrCreate(userId, resolvedConversationId);
+            isNewConversation = true;
+          }
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 2: Load conversation history
+        // ═════════════════════════════════════════════════════════════════════
+        const messages = await workingMemory.getMessages(resolvedConversationId, 20);
+        
+        const conversationHistory: ConversationMessage[] = messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant' | 'system',
+          content: msg.content,
+          timestamp: msg.timestamp,
+          metadata: msg.metadata ? { liveData: msg.metadata.liveData } : undefined,
+        }));
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 3: Build pipeline context
+        // ═════════════════════════════════════════════════════════════════════
+        const context: PipelineContext = {
+          userId,
+          conversationId: resolvedConversationId,
+          message,
+          timestamp: Date.now(),
+          requestId: (req as any).requestId ?? crypto.randomUUID(),
+          requestedStance: stance,
+          actionSource: actionSource as ActionSource,
+          conversationHistory,
+          metadata: {
+            userAgent: req.headers['user-agent'],
+            ip: req.ip,
+          },
+        };
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 4: Execute Gates 1-5 (non-streaming)
+        // ═════════════════════════════════════════════════════════════════════
+        const state: PipelineState = {
+          userMessage: message,
+          normalizedInput: message.toLowerCase().trim(),
+          gateResults: {},
+          flags: {},
+          timestamps: { pipelineStart: Date.now() },
+        };
+
+        // Gate 1: Intent
+        state.gateResults.intent = await executeIntentGateAsync(state, context);
+        state.intent_summary = state.gateResults.intent.output;
+
+        // Gate 2: Shield
+        state.gateResults.shield = await executeShieldGateAsync(state, context);
+        state.shieldResult = state.gateResults.shield.output;
+
+        // Check for shield block
+        if (state.gateResults.shield.action === 'halt') {
+          // Return JSON for blocked requests (not streaming)
+          res.json({
+            response: '',
+            stance: 'shield',
+            status: 'blocked',
+            conversationId: resolvedConversationId,
+            isNewConversation,
+            shield: {
+              action: state.shieldResult.action,
+              warningMessage: state.shieldResult.warningMessage,
+              riskAssessment: state.shieldResult.riskAssessment,
+              activationId: state.shieldResult.activationId,
+              sessionId: state.shieldResult.sessionId,
+            },
+          });
+          return;
+        }
+
+        // Gate 3: Tools
+        state.gateResults.tools = executeToolsGate(state, context);
+        state.toolsResult = state.gateResults.tools.output;
+
+        // Gate 4: Stance
+        state.gateResults.stance = await executeStanceGateAsync(state, context);
+        state.stanceResult = state.gateResults.stance.output;
+        state.stance = state.stanceResult.route as import('../types/index.js').Stance;
+
+        // Check for redirect
+        if (state.gateResults.stance.action === 'redirect') {
+          res.json({
+            response: '',
+            stance: 'sword',
+            status: 'redirect',
+            conversationId: resolvedConversationId,
+            isNewConversation,
+            redirect: state.stanceResult.redirect,
+          });
+          return;
+        }
+
+        // Gate 5: Capability
+        state.gateResults.capability = await executeCapabilityGate(state, context);
+        state.capabilityResult = state.gateResults.capability.output;
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 5: Determine risk level and execute appropriate path
+        // ═════════════════════════════════════════════════════════════════════
+        const capabilityOutput = state.gateResults.capability?.output;
+        const provider = (capabilityOutput?.provider ?? 'openai') as import('../types/index.js').ProviderName;
+        const usedLiveData = provider === 'gemini_grounded';
+
+        if (isHighRisk(state)) {
+          // ═══════════════════════════════════════════════════════════════════
+          // HIGH RISK PATH: Full pipeline first, then fake stream
+          // Gates 6-8 execute hidden, then fake stream validated response
+          // ═══════════════════════════════════════════════════════════════════
+          console.log('[STREAM] High risk path: executing full pipeline before streaming');
+
+          // Send thinking event IMMEDIATELY to keep nginx alive
+          sendThinkingEvent(res, resolvedConversationId, isNewConversation);
+
+          // Gate 6: Response (non-streaming)
+          state.gateResults.response = await executeResponseGateAsync(state, context);
+          const responseOutput = state.gateResults.response.output;
+          state.generation = { 
+            text: responseOutput?.text ?? '',
+            model: responseOutput?.model ?? 'unknown',
+            tokensUsed: responseOutput?.tokensUsed ?? 0,
+          };
+
+          // Gate 7: Constitution (will run check for high risk)
+          let constitutionAttempts = 0;
+          const maxRegenerations = 2;
+          
+          while (constitutionAttempts <= maxRegenerations) {
+            state.gateResults.constitution = await executeConstitutionGateAsync(state, context);
+            state.validatedOutput = state.gateResults.constitution.output;
+
+            // Check if regeneration needed
+            if (state.gateResults.constitution.action === 'regenerate' && constitutionAttempts < maxRegenerations) {
+              console.log(`[STREAM] Constitution failed, regenerating (attempt ${constitutionAttempts + 1}/${maxRegenerations})`);
+              
+              // Regenerate response
+              state.gateResults.response = await executeResponseGateAsync(state, context);
+              const regenOutput = state.gateResults.response.output;
+              state.generation = { 
+                text: regenOutput?.text ?? '',
+                model: regenOutput?.model ?? 'unknown',
+                tokensUsed: regenOutput?.tokensUsed ?? 0,
+              };
+              constitutionAttempts++;
+            } else {
+              break;
+            }
+          }
+
+          // Gate 8: Memory
+          state.gateResults.memory = await executeMemoryGateAsync(state, context);
+
+          // Get final validated text
+          const finalText = state.validatedOutput?.text ?? state.generation?.text ?? '';
+          const tokensUsed = state.gateResults.response.output?.tokensUsed ?? Math.ceil(finalText.length / 4);
+
+          // Save messages BEFORE fake streaming
+          await workingMemory.addUserMessage(resolvedConversationId, message);
+          await workingMemory.addAssistantMessage(
+            resolvedConversationId,
+            finalText,
+            {
+              liveData: usedLiveData,
+              stance: state.stance,
+              tokensUsed,
+            }
+          );
+
+          // Fake stream the validated response
+          await executeFakeStreamingResponse(
+            res,
+            finalText,
+            resolvedConversationId,
+            isNewConversation,
+            state.stance,
+            {
+              provider,
+              tokensUsed,
+              model: state.gateResults.response.output?.model ?? 'gpt-4o',
+            }
+          );
+
+          // Audit logging
+          await logAudit({
+            category: 'chat',
+            action: 'chat_message_stream',
+            userId,
+            details: {
+              conversationId: resolvedConversationId,
+              stance: state.stance,
+              usedLiveData,
+              isNewConversation,
+              tokensUsed,
+              highRisk: true,
+              constitutionAttempts,
+            },
+          });
+
+        } else {
+          // ═══════════════════════════════════════════════════════════════════
+          // LOW RISK PATH: Real stream, then Constitution/Memory
+          // ═══════════════════════════════════════════════════════════════════
+          console.log('[STREAM] Low risk path: streaming response');
+
+          // Gate 6: Streaming Response
+          const streamResult = await executeStreamingResponse(
+            res,
+            state,
+            context,
+            resolvedConversationId,
+            isNewConversation
+          );
+
+          // Set generation for downstream gates
+          state.generation = { 
+            text: streamResult.fullText,
+            model: streamResult.model,
+            tokensUsed: streamResult.tokensUsed,
+          };
+
+          // Gate 7: Constitution (will log skip for low risk)
+          state.gateResults.constitution = await executeConstitutionGateAsync(state, context);
+          state.validatedOutput = state.gateResults.constitution.output;
+
+          // Gate 8: Memory
+          state.gateResults.memory = await executeMemoryGateAsync(state, context);
+
+          // Save messages (after streaming completes)
+          await workingMemory.addUserMessage(resolvedConversationId, message);
+          await workingMemory.addAssistantMessage(
+            resolvedConversationId,
+            streamResult.fullText,
+            {
+              liveData: usedLiveData,
+              stance: state.stance,
+              tokensUsed: streamResult.tokensUsed,
+            }
+          );
+
+          // Audit logging
+          await logAudit({
+            category: 'chat',
+            action: 'chat_message_stream',
+            userId,
+            details: {
+              conversationId: resolvedConversationId,
+              stance: state.stance,
+              usedLiveData,
+              isNewConversation,
+              tokensUsed: streamResult.tokensUsed,
+              highRisk: false,
+            },
+          });
+        }
+
+      } catch (error) {
+        // If headers already sent (streaming started), we can't send error response
+        if (res.headersSent) {
+          console.error('[STREAM] Error after headers sent:', error);
+          return;
+        }
+        next(error);
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // PARSE COMMAND ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -972,6 +1297,7 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
             supabase: isSupabaseInitialized(),
             swordgate: true,
             shield: true,
+            streaming: true,
           },
           verification: {
             enabled: appConfig.verification.enabled,

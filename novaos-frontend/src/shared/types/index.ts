@@ -17,6 +17,7 @@ export interface Message {
   timestamp: Date;
   stance?: Stance;
   isLoading?: boolean;
+  isStreaming?: boolean; // NEW: For streaming responses
   // SwordGate confirmation
   pendingAction?: PendingAction;
   actionTaken?: 'confirmed' | 'cancelled';
@@ -63,6 +64,13 @@ export interface ChatResponse {
   shieldActivation?: ShieldActivation;
   // SwordGate redirect
   redirect?: SwordRedirect;
+  // Shield block info (for blocked status)
+  shield?: {
+    action: 'warn' | 'crisis';
+    warningMessage?: string;
+    activationId?: string;
+    sessionId?: string;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
