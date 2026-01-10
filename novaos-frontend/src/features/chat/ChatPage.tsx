@@ -189,7 +189,16 @@ const chatHistory = [
 
 export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
-  const { messages, isLoading, sendMessageStream, clearMessages } = useChatStore();
+  const { 
+    messages, 
+    isLoading, 
+    sendMessageStream, 
+    clearMessages,
+    shieldActivation,
+    isShieldOverlayOpen,
+    resolveCrisis,
+    handleShieldCancel,
+  } = useChatStore();
   const haptic = useHaptic();
   const isKeyboardOpen = useKeyboardOpen();
   
@@ -476,6 +485,62 @@ export function ChatPage() {
       className="fixed inset-0 max-w-[430px] mx-auto flex z-50"
       style={{ backgroundColor: '#000000' }}
     >
+      {/* ═══════════════════════════════════════════════════════════════════════════
+          SHIELD BANNER — Shows when shield is triggered
+          ═══════════════════════════════════════════════════════════════════════════ */}
+      {isShieldOverlayOpen && shieldActivation && (
+        <div 
+          className="absolute top-0 left-0 right-0 z-[100] p-4"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)', backgroundColor: 'rgba(0,0,0,0.95)' }}
+        >
+          <div className="bg-red-900/80 border border-red-500/50 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-white font-semibold text-[15px] mb-1">
+                  {shieldActivation.isCrisis ? 'Crisis Mode Active' : 'Shield Warning'}
+                </h3>
+                <p className="text-white/70 text-[13px] leading-relaxed mb-3">
+                  {shieldActivation.warningMessage || 'This conversation has been flagged for safety review.'}
+                </p>
+                <div className="flex gap-2">
+                  {shieldActivation.isCrisis ? (
+                    <button
+                      onClick={() => resolveCrisis()}
+                      className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 text-white text-[14px] font-medium rounded-lg transition-colors"
+                    >
+                      I'm Safe - Continue
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleShieldCancel()}
+                        className="flex-1 py-2.5 px-4 bg-white/10 hover:bg-white/20 text-white text-[14px] font-medium rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          // TODO: Call shield confirm endpoint
+                          console.log('Confirm shield:', shieldActivation.activationId);
+                        }}
+                        className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white text-[14px] font-medium rounded-lg transition-colors"
+                      >
+                        I Understand
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar Overlay */}
       {isSidebarOpen && (
         <div 

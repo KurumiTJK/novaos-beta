@@ -34,14 +34,18 @@ export type ShieldDomain =
   | 'medical'
   | 'legal'
   | 'financial'
-  | 'substance';
+  | 'substance'
+  | 'general';
 
 export interface ShieldActivation {
-  activationId: string;
-  domain: ShieldDomain;
-  severity: 'low' | 'medium' | 'high';
+  activationId: string | null;
+  sessionId?: string | null;
+  domain: ShieldDomain | string;  // Allow any string from backend
+  severity: 'low' | 'medium' | 'high' | string;  // Allow any string from backend
   warningMessage: string;
   requiresConfirmation?: boolean;
+  isCrisis?: boolean;
+  crisisBlocked?: boolean;
   buttons?: {
     confirm?: string;
     cancel?: string;

@@ -65,6 +65,9 @@ export interface ChatState {
   /** Handle shield cancel */
   handleShieldCancel: () => void;
   
+  /** Resolve/clear crisis session */
+  resolveCrisis: () => Promise<void>;
+  
   /** Dismiss error */
   dismissError: () => void;
 }
@@ -366,11 +369,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (response.status === 'blocked') {
               // Use shieldActivation if present (properly typed), otherwise build from shield object
               const activation = response.shieldActivation ?? (response.shield ? {
-                activationId: response.shield.activationId ?? `shield_${Date.now()}`,
-                domain: 'crisis' as const,
+                activationId: response.shield.activationId ?? null,
+                sessionId: response.shield.sessionId ?? null,
+                domain: response.shield.riskAssessment?.domain ?? 'general',
                 severity: response.shield.action === 'crisis' ? 'high' as const : 'medium' as const,
                 warningMessage: response.shield.warningMessage ?? 'This request has been blocked.',
-                requiresConfirmation: response.shield.action !== 'crisis',
+                requiresConfirmation: response.shield.action === 'warn',
+                isCrisis: response.shield.action === 'crisis',
+                crisisBlocked: !!(response.shield as any).crisisBlocked,
               } : null);
               
               if (activation) {
@@ -524,6 +530,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       shieldActivation: null,
       isShieldOverlayOpen: false,
     });
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RESOLVE CRISIS — Clear crisis session
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  resolveCrisis: async () => {
+    try {
+      const { api } = await import('../api/client');
+      const result = await api.post<{ success: boolean; message: string }>('/shield/resolve-crisis');
+      
+      console.log('[CHAT] Crisis resolved:', result);
+      
+      // Clear shield state
+      set({
+        shieldActivation: null,
+        isShieldOverlayOpen: false,
+        error: null,
+      });
+    } catch (error) {
+      console.error('[CHAT] Failed to resolve crisis:', error);
+      set({ error: 'Failed to resolve crisis session' });
+    }
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
