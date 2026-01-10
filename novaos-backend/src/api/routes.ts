@@ -480,6 +480,51 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
   router.use('/shield', authenticate({ required: true }), shieldRoutes);
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // CRISIS RESOLVE — Clear crisis session for current user (development helper)
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  router.post('/shield/resolve-crisis',
+    authenticate({ required: true }),
+    async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.userId ?? 'anonymous';
+      
+      try {
+        const { getShieldService } = await import('../services/shield/index.js');
+        const shieldService = getShieldService();
+        
+        // Check if there's an active crisis
+        const crisisCheck = await shieldService.checkCrisisBlock(userId);
+        
+        if (!crisisCheck.blocked || !crisisCheck.sessionId) {
+          res.json({
+            success: true,
+            message: 'No active crisis session',
+          });
+          return;
+        }
+        
+        // Resolve the crisis session
+        const resolved = await shieldService.confirmSafety(userId, crisisCheck.sessionId);
+        
+        console.log(`[SHIELD] Crisis resolved for user: ${userId}, sessionId: ${crisisCheck.sessionId}, success: ${resolved}`);
+        
+        res.json({
+          success: resolved,
+          message: resolved ? 'Crisis session resolved' : 'Failed to resolve crisis',
+          sessionId: crisisCheck.sessionId,
+        });
+      } catch (error) {
+        console.error('[SHIELD] Failed to resolve crisis:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to resolve crisis session',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // PROTECTED MIDDLEWARE STACK
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -845,9 +890,12 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
         state.gateResults.shield = await executeShieldGateAsync(state, context);
         state.shieldResult = state.gateResults.shield.output;
 
-        // Check for shield block
+        // Check for shield block OR warning (both need to show overlay to user)
+        // GateResult.action is 'halt' for both warn and crisis
+        // ShieldGateOutput.action distinguishes between 'warn', 'crisis', 'skip'
         if (state.gateResults.shield.action === 'halt') {
-          // Return JSON for blocked requests (not streaming)
+          // Return JSON for shield responses (not streaming)
+          // Frontend will show the shield overlay for user to confirm/cancel
           res.json({
             response: '',
             stance: 'shield',
@@ -855,11 +903,22 @@ export async function createRouterAsync(config: RouterConfig = {}): Promise<Rout
             conversationId: resolvedConversationId,
             isNewConversation,
             shield: {
-              action: state.shieldResult.action,
+              action: state.shieldResult.action, // 'warn' or 'crisis'
               warningMessage: state.shieldResult.warningMessage,
               riskAssessment: state.shieldResult.riskAssessment,
               activationId: state.shieldResult.activationId,
               sessionId: state.shieldResult.sessionId,
+            },
+            // Always include shieldActivation for frontend to show overlay
+            shieldActivation: {
+              activationId: state.shieldResult.activationId ?? null,
+              sessionId: state.shieldResult.sessionId ?? null,
+              domain: state.shieldResult.riskAssessment?.domain ?? 'general',
+              severity: (state.shieldResult.riskAssessment as any)?.risk_level ?? 'medium',
+              warningMessage: state.shieldResult.warningMessage ?? 'This request requires confirmation.',
+              requiresConfirmation: state.shieldResult.action === 'warn',
+              isCrisis: state.shieldResult.action === 'crisis',
+              crisisBlocked: state.shieldResult.crisisBlocked ?? false,
             },
           });
           return;
