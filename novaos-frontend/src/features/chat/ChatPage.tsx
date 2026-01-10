@@ -189,7 +189,7 @@ const chatHistory = [
 
 export function ChatPage() {
   const { closeChat, setActiveTab } = useUIStore();
-  const { messages, isLoading, sendMessage } = useChatStore();
+  const { messages, isLoading, sendMessage, clearMessages } = useChatStore();
   const haptic = useHaptic();
   const isKeyboardOpen = useKeyboardOpen();
   
@@ -338,7 +338,7 @@ export function ChatPage() {
     const timer = setTimeout(calculatePadding, 150);
     
     return () => clearTimeout(timer);
-  }, [messages, typingMessageIds.size, bottomPadding]);
+  }, [messages.length, bottomPadding]); // Only recalc on message count change
 
   // Scroll to position user message at top of viewport
   useEffect(() => {
@@ -450,7 +450,7 @@ export function ChatPage() {
     haptic('medium');
     setIsSidebarOpen(false);
     setIsMenuOpen(false);
-    // TODO: Clear chat and start new
+    clearMessages();
   };
 
   const handleOpenMenu = () => {
