@@ -106,6 +106,7 @@ async function refreshTokens(): Promise<boolean> {
     const response = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // Send cookies with refresh request too
       body: JSON.stringify({ refreshToken }),
     });
 
@@ -182,6 +183,7 @@ async function request<T>(
   const config: RequestInit = {
     method,
     headers,
+    credentials: 'include', // CRITICAL: Send cookies with requests (for Authentik session)
   };
 
   if (body && method !== 'GET') {
