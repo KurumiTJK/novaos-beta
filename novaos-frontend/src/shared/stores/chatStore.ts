@@ -371,7 +371,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const activation = response.shieldActivation ?? (response.shield ? {
                 activationId: response.shield.activationId ?? null,
                 sessionId: response.shield.sessionId ?? null,
-                domain: response.shield.riskAssessment?.domain ?? 'general',
+                domain: 'general' as const,
                 severity: response.shield.action === 'crisis' ? 'high' as const : 'medium' as const,
                 warningMessage: response.shield.warningMessage ?? 'This request has been blocked.',
                 requiresConfirmation: response.shield.action === 'warn',

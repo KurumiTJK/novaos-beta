@@ -6,6 +6,7 @@
 import { getSupabase } from '../../../../db/index.js';
 import { SwordGateLLM } from '../../llm/swordgate-llm.js';
 import type { PlanSubskill, LessonPlan, Route } from '../../types.js';
+import type { OnTokenCallback, OnThinkingCallback } from '../../llm/streaming-utils.js';
 import { mapPlanSubskill, mapLessonPlan } from '../../types.js';
 import type {
   DailyLesson,
@@ -1004,6 +1005,171 @@ async function getWeakAreas(internalUserId: string): Promise<string[]> {
   
   return weakAreas.slice(0, 5);
 }
+// ─────────────────────────────────────────────────────────────────────────────────
+// STREAMING SESSION START
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Start session with streaming lesson generation
+ */
+export async function startSessionStream(
+  userId: string,
+  subskillId: string,
+  onToken: OnTokenCallback,
+  onThinking?: OnThinkingCallback
+): Promise<StartSessionResult> {
+  const supabase = getSupabase();
+  
+  const { data: user } = await supabase
+    .from('users')
+    .select('id')
+    .eq('external_id', userId)
+    .single();
+  
+  if (!user) throw new Error('User not found');
+  
+  const internalUserId = user.id;
+  
+  const { data: subskillRow } = await supabase
+    .from('plan_subskills')
+    .select('*')
+    .eq('id', subskillId)
+    .single();
+  
+  if (!subskillRow) throw new Error(`Subskill not found: ${subskillId}`);
+  
+  const subskill = mapPlanSubskill(subskillRow);
+  const sessionNumber = (subskill.sessionsCompleted || 0) + 1;
+  
+  console.log(`[DAILY] Starting session ${sessionNumber} for: ${subskill.title} (streaming)`);
+  
+  // Check cache first
+  const { data: existingRow } = await supabase
+    .from('daily_lessons')
+    .select('*')
+    .eq('subskill_id', subskillId)
+    .eq('user_id', internalUserId)
+    .eq('session_number', sessionNumber)
+    .single();
+  
+  if (existingRow && existingRow.content) {
+    console.log(`[DAILY] Using cached lesson (streaming full content)`);
+    const dailyLesson = mapDailyLesson(existingRow);
+    const previousSummaries = await getPreviousSummaries(subskillId, internalUserId, sessionNumber);
+    
+    // Stream the cached content
+    const contentText = JSON.stringify(dailyLesson.content, null, 2);
+    onToken(contentText);
+    
+    if (!existingRow.started_at) {
+      await supabase.from('daily_lessons').update({ started_at: new Date().toISOString() }).eq('id', existingRow.id);
+    }
+    
+    return { dailyLesson, previousSummaries };
+  }
+  
+  // Generate with streaming
+  const { data: planRow } = await supabase
+    .from('lesson_plans')
+    .select('*')
+    .eq('id', subskill.planId)
+    .single();
+  
+  const plan = mapLessonPlan(planRow);
+  const lessonPlan = await getLessonPlan(subskillId);
+  
+  if (!lessonPlan) throw new Error('Lesson plan not found');
+  
+  const previousSummaries = await getPreviousSummaries(subskillId, internalUserId, sessionNumber);
+  const weakAreas = await getWeakAreas(internalUserId);
+  
+  const dailyLesson = await generateDailyLessonStream(
+    internalUserId,
+    subskill,
+    plan,
+    lessonPlan,
+    sessionNumber,
+    previousSummaries,
+    weakAreas,
+    onToken,
+    onThinking
+  );
+  
+  return { dailyLesson, previousSummaries };
+}
+
+async function generateDailyLessonStream(
+  internalUserId: string,
+  subskill: PlanSubskill,
+  plan: LessonPlan,
+  lessonPlan: SubskillLessonPlan,
+  sessionNumber: number,
+  previousSummaries: SessionSummary[],
+  weakAreas: string[],
+  onToken: OnTokenCallback,
+  onThinking?: OnThinkingCallback
+): Promise<DailyLesson> {
+  const supabase = getSupabase();
+  
+  const sessionOutline = lessonPlan.sessionOutline.find(s => s.sessionNumber === sessionNumber);
+  const totalSessions = lessonPlan.sessionOutline.length;
+  const context = buildFullContext(subskill, plan, sessionNumber, totalSessions, previousSummaries, [], weakAreas);
+  const dailyContext = buildContext(subskill, plan, sessionNumber, totalSessions);
+  
+  console.log(`[DAILY] Generating session ${sessionNumber}/${totalSessions} with streaming LLM`);
+  
+  let lessonData: DailyLessonLLMResponse;
+  
+  try {
+    const userMessage = buildDailyLessonUserMessage(subskill, plan, context, sessionOutline, previousSummaries);
+    
+    if (onThinking) onThinking(true);
+    
+    const response = await SwordGateLLM.generateStream(
+      DAILY_LESSON_SYSTEM_PROMPT,
+      userMessage,
+      onToken,
+      { thinkingLevel: 'high' },
+      onThinking
+    );
+    
+    lessonData = parseLLMJson<DailyLessonLLMResponse>(response);
+    
+    if (!lessonData.sessionGoal) throw new Error('Missing session goal');
+    if (!lessonData.content?.length) throw new Error('Missing content sections');
+    
+    console.log(`[DAILY] Streamed ${lessonData.content.length} sections, ${lessonData.activities?.length || 0} activities`);
+    
+  } catch (error) {
+    console.error('[DAILY] Stream generation failed, using fallback:', error);
+    lessonData = generateFallbackLesson(subskill, plan, sessionOutline, previousSummaries);
+    onToken(JSON.stringify(lessonData, null, 2));
+  }
+  
+  const activities = await processActivities(lessonData.activities || [], subskill, plan);
+  
+  const { data: row, error } = await supabase
+    .from('daily_lessons')
+    .insert({
+      subskill_id: subskill.id,
+      lesson_plan_id: lessonPlan.id,
+      user_id: internalUserId,
+      session_number: sessionNumber,
+      context: dailyContext,
+      session_goal: lessonData.sessionGoal,
+      content: lessonData.content,
+      activities,
+      key_points: lessonData.keyPoints || [],
+      started_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  
+  if (error || !row) throw new Error(`Failed to create daily lesson: ${error?.message}`);
+  
+  console.log(`[DAILY] Generated session ${sessionNumber} (streaming)`);
+  return mapDailyLesson(row);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // EXPORTS
@@ -1011,6 +1177,7 @@ async function getWeakAreas(internalUserId: string): Promise<string[]> {
 
 export const DailyLessonGenerator = {
   start: startSession,
+  startStream: startSessionStream,
   get: getSession,
   regenerate: regenerateSession,
   complete: completeSession,

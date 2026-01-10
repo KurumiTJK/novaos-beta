@@ -1,172 +1,94 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SWORD DESIGNER STORE — NovaOS
-// Updated to match backend flow: Orient → Clarify → Goal → Skills → Path
+// SWORD DESIGNER STORE — NovaOS WITH STREAMING
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
 import {
-  startExploration,
-  exploreChat,
-  confirmExploration,
-  updateClarifyField,
-  updateConstraints,
-  continueToGoal,
-  generateGoal,
-  getReview,
-  confirmReview,
-  getActiveSession,
-  deleteSession,
-  activatePlan,
-  type DesignerSession,
-  type ClarifyData,
-  type ClarifyResponse,
-  type Capstone,
-  type Subskill,
-  type SubskillRouting,
-  type LearningPlan,
-  type ExplorationState,
-  type ReviewState,
+  confirmExploration, updateClarifyField,
+  updateConstraints, continueToGoal, getReview, confirmReview,
+  getActiveSession, deleteSession, activatePlan,
+  type DesignerSession, type ClarifyData, type ClarifyResponse, type Capstone,
+  type Subskill, type SubskillRouting, type LearningPlan, type ExplorationState, type ReviewState,
 } from '../api/sword';
+import {
+  startExplorationStream, exploreChatStream, generatePlanStream,
+  createStreamController, getStageLabel,
+  type ProgressEvent, type PlanGenerationStreamResult,
+} from '../api/sword-streaming';
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Designer phases matching backend flow:
- * - orient: Chat-based exploration (POST /explore/start, /explore/chat)
- * - clarify: Edit extracted fields (POST /explore/confirm, PATCH /explore/field)
- * - goal: Auto-generate capstone+subskills+routing (POST /explore/continue, /goal/generate)
- * - skills: Review generated plan (GET /review)
- * - path: Plan created, ready to activate (POST /review/confirm)
- */
-export type DesignerPhase = 
-  | 'orient'      // Chat-based exploration
-  | 'clarify'     // Edit fields
-  | 'goal'        // Auto-generating (loading state)
-  | 'skills'      // Review subskills + routing
-  | 'path';       // Plan created
+export type DesignerPhase = 'orient' | 'clarify' | 'goal' | 'skills' | 'path';
 
 export interface OrientMessage {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
+  timestamp: Date;
+  isStreaming?: boolean;
+}
+
+export interface GenerationProgress {
+  stage: string;
+  stageLabel: string;
+  status: 'idle' | 'starting' | 'generating' | 'complete' | 'error';
+  message: string;
+  progress: number;
+  stageData: any;
 }
 
 interface DesignerStore {
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STATE
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Current designer phase */
   phase: DesignerPhase;
-  /** Session ID from backend */
   sessionId: string | null;
-  /** Whether we're loading/processing */
   isLoading: boolean;
-  /** Whether goal is being generated (long operation) */
   isGenerating: boolean;
-  /** Error message if any */
   error: string | null;
-  
-  // Orient phase state
-  /** Chat messages in orient phase */
   orientMessages: OrientMessage[];
-  /** Backend exploration state */
   explorationState: ExplorationState | null;
-  
-  // Clarify phase state
-  /** Clarify form data */
   clarifyData: ClarifyData | null;
-  /** Field sources (extracted vs user_edited) */
   fieldSources: Record<string, string>;
-  /** Missing required fields */
   missingFields: string[];
-  /** Whether clarify data can be finalized */
   canFinalize: boolean;
-  
-  // Goal phase state (auto-generated)
-  /** Generated capstone */
   capstone: Capstone | null;
-  /** Generated subskills */
   subskills: Subskill[];
-  /** Generated routing */
   routing: SubskillRouting[];
-  
-  // Skills/Review phase state
-  /** Review data from backend */
   reviewData: ReviewState | null;
-  
-  // Path phase state
-  /** Created learning plan */
   plan: LearningPlan | null;
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ACTIONS
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  /** Initialize designer - check for existing session or start new */
+  isStreaming: boolean;
+  streamingText: string;
+  abortController: AbortController | null;
+  generationProgress: GenerationProgress;
+
   initialize: (topic?: string) => Promise<void>;
-  /** Reset designer to initial state */
   reset: () => void;
-  /** Abandon current session */
   abandon: () => Promise<void>;
-  
-  // Orient phase actions
-  /** Send message in orient chat */
+  abortStream: () => void;
   sendOrientMessage: (message: string) => Promise<void>;
-  /** Confirm orient and move to clarify */
   confirmOrient: () => Promise<void>;
-  
-  // Clarify phase actions
-  /** Update a clarify field */
   updateField: (field: 'learningGoal' | 'priorKnowledge' | 'context', value: string) => Promise<void>;
-  /** Update constraints */
   updateConstraintsAction: (constraints: string[]) => Promise<void>;
-  /** Finalize clarify → auto-generate goal */
   finalizeClarify: () => Promise<void>;
-  
-  // Skills phase actions
-  /** Load review data (called after goal generation) */
   loadReview: () => Promise<void>;
-  
-  // Path phase actions
-  /** Confirm skills and create plan */
   confirmSkills: () => Promise<void>;
-  /** Activate the created plan */
   activateCreatedPlan: () => Promise<void>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// INITIAL STATE
-// ─────────────────────────────────────────────────────────────────────────────────
-
-const initialState = {
-  phase: 'orient' as DesignerPhase,
-  sessionId: null,
-  isLoading: false,
-  isGenerating: false,
-  error: null,
-  orientMessages: [],
-  explorationState: null,
-  clarifyData: null,
-  fieldSources: {},
-  missingFields: [],
-  canFinalize: false,
-  capstone: null,
-  subskills: [],
-  routing: [],
-  reviewData: null,
-  plan: null,
+const initialGenerationProgress: GenerationProgress = {
+  stage: '', stageLabel: '', status: 'idle', message: '', progress: 0, stageData: null,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// HELPER: Extract ClarifyData from various response formats
-// ─────────────────────────────────────────────────────────────────────────────────
+const initialState = {
+  phase: 'orient' as DesignerPhase, sessionId: null, isLoading: false, isGenerating: false,
+  error: null, orientMessages: [], explorationState: null, clarifyData: null, fieldSources: {},
+  missingFields: [], canFinalize: false, capstone: null, subskills: [], routing: [],
+  reviewData: null, plan: null, isStreaming: false, streamingText: '', abortController: null,
+  generationProgress: initialGenerationProgress,
+};
+
+function generateMessageId(): string {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
 
 function extractClarifyData(result: ClarifyResponse): ClarifyData {
-  // Backend might return { extracted: {...} }, { data: {...} }, or direct fields
   const source = result.extracted || result.data || result;
-  
   return {
     learningGoal: (source as any).learningGoal || '',
     priorKnowledge: (source as any).priorKnowledge || '',
@@ -175,495 +97,294 @@ function extractClarifyData(result: ClarifyResponse): ClarifyData {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// STORE
-// ─────────────────────────────────────────────────────────────────────────────────
-
 export const useSwordDesignerStore = create<DesignerStore>((set, get) => ({
   ...initialState,
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // INITIALIZE
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   initialize: async (topic?: string) => {
-    set({ isLoading: true, error: null });
+    get().abortController?.abort();
+    set({ isLoading: true, error: null, abortController: null });
     
     try {
-      // Check for existing session first
       const existingSession = await getActiveSession();
-      
       if (existingSession) {
-        console.log('[DESIGNER] Found existing session:', existingSession.id, existingSession.phase);
-        // Restore state from existing session
         await restoreSessionState(existingSession, set);
         return;
       }
       
-      // Start new exploration
-      console.log('[DESIGNER] Starting new exploration with topic:', topic);
-      const result = await startExploration(topic);
+      const controller = createStreamController();
+      const streamingMessageId = generateMessageId();
+      let accumulatedText = '';
       
-      set({
-        sessionId: result.sessionId,
-        phase: 'orient',
-        explorationState: result.state,
-        orientMessages: [
-          { role: 'assistant', content: result.message }
-        ],
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('[DESIGNER] Initialize failed:', error);
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to initialize designer',
-      });
-    }
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RESET
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  reset: () => {
-    set(initialState);
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ABANDON
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  abandon: async () => {
-    const { sessionId } = get();
-    
-    if (sessionId) {
-      try {
-        await deleteSession();
-      } catch (error) {
-        console.warn('[DESIGNER] Failed to delete session:', error);
+      const initialMessages: OrientMessage[] = [];
+      if (topic) {
+        initialMessages.push({ id: generateMessageId(), role: 'user', content: `I want to learn ${topic}`, timestamp: new Date() });
+      }
+      initialMessages.push({ id: streamingMessageId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true });
+      
+      set({ phase: 'orient', orientMessages: initialMessages, isStreaming: true, streamingText: '', abortController: controller, isLoading: false });
+      
+      await startExplorationStream(topic, {
+        onToken: (text) => {
+          accumulatedText += text;
+          set((state) => ({
+            streamingText: accumulatedText,
+            orientMessages: state.orientMessages.map(msg => msg.id === streamingMessageId ? { ...msg, content: accumulatedText } : msg),
+          }));
+        },
+        onThinking: (active) => console.log('[DESIGNER] Thinking:', active),
+        onDone: (streamResult) => {
+          set((state) => ({
+            sessionId: streamResult.sessionId,
+            orientMessages: state.orientMessages.map(msg => msg.id === streamingMessageId ? { ...msg, isStreaming: false } : msg),
+            isStreaming: false, streamingText: '', abortController: null,
+          }));
+        },
+        onError: (error) => set({ error, isStreaming: false, abortController: null }),
+      }, controller.signal);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        set({ isLoading: false, isStreaming: false, abortController: null, error: error.message || 'Failed to initialize' });
       }
     }
-    
+  },
+
+  reset: () => { get().abortController?.abort(); set(initialState); },
+  
+  abandon: async () => {
+    const { sessionId, abortController } = get();
+    abortController?.abort();
+    if (sessionId) { try { await deleteSession(); } catch {} }
     set(initialState);
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ORIENT PHASE
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  sendOrientMessage: async (message: string) => {
-    const { sessionId, orientMessages } = get();
-    
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
+  abortStream: () => {
+    const { abortController } = get();
+    if (abortController) {
+      abortController.abort();
+      set({ isStreaming: false, abortController: null, generationProgress: { ...get().generationProgress, status: 'idle' } });
     }
+  },
+
+  sendOrientMessage: async (message: string) => {
+    const { sessionId, orientMessages, abortController: existingController } = get();
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     
-    // Add user message immediately
+    existingController?.abort();
+    const controller = createStreamController();
+    const userMessageId = generateMessageId();
+    const assistantMessageId = generateMessageId();
+    let accumulatedText = '';
+    
     set({
-      orientMessages: [...orientMessages, { role: 'user', content: message }],
-      isLoading: true,
-      error: null,
+      orientMessages: [...orientMessages, 
+        { id: userMessageId, role: 'user', content: message, timestamp: new Date() },
+        { id: assistantMessageId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true },
+      ],
+      isStreaming: true, streamingText: '', abortController: controller, error: null,
     });
     
     try {
-      const result = await exploreChat(sessionId, message);
-      
-      set((state) => ({
-        orientMessages: [
-          ...state.orientMessages,
-          { role: 'assistant', content: result.response }
-        ],
-        explorationState: result.state,
-        isLoading: false,
-      }));
-    } catch (error) {
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to send message',
-      });
+      await exploreChatStream(sessionId, message, {
+        onToken: (text) => {
+          accumulatedText += text;
+          set((state) => ({
+            streamingText: accumulatedText,
+            orientMessages: state.orientMessages.map(msg => msg.id === assistantMessageId ? { ...msg, content: accumulatedText } : msg),
+          }));
+        },
+        onThinking: () => {},
+        onDone: () => {
+          set((state) => ({
+            orientMessages: state.orientMessages.map(msg => msg.id === assistantMessageId ? { ...msg, isStreaming: false } : msg),
+            isStreaming: false, streamingText: '', abortController: null,
+          }));
+        },
+        onError: (error) => {
+          set((state) => ({
+            orientMessages: state.orientMessages.filter(msg => msg.id !== assistantMessageId),
+            error, isStreaming: false, abortController: null,
+          }));
+        },
+      }, controller.signal);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        set({ error: error.message || 'Failed to send message', isStreaming: false, abortController: null });
+      }
     }
   },
 
   confirmOrient: async () => {
     const { sessionId } = get();
-    
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     
     set({ isLoading: true, error: null });
-    
     try {
       const result = await confirmExploration(sessionId);
-      
-      // Extract clarify data from response (handles multiple formats)
       const clarifyData = extractClarifyData(result);
-      
-      // Calculate canFinalize locally
       const canFinalize = !!(clarifyData.learningGoal && clarifyData.priorKnowledge);
-      
-      console.log('[DESIGNER] Confirm orient result:', result);
-      console.log('[DESIGNER] Clarify data:', clarifyData, 'canFinalize:', canFinalize);
-      
-      set({
-        phase: 'clarify',
-        clarifyData,
-        fieldSources: (result as any).fieldSources || {},
-        missingFields: (result as any).missing || [],
-        canFinalize,
-        isLoading: false,
-      });
-    } catch (error) {
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to confirm exploration',
-      });
+      set({ phase: 'clarify', clarifyData, fieldSources: (result as any).fieldSources || {}, missingFields: (result as any).missing || [], canFinalize, isLoading: false });
+    } catch (error: any) {
+      set({ isLoading: false, error: error.message || 'Failed to confirm exploration' });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CLARIFY PHASE
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   updateField: async (field, value) => {
     const { sessionId, clarifyData } = get();
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-    
-    // Optimistic update with local canFinalize calculation
-    const newClarifyData = clarifyData 
-      ? { ...clarifyData, [field]: value }
-      : { learningGoal: '', priorKnowledge: '', context: '', constraints: [], [field]: value };
-    
+    const newClarifyData = clarifyData ? { ...clarifyData, [field]: value } : { learningGoal: '', priorKnowledge: '', context: '', constraints: [], [field]: value };
     const newCanFinalize = !!(newClarifyData.learningGoal && newClarifyData.priorKnowledge);
-    
-    set({
-      clarifyData: newClarifyData,
-      fieldSources: { ...get().fieldSources, [field]: 'user_edited' },
-      canFinalize: newCanFinalize,
-    });
+    set({ clarifyData: newClarifyData, fieldSources: { ...get().fieldSources, [field]: 'user_edited' }, canFinalize: newCanFinalize });
     
     try {
-      // API call - we don't need to use the response for state since we've already updated optimistically
       await updateClarifyField(sessionId, field, value);
-      console.log('[DESIGNER] Field updated:', field, '→', value, 'canFinalize:', newCanFinalize);
-    } catch (error) {
-      // Revert on error
-      set({
-        clarifyData,
-        canFinalize: !!(clarifyData?.learningGoal && clarifyData?.priorKnowledge),
-        error: error instanceof Error ? error.message : 'Failed to update field',
-      });
+    } catch (error: any) {
+      set({ clarifyData, canFinalize: !!(clarifyData?.learningGoal && clarifyData?.priorKnowledge), error: error.message });
     }
   },
 
   updateConstraintsAction: async (constraints) => {
     const { sessionId, clarifyData } = get();
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
+    const newClarifyData = clarifyData ? { ...clarifyData, constraints } : { learningGoal: '', priorKnowledge: '', context: '', constraints };
+    set({ clarifyData: newClarifyData });
     
-    // Optimistic update
-    const newClarifyData = clarifyData 
-      ? { ...clarifyData, constraints }
-      : { learningGoal: '', priorKnowledge: '', context: '', constraints };
-    
-    set({
-      clarifyData: newClarifyData,
-    });
-    
-    try {
-      await updateConstraints(sessionId, constraints);
-      console.log('[DESIGNER] Constraints updated:', constraints);
-    } catch (error) {
-      // Revert on error
-      set({
-        clarifyData,
-        error: error instanceof Error ? error.message : 'Failed to update constraints',
-      });
-    }
+    try { await updateConstraints(sessionId, constraints); } 
+    catch (error: any) { set({ clarifyData, error: error.message }); }
   },
 
-  /**
-   * Finalize clarify → moves to goal phase → auto-generates everything
-   * Flow: POST /explore/continue → POST /goal/generate → GET /review
-   */
   finalizeClarify: async () => {
-    const { sessionId } = get();
+    const { sessionId, abortController: existingController } = get();
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
+    existingController?.abort();
+    const controller = createStreamController();
     
-    set({ 
-      phase: 'goal',
-      isLoading: true, 
-      isGenerating: true,
-      error: null 
+    set({ phase: 'goal', isLoading: true, isGenerating: true, isStreaming: true, abortController: controller, error: null,
+      generationProgress: { stage: '', stageLabel: '', status: 'starting', message: 'Starting plan generation...', progress: 0, stageData: null },
     });
     
     try {
-      // Step 1: Move to goal phase
-      console.log('[DESIGNER] Moving to goal phase...');
       await continueToGoal(sessionId);
       
-      // Step 2: Generate capstone + subskills + routing
-      console.log('[DESIGNER] Generating goal (this may take ~60s)...');
-      const goalResult = await generateGoal(sessionId);
-      
-      set({
-        capstone: goalResult.capstone,
-        subskills: goalResult.subskills || [],
-        routing: goalResult.routing || [],
-      });
-      
-      // Step 3: Get review data with session distribution
-      console.log('[DESIGNER] Loading review data...');
-      const reviewResult = await getReview(sessionId);
-      
-      set({
-        phase: 'skills',
-        reviewData: reviewResult,
-        isLoading: false,
-        isGenerating: false,
-      });
-    } catch (error) {
-      console.error('[DESIGNER] Goal generation failed:', error);
-      set({
-        phase: 'clarify', // Go back to clarify on error
-        isLoading: false,
-        isGenerating: false,
-        error: error instanceof Error ? error.message : 'Failed to generate learning plan',
-      });
+      await generatePlanStream(sessionId, {
+        onProgress: (event: ProgressEvent) => {
+          set({ generationProgress: { stage: event.stage, stageLabel: getStageLabel(event.stage), status: event.status, message: event.message, progress: event.progress ?? 0, stageData: event.data ?? null } });
+        },
+        onDone: (streamResult: PlanGenerationStreamResult) => {
+          set({
+            phase: 'skills', reviewData: streamResult.preview, capstone: streamResult.preview?.capstone || null,
+            subskills: streamResult.preview?.subskills || [], isLoading: false, isGenerating: false, isStreaming: false, abortController: null,
+            generationProgress: { stage: 'complete', stageLabel: 'Complete', status: 'complete', message: 'Your learning plan is ready!', progress: 100, stageData: streamResult.preview },
+          });
+        },
+        onError: (error) => {
+          set({ phase: 'clarify', isLoading: false, isGenerating: false, isStreaming: false, abortController: null, error,
+            generationProgress: { ...get().generationProgress, status: 'error', message: error },
+          });
+        },
+      }, controller.signal);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        set({ phase: 'clarify', isLoading: false, isGenerating: false, isStreaming: false, abortController: null, error: error.message, generationProgress: initialGenerationProgress });
+      }
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SKILLS PHASE (Review)
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   loadReview: async () => {
     const { sessionId } = get();
-    
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-    
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     set({ isLoading: true, error: null });
-    
     try {
       const reviewResult = await getReview(sessionId);
-      
-      set({
-        reviewData: reviewResult,
-        isLoading: false,
-      });
-    } catch (error) {
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to load review',
-      });
+      set({ reviewData: reviewResult, isLoading: false });
+    } catch (error: any) {
+      set({ isLoading: false, error: error.message });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PATH PHASE (Create Plan)
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   confirmSkills: async () => {
     const { sessionId } = get();
-    
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-    
+    if (!sessionId) { set({ error: 'No active session' }); return; }
     set({ isLoading: true, error: null });
-    
     try {
-      console.log('[DESIGNER] Creating plan...');
       const result = await confirmReview(sessionId);
-      
-      set({
-        phase: 'path',
-        plan: result.plan,
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('[DESIGNER] Plan creation failed:', error);
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to create plan',
-      });
+      set({ phase: 'path', plan: result.plan, isLoading: false });
+    } catch (error: any) {
+      set({ isLoading: false, error: error.message });
     }
   },
 
   activateCreatedPlan: async () => {
     const { plan } = get();
-    
-    if (!plan) {
-      set({ error: 'No plan to activate' });
-      return;
-    }
-    
+    if (!plan) { set({ error: 'No plan to activate' }); return; }
     set({ isLoading: true, error: null });
-    
     try {
       await activatePlan(plan.id);
-      console.log('[DESIGNER] Plan activated:', plan.id);
-      
-      // Reset designer state after activation
       set(initialState);
-    } catch (error) {
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to activate plan',
-      });
+    } catch (error: any) {
+      set({ isLoading: false, error: error.message });
     }
   },
 }));
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// HELPER: Restore session state from existing session
-// ─────────────────────────────────────────────────────────────────────────────────
-
-async function restoreSessionState(
-  session: DesignerSession,
-  set: (state: Partial<DesignerStore> | ((state: DesignerStore) => Partial<DesignerStore>)) => void
-) {
-  // Backend uses visiblePhase and internalPhase, NOT phase
+async function restoreSessionState(session: DesignerSession, set: any) {
   const backendPhase = session.internalPhase || session.visiblePhase || session.phase || 'exploration';
-  
-  // Determine frontend phase based on backend state
   let phase = mapBackendPhaseToLocal(backendPhase);
   
-  // Special case: 'exploration' can be either orient or clarify
-  // Check explorationData to determine which one
+  // Check actual exploration state part from backend
   if (backendPhase === 'exploration' && session.explorationData) {
-    // If we have exploration data with learningGoal filled, we're in clarify
-    if (session.explorationData.learningGoal || session.explorationData.readyForCapstone) {
+    const expData = session.explorationData as any;
+    if (expData.part === 'clarify') {
       phase = 'clarify';
     }
   }
   
-  console.log('[DESIGNER] Restoring session to phase:', phase, 'backendPhase:', backendPhase, 'session:', session);
+  const state: any = { sessionId: session.id, phase, isLoading: false, isStreaming: false, abortController: null, generationProgress: initialGenerationProgress };
   
-  // Build base state
-  const state: Partial<DesignerStore> = {
-    sessionId: session.id,
-    phase,
-    isLoading: false,
-  };
-  
-  // Restore capstone from either capstoneData or capstone field
   const capstoneSource = session.capstoneData || session.capstone;
   if (capstoneSource) {
-    state.capstone = {
-      id: (capstoneSource as any).id || session.id,
-      title: (capstoneSource as any).title || '',
-      description: (capstoneSource as any).capstoneStatement || (capstoneSource as any).description || '',
-      successCriteria: (capstoneSource as any).successCriteria || [],
-    };
+    state.capstone = { id: (capstoneSource as any).id || session.id, title: (capstoneSource as any).title || '', description: (capstoneSource as any).capstoneStatement || (capstoneSource as any).description || '', successCriteria: (capstoneSource as any).successCriteria || [] };
   }
   
-  // Restore subskills from either subskillsData or subskills field
   const subskillsSource = session.subskillsData?.subskills || session.subskills;
-  if (subskillsSource && subskillsSource.length > 0) {
-    state.subskills = subskillsSource;
-  }
+  if (subskillsSource && subskillsSource.length > 0) state.subskills = subskillsSource;
   
-  // Restore routing from either routingData or routing field
   const routingSource = session.routingData?.assignments || session.routing;
-  if (routingSource && routingSource.length > 0) {
-    state.routing = routingSource;
-  }
+  if (routingSource && routingSource.length > 0) state.routing = routingSource;
   
-  // Handle clarify phase - use explorationData from session
-  // Always initialize clarifyData when in clarify phase
   if (phase === 'clarify') {
-    const data = session.explorationData || {};
-    state.clarifyData = {
-      learningGoal: data.learningGoal || '',
-      priorKnowledge: data.priorKnowledge || '',
-      context: data.context || '',
-      constraints: data.constraints || [],
+    const expData = session.explorationData as any || {};
+    // Backend stores fields under 'extracted' in exploration_data
+    const extracted = expData.extracted || expData;
+    state.clarifyData = { 
+      learningGoal: extracted.learningGoal || '', 
+      priorKnowledge: extracted.priorKnowledge || '', 
+      context: extracted.context || '', 
+      constraints: extracted.constraints || [] 
     };
-    // Check if we can finalize (learningGoal AND priorKnowledge are required)
     state.canFinalize = !!(state.clarifyData.learningGoal && state.clarifyData.priorKnowledge);
-    console.log('[DESIGNER] Restored clarify data:', state.clarifyData, 'canFinalize:', state.canFinalize);
+    state.fieldSources = expData.fieldSources || {};
+    state.missingFields = expData.missing || [];
   }
   
-  // Handle skills/review phase - fetch review data
   if (phase === 'skills') {
-    try {
-      const reviewResult = await getReview(session.id);
-      state.reviewData = reviewResult;
-    } catch (error) {
-      console.warn('[DESIGNER] Failed to fetch review data:', error);
-    }
+    try { state.reviewData = await getReview(session.id); } catch {}
   }
   
   set(state);
 }
 
-// Map backend phase to local phase
-// Backend internalPhase values: exploration, capstone, subskills, routing
-// Backend visiblePhase values: exploration, define_goal, research, review
 function mapBackendPhaseToLocal(backendPhase: string): DesignerPhase {
   const mapping: Record<string, DesignerPhase> = {
-    // Internal phases
-    'exploration': 'orient',  // Will be overridden to 'clarify' if has explorationData
-    'capstone': 'goal',
-    'subskills': 'goal',
-    'routing': 'skills',
-    
-    // Visible phases
-    'define_goal': 'goal',
-    'research': 'goal',
-    'review': 'skills',
-    
-    // Frontend phases (for completeness)
-    'orient': 'orient',
-    'clarify': 'clarify',
-    'goal': 'goal',
-    'skills': 'skills',
-    'path': 'path',
-    'complete': 'path',
+    'exploration': 'orient', 'capstone': 'goal', 'subskills': 'goal', 'routing': 'skills',
+    'define_goal': 'goal', 'research': 'goal', 'review': 'skills',
+    'orient': 'orient', 'clarify': 'clarify', 'goal': 'goal', 'skills': 'skills', 'path': 'path', 'complete': 'path',
   };
-  
   return mapping[backendPhase] || 'orient';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// SELECTORS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export const selectPhaseIndex = (phase: DesignerPhase): number => {
-  const phases: DesignerPhase[] = ['orient', 'clarify', 'goal', 'skills', 'path'];
-  return phases.indexOf(phase);
-};
-
-export const selectIsPhaseComplete = (currentPhase: DesignerPhase, targetPhase: DesignerPhase): boolean => {
-  return selectPhaseIndex(currentPhase) > selectPhaseIndex(targetPhase);
-};
-
-export const selectPhaseLabel = (phase: DesignerPhase): string => {
-  const labels: Record<DesignerPhase, string> = {
-    'orient': 'Explore',
-    'clarify': 'Clarify',
-    'goal': 'Goal',
-    'skills': 'Skills',
-    'path': 'Path',
-  };
-  return labels[phase];
-};
+export const selectPhaseIndex = (phase: DesignerPhase): number => ['orient', 'clarify', 'goal', 'skills', 'path'].indexOf(phase);
+export const selectIsPhaseComplete = (currentPhase: DesignerPhase, targetPhase: DesignerPhase): boolean => selectPhaseIndex(currentPhase) > selectPhaseIndex(targetPhase);
+export const selectPhaseLabel = (phase: DesignerPhase): string => ({ 'orient': 'Explore', 'clarify': 'Clarify', 'goal': 'Goal', 'skills': 'Skills', 'path': 'Path' })[phase];

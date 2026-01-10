@@ -6,6 +6,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { SwordGate, LessonDesigner, LessonRunner } from '../services/sword/index.js';
 import { ExplorationService } from '../services/sword/lesson-designer/exploration.js';
+import { DailyLessonGenerator } from "../services/sword/lesson-runner/daily-lesson/generator.js";
 import { CapstoneGenerator } from '../services/sword/lesson-designer/capstone.js';
 import { SubskillsGenerator } from '../services/sword/lesson-designer/subskills.js';
 import { RoutingGenerator } from '../services/sword/lesson-designer/routing.js';
@@ -14,6 +15,8 @@ import { AssessmentHandler } from '../services/sword/lesson-runner/router/assess
 import { SparkGenerator } from '../services/sword/spark/index.js';
 import { getSupabase } from '../db/index.js';
 import { mapSubskillAssessment } from '../services/sword/lesson-runner/types.js';
+import { SSEWriter, createTokenCallback, createThinkingCallback, createProgressCallback } from "../services/sword/llm/streaming-utils.js";
+import { PlanGeneratorStreaming } from "../services/sword/lesson-designer/plan-generator-streaming.js";
 import {
   StartDesignerSchema,
   ExplorationMessageSchema,
@@ -2055,5 +2058,136 @@ router.get('/sparks', async (req: Request, res: Response, next: NextFunction) =>
 // ─────────────────────────────────────────────────────────────────────────────────
 // EXPORT
 // ─────────────────────────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// STREAMING ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Start exploration with streaming
+ * POST /sword/explore/start/stream
+ */
+router.post('/explore/start/stream', async (req: Request, res: Response, next: NextFunction) => {
+  const writer = new SSEWriter(res);
+  
+  try {
+    const userId = getUserId(req);
+    let { sessionId, topic } = req.body;
+    
+    if (!sessionId) {
+      const existingSession = await LessonDesigner.getActiveSession(userId);
+      if (existingSession) {
+        sessionId = existingSession.id;
+      } else {
+        const newSession = await LessonDesigner.startSession(userId, topic || 'New Learning Goal');
+        sessionId = newSession.id;
+      }
+    }
+
+    const result = await ExplorationService.startStream(
+      sessionId,
+      topic,
+      createTokenCallback(writer),
+      createThinkingCallback(writer)
+    );
+
+    writer.sendDone({ sessionId, state: result.state });
+    writer.close();
+  } catch (error: any) {
+    console.error('[EXPLORE_STREAM] Start error:', error);
+    writer.sendError('STREAM_ERROR', error.message);
+    writer.close();
+  }
+});
+
+/**
+ * Chat in Orient phase with streaming
+ * POST /sword/explore/chat/stream
+ */
+router.post('/explore/chat/stream', async (req: Request, res: Response, next: NextFunction) => {
+  const writer = new SSEWriter(res);
+  
+  try {
+    const { sessionId, message } = req.body;
+    
+    if (!sessionId || !message) {
+      writer.sendError('VALIDATION_ERROR', 'sessionId and message required');
+      writer.close();
+      return;
+    }
+
+    const result = await ExplorationService.chatStream(
+      sessionId,
+      message,
+      createTokenCallback(writer),
+      createThinkingCallback(writer)
+    );
+
+    writer.sendDone({ response: result.response, state: result.state });
+    writer.close();
+  } catch (error: any) {
+    console.error('[EXPLORE_STREAM] Chat error:', error);
+    writer.sendError('STREAM_ERROR', error.message);
+    writer.close();
+  }
+});
+
+/**
+ * Generate plan with streaming progress
+ * POST /sword/designer/generate/stream
+ */
+router.post('/designer/generate/stream', async (req: Request, res: Response, next: NextFunction) => {
+  const writer = new SSEWriter(res);
+  
+  try {
+    const userId = getUserId(req);
+
+    const result = await PlanGeneratorStreaming.run(
+      userId,
+      createProgressCallback(writer)
+    );
+
+    writer.sendDone({ session: result.session, preview: result.preview });
+    writer.close();
+  } catch (error: any) {
+    console.error('[DESIGNER_STREAM] Generate error:', error);
+    writer.sendError('STREAM_ERROR', error.message);
+    writer.close();
+  }
+});
+
+/**
+ * Start session with streaming lesson generation
+ * POST /sword/runner/session/stream
+ */
+router.post('/runner/session/stream', async (req: Request, res: Response, next: NextFunction) => {
+  const writer = new SSEWriter(res);
+  
+  try {
+    const userId = getUserId(req);
+    const { subskillId } = req.body;
+    
+    if (!subskillId) {
+      writer.sendError('VALIDATION_ERROR', 'subskillId required');
+      writer.close();
+      return;
+    }
+
+    const result = await DailyLessonGenerator.startStream(
+      userId,
+      subskillId,
+      createTokenCallback(writer),
+      createThinkingCallback(writer)
+    );
+
+    writer.sendDone({ dailyLesson: result.dailyLesson, previousSummaries: result.previousSummaries });
+    writer.close();
+  } catch (error: any) {
+    console.error('[RUNNER_STREAM] Session error:', error);
+    writer.sendError('STREAM_ERROR', error.message);
+    writer.close();
+  }
+});
 
 export { router as swordRoutes };

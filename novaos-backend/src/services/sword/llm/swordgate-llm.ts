@@ -1,13 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SWORDGATE LLM — Gemini 3 Pro Integration
-// Configurable LLM for SwordGate exploration and learning flows
+// SWORDGATE LLM — Gemini 3 Pro Integration WITH STREAMING
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { GoogleGenAI } from '@google/genai';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────────────────────────────────────────
+import type { OnTokenCallback, OnThinkingCallback } from './streaming-utils.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -26,40 +22,24 @@ export interface ChatResponse {
   thinkingLevel: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// CLIENT SINGLETON
-// ─────────────────────────────────────────────────────────────────────────────────
-
 let client: GoogleGenAI | null = null;
 
 function getClient(): GoogleGenAI {
   if (!client) {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('[SWORDGATE_LLM] GEMINI_API_KEY not set');
-    }
+    if (!apiKey) throw new Error('[SWORDGATE_LLM] GEMINI_API_KEY not set');
     client = new GoogleGenAI({ apiKey });
   }
   return client;
 }
 
-/**
- * Check if SwordGate LLM is available
- */
 export function isAvailable(): boolean {
   return !!process.env.GEMINI_API_KEY;
 }
 
-/**
- * Reset client (for testing)
- */
 export function resetClient(): void {
   client = null;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONFIGURATION
-// ─────────────────────────────────────────────────────────────────────────────────
 
 function getModel(): string {
   return process.env.SWORDGATE_LLM_MODEL || 'gemini-3-pro-preview';
@@ -67,147 +47,135 @@ function getModel(): string {
 
 function getDefaultThinkingLevel(): 'low' | 'high' {
   const level = process.env.SWORDGATE_LLM_THINKING_LEVEL;
-  if (level === 'low' || level === 'high') {
-    return level;
-  }
-  return 'high'; // Default to high for complex reasoning
+  return (level === 'low' || level === 'high') ? level : 'high';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// MAIN CHAT FUNCTION
-// ─────────────────────────────────────────────────────────────────────────────────
+function buildContents(messages: Message[]): any[] {
+  const systemMessage = messages.find(m => m.role === 'system')?.content;
+  const conversationMessages = messages.filter(m => m.role !== 'system');
+  if (conversationMessages.length === 0) throw new Error('[SWORDGATE_LLM] No user/assistant messages');
 
-/**
- * Send a chat request to Gemini 3 Pro
- * 
- * @param messages - Array of messages (system, user, assistant)
- * @param options - Optional configuration
- * @returns Response text
- * @throws Error if API call fails
- */
-export async function chat(
-  messages: Message[],
-  options: ChatOptions = {}
-): Promise<ChatResponse> {
+  const contents = conversationMessages.map((msg, index) => {
+    let text = msg.content;
+    if (index === 0 && systemMessage && msg.role === 'user') text = `${systemMessage}\n\n${text}`;
+    return { role: msg.role === 'assistant' ? 'model' : 'user', parts: [{ text }] };
+  });
+
+  if (contents[0]?.role === 'model' && systemMessage) {
+    contents.unshift({ role: 'user', parts: [{ text: systemMessage }] });
+  }
+  return contents;
+}
+
+export async function chat(messages: Message[], options: ChatOptions = {}): Promise<ChatResponse> {
   const ai = getClient();
   const model = getModel();
   const thinkingLevel = options.thinkingLevel || getDefaultThinkingLevel();
-
-  // Extract system message (Gemini doesn't have system role, prepend to first user message)
-  const systemMessage = messages.find(m => m.role === 'system')?.content;
-  const conversationMessages = messages.filter(m => m.role !== 'system');
-
-  if (conversationMessages.length === 0) {
-    throw new Error('[SWORDGATE_LLM] No user/assistant messages provided');
-  }
-
-  // Convert to Gemini format
-  // Gemini uses 'user' and 'model' roles
-  const contents = conversationMessages.map((msg, index) => {
-    let text = msg.content;
-    
-    // Prepend system message to first user message
-    if (index === 0 && systemMessage && msg.role === 'user') {
-      text = `${systemMessage}\n\n${text}`;
-    }
-
-    return {
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text }],
-    };
-  });
-
-  // If first message isn't from user (e.g., system-only), prepend system as user
-  if (contents[0]?.role === 'model' && systemMessage) {
-    contents.unshift({
-      role: 'user',
-      parts: [{ text: systemMessage }],
-    });
-  }
+  const contents = buildContents(messages);
 
   console.log(`[SWORDGATE_LLM] Calling ${model} with thinkingLevel=${thinkingLevel}`);
 
-  try {
-    const response = await ai.models.generateContent({
-      model,
-      contents,
-      config: {
-        thinkingConfig: {
-          thinkingLevel: thinkingLevel as any, // Cast string to ThinkingLevel enum
-        },
-        temperature: options.temperature,
-        maxOutputTokens: options.maxTokens,
-      },
-    });
+  const response = await ai.models.generateContent({
+    model, contents,
+    config: {
+      thinkingConfig: { thinkingLevel: thinkingLevel as any },
+      temperature: options.temperature,
+      maxOutputTokens: options.maxTokens,
+    },
+  });
 
-    const text = response.text;
-    
-    if (!text) {
-      throw new Error('[SWORDGATE_LLM] Empty response from Gemini');
-    }
-
-    console.log(`[SWORDGATE_LLM] Response received (${text.length} chars)`);
-
-    return {
-      text,
-      model,
-      thinkingLevel,
-    };
-  } catch (error) {
-    console.error('[SWORDGATE_LLM] API error:', error);
-    throw error; // Re-throw - no fallback
-  }
+  const text = response.text;
+  if (!text) throw new Error('[SWORDGATE_LLM] Empty response');
+  console.log(`[SWORDGATE_LLM] Response received (${text.length} chars)`);
+  return { text, model, thinkingLevel };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// CONVENIENCE FUNCTIONS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Simple single-turn chat with system prompt
- */
-export async function generate(
-  systemPrompt: string,
-  userMessage: string,
-  options: ChatOptions = {}
+export async function chatStream(
+  messages: Message[],
+  onToken: OnTokenCallback,
+  options: ChatOptions = {},
+  onThinking?: OnThinkingCallback
 ): Promise<string> {
-  const response = await chat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userMessage },
-  ], options);
-  
+  const ai = getClient();
+  const model = getModel();
+  const thinkingLevel = options.thinkingLevel || getDefaultThinkingLevel();
+  const contents = buildContents(messages);
+
+  console.log(`[SWORDGATE_LLM] Streaming ${model} with thinkingLevel=${thinkingLevel}`);
+
+  if (thinkingLevel === 'high' && onThinking) onThinking(true);
+
+  const response = await ai.models.generateContentStream({
+    model, contents,
+    config: {
+      thinkingConfig: { thinkingLevel: thinkingLevel as any },
+      temperature: options.temperature,
+      maxOutputTokens: options.maxTokens,
+    },
+  });
+
+  let fullText = '';
+  let thinkingEnded = false;
+
+  for await (const chunk of response) {
+    const text = chunk.text;
+    if (text) {
+      if (!thinkingEnded && thinkingLevel === 'high' && onThinking) {
+        onThinking(false);
+        thinkingEnded = true;
+      }
+      fullText += text;
+      onToken(text);
+    }
+  }
+
+  if (!thinkingEnded && thinkingLevel === 'high' && onThinking) onThinking(false);
+  console.log(`[SWORDGATE_LLM] Stream complete (${fullText.length} chars)`);
+  return fullText;
+}
+
+export async function generate(systemPrompt: string, userMessage: string, options: ChatOptions = {}): Promise<string> {
+  const response = await chat([{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }], options);
   return response.text;
 }
 
-/**
- * Multi-turn conversation
- */
 export async function converse(
   systemPrompt: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   newMessage: string,
   options: ChatOptions = {}
 ): Promise<string> {
-  const messages: Message[] = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: newMessage },
-  ];
-
+  const messages: Message[] = [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: newMessage }];
   const response = await chat(messages, options);
   return response.text;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// EXPORTS
-// ─────────────────────────────────────────────────────────────────────────────────
+export async function generateStream(
+  systemPrompt: string,
+  userMessage: string,
+  onToken: OnTokenCallback,
+  options: ChatOptions = {},
+  onThinking?: OnThinkingCallback
+): Promise<string> {
+  return chatStream([{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }], onToken, options, onThinking);
+}
+
+export async function converseStream(
+  systemPrompt: string,
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  newMessage: string,
+  onToken: OnTokenCallback,
+  options: ChatOptions = {},
+  onThinking?: OnThinkingCallback
+): Promise<string> {
+  const messages: Message[] = [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: newMessage }];
+  return chatStream(messages, onToken, options, onThinking);
+}
 
 export const SwordGateLLM = {
-  chat,
-  generate,
-  converse,
-  isAvailable,
-  resetClient,
+  chat, generate, converse,
+  chatStream, generateStream, converseStream,
+  isAvailable, resetClient,
 };
 
 export default SwordGateLLM;

@@ -1,403 +1,225 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// LESSON STORE — NovaOS
-// Wired to real API endpoints
+// LESSON STORE — NovaOS WITH STREAMING
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
 import {
-  getToday,
-  getCurrentSpark,
-  completeSpark as completeSparkApi,
-  skipSpark as skipSparkApi,
-  generateSpark,
-  getPlans,
-  startSubskill,
-  type TodayState,
-  type Spark as ApiSpark,
-  type Subskill,
-  type LearningPlan,
+  getToday, getCurrentSpark, completeSpark as completeSparkApi, skipSpark as skipSparkApi,
+  generateSpark, getPlans, startSubskill,
+  type TodayState, type Spark as ApiSpark, type Subskill, type LearningPlan, type DailyLesson,
 } from '../api/sword';
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// TYPES (Preserved for UI compatibility)
-// ─────────────────────────────────────────────────────────────────────────────────
+import { startSessionStream, createStreamController, type SessionStreamResult } from '../api/sword-streaming';
 
 export type LessonStatus = 'locked' | 'available' | 'in_progress' | 'completed';
 
-export interface Spark {
-  id: string;
-  task: string;
-  estimatedMinutes: number;
-  context?: string;
-}
+export interface Spark { id: string; task: string; estimatedMinutes: number; context?: string; }
+export interface Lesson { id: string; title: string; description: string; progress: number; status: LessonStatus; totalSessions: number; completedSessions: number; emoji: string; }
+export interface Milestone { id: string; title: string; completed: boolean; }
+export interface LearningPath { id: string; goal: string; progress: number; milestones: Milestone[]; }
+export interface LearningStats { totalLessonsCompleted: number; totalSessionsCompleted: number; currentStreak: number; sparksCompletedToday: number; }
+export interface SessionGeneration { isGenerating: boolean; isStreaming: boolean; streamingText: string; progress: number; statusMessage: string; }
 
-export interface Lesson {
-  id: string;
-  title: string;
-  description: string;
-  progress: number; // 0-1
-  status: LessonStatus;
-  totalSessions: number;
-  completedSessions: number;
-  emoji: string;
-}
-
-export interface Milestone {
-  id: string;
-  title: string;
-  completed: boolean;
-}
-
-export interface LearningPath {
-  id: string;
-  goal: string;
-  progress: number; // 0-1
-  milestones: Milestone[];
-}
-
-export interface LearningStats {
-  totalLessonsCompleted: number;
-  totalSessionsCompleted: number;
-  currentStreak: number;
-  sparksCompletedToday: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// DEFAULT VALUES
-// ─────────────────────────────────────────────────────────────────────────────────
-
-const DEFAULT_STATS: LearningStats = {
-  totalLessonsCompleted: 0,
-  totalSessionsCompleted: 0,
-  currentStreak: 0,
-  sparksCompletedToday: 0,
-};
-
-// ─────────────────────────────────────────────────────────────────────────────────
-// TYPE MAPPERS (API → UI)
-// ─────────────────────────────────────────────────────────────────────────────────
+const DEFAULT_STATS: LearningStats = { totalLessonsCompleted: 0, totalSessionsCompleted: 0, currentStreak: 0, sparksCompletedToday: 0 };
+const DEFAULT_SESSION_GENERATION: SessionGeneration = { isGenerating: false, isStreaming: false, streamingText: '', progress: 0, statusMessage: '' };
 
 function mapApiSparkToSpark(apiSpark: ApiSpark | null | undefined): Spark | null {
   if (!apiSpark) return null;
-  
-  return {
-    id: apiSpark.id,
-    task: apiSpark.task,
-    estimatedMinutes: apiSpark.estimatedMinutes || 3,
-    context: apiSpark.context || apiSpark.subskillId,
-  };
+  return { id: apiSpark.id, task: apiSpark.task, estimatedMinutes: apiSpark.estimatedMinutes || 3, context: apiSpark.context || apiSpark.subskillId };
 }
 
-/**
- * Maps API Subskill status (8 values) to UI LessonStatus (4 values)
- */
 function mapApiStatusToLessonStatus(apiStatus: Subskill['status']): LessonStatus {
   switch (apiStatus) {
-    case 'completed':
-    case 'mastered':
-      return 'completed';
-    case 'in_progress':
-    case 'active':
-      return 'in_progress';
-    case 'available':
-      return 'available';
-    case 'locked':
-    case 'pending':
-    case 'skipped':
-    default:
-      return 'locked';
+    case 'completed': case 'mastered': return 'completed';
+    case 'in_progress': case 'active': return 'in_progress';
+    case 'available': return 'available';
+    default: return 'locked';
   }
 }
 
 function mapSubskillToLesson(subskill: Subskill, index: number): Lesson {
-  // Generate emoji based on order/type
   const emojis = ['🎯', '📚', '🧩', '💡', '🔧', '🎨', '🚀', '⚡', '🌟', '🎸'];
-  
   return {
-    id: subskill.id,
-    title: subskill.title,
-    description: subskill.description,
-    progress: subskill.progress,
-    status: mapApiStatusToLessonStatus(subskill.status),
-    totalSessions: subskill.totalSessions,
-    completedSessions: subskill.completedSessions ?? 0,
-    emoji: emojis[index % emojis.length],
+    id: subskill.id, title: subskill.title, description: subskill.description, progress: subskill.progress,
+    status: mapApiStatusToLessonStatus(subskill.status), totalSessions: subskill.totalSessions,
+    completedSessions: subskill.completedSessions ?? 0, emoji: emojis[index % emojis.length],
   };
 }
 
 function mapPlanToPath(plan: LearningPlan | null | undefined): LearningPath | null {
   if (!plan) return null;
-  
-  // Create milestones from subskills
-  const milestones: Milestone[] = plan.subskills?.map(subskill => ({
-    id: subskill.id,
-    title: subskill.title,
-    completed: subskill.status === 'completed',
-  })) || [];
-  
-  return {
-    id: plan.id,
-    goal: plan.capstone?.title || plan.title,
-    progress: plan.progress ?? 0,
-    milestones,
-  };
+  const milestones: Milestone[] = plan.subskills?.map(s => ({ id: s.id, title: s.title, completed: s.status === 'completed' })) || [];
+  return { id: plan.id, goal: plan.capstone?.title || plan.title, progress: plan.progress ?? 0, milestones };
 }
 
 function mapTodayToStats(today: TodayState | null): LearningStats {
   if (!today) return DEFAULT_STATS;
-  
   const plan = today.plan;
   const completedSubskills = plan?.subskills?.filter(s => s.status === 'completed').length || 0;
   const totalSessions = plan?.subskills?.reduce((sum, s) => sum + (s.completedSessions ?? 0), 0) || 0;
-  
   return {
-    totalLessonsCompleted: completedSubskills,
-    totalSessionsCompleted: totalSessions,
-    currentStreak: today.progress?.streak || 0,
-    sparksCompletedToday: today.progress?.completedToday || 0,
+    totalLessonsCompleted: completedSubskills, totalSessionsCompleted: totalSessions,
+    currentStreak: today.progress?.streak || 0, sparksCompletedToday: today.progress?.completedToday || 0,
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// STORE
-// ─────────────────────────────────────────────────────────────────────────────────
-
 interface LessonStore {
-  // State
   currentSpark: Spark | null;
   lessons: Lesson[];
   activePath: LearningPath | null;
   stats: LearningStats;
   isLoading: boolean;
   error: string | null;
-  
-  /** Track if data has been fetched at least once */
   isInitialized: boolean;
-  
-  /** Raw API data for advanced use */
   _rawTodayState: TodayState | null;
   _rawPlan: LearningPlan | null | undefined;
+  sessionGeneration: SessionGeneration;
+  currentDailyLesson: DailyLesson | null;
+  abortController: AbortController | null;
 
-  // Actions
   fetchLessons: () => Promise<void>;
   completeSpark: (sparkId: string) => Promise<void>;
   skipSpark: (sparkId: string, reason?: string) => Promise<void>;
   startLesson: (lessonId: string) => Promise<void>;
   continueLesson: (lessonId: string) => void;
-  
-  /** Generate a new spark */
   refreshSpark: () => Promise<void>;
-  
-  /** Clear error */
+  startSessionWithStreaming: (subskillId: string) => Promise<DailyLesson | null>;
+  abortSessionGeneration: () => void;
   clearError: () => void;
+  reset: () => void;
 }
 
 export const useLessonStore = create<LessonStore>((set, get) => ({
-  // Initial state
-  currentSpark: null,
-  lessons: [],
-  activePath: null,
-  stats: DEFAULT_STATS,
-  isLoading: false,
-  error: null,
-  isInitialized: false,
-  _rawTodayState: null,
-  _rawPlan: null,
+  currentSpark: null, lessons: [], activePath: null, stats: DEFAULT_STATS, isLoading: false,
+  error: null, isInitialized: false, _rawTodayState: null, _rawPlan: null,
+  sessionGeneration: DEFAULT_SESSION_GENERATION, currentDailyLesson: null, abortController: null,
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // FETCH LESSONS — GET /sword/today + /sword/plans
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   fetchLessons: async () => {
-    // Don't refetch if already loading
     if (get().isLoading) return;
-    
     set({ isLoading: true, error: null });
-    
     try {
-      // Fetch today's state
       const today = await getToday();
-      
-      // Get current spark
       const apiSpark = today.currentSpark || await getCurrentSpark();
-      
-      // Get plan details for lessons
       let plan: LearningPlan | undefined = today.plan;
       if (!plan && today.hasActivePlan) {
-        // Fetch plans if not included in today response
         const plans = await getPlans();
         plan = plans.find(p => p.status === 'active');
       }
-      
-      // Map API data to UI types
-      const currentSpark = mapApiSparkToSpark(apiSpark);
-      const lessons = plan?.subskills?.map((s, i) => mapSubskillToLesson(s, i)) || [];
-      const activePath = mapPlanToPath(plan);
-      const stats = mapTodayToStats(today);
-      
       set({
-        currentSpark,
-        lessons,
-        activePath,
-        stats,
-        isLoading: false,
-        isInitialized: true,
-        _rawTodayState: today,
-        _rawPlan: plan,
+        currentSpark: mapApiSparkToSpark(apiSpark),
+        lessons: plan?.subskills?.map((s, i) => mapSubskillToLesson(s, i)) || [],
+        activePath: mapPlanToPath(plan),
+        stats: mapTodayToStats(today),
+        isLoading: false, isInitialized: true, _rawTodayState: today, _rawPlan: plan,
       });
-    } catch (error) {
-      console.error('[LESSON_STORE] Fetch failed:', error);
-      
-      set({
-        isLoading: false,
-        isInitialized: true,
-        error: error instanceof Error ? error.message : 'Failed to fetch lessons',
-      });
+    } catch (error: any) {
+      set({ isLoading: false, isInitialized: true, error: error.message || 'Failed to fetch lessons' });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // COMPLETE SPARK — POST /sword/spark/:id/complete
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   completeSpark: async (sparkId: string) => {
     const { stats } = get();
-    
-    // Optimistic update
-    set({
-      currentSpark: null,
-      stats: {
-        ...stats,
-        sparksCompletedToday: stats.sparksCompletedToday + 1,
-      },
-    });
-    
+    set({ currentSpark: null, stats: { ...stats, sparksCompletedToday: stats.sparksCompletedToday + 1 } });
     try {
       await completeSparkApi(sparkId);
-      
-      // Generate next spark
       const nextSpark = await generateSpark();
       set({ currentSpark: mapApiSparkToSpark(nextSpark) });
-    } catch (error) {
-      console.error('[LESSON_STORE] Complete spark failed:', error);
-      
-      // Revert optimistic update on error
-      set({
-        stats: {
-          ...stats,
-          sparksCompletedToday: stats.sparksCompletedToday, // revert
-        },
-        error: error instanceof Error ? error.message : 'Failed to complete spark',
-      });
+    } catch (error: any) {
+      set({ stats: { ...stats, sparksCompletedToday: stats.sparksCompletedToday }, error: error.message });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SKIP SPARK — POST /sword/spark/:id/skip
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   skipSpark: async (sparkId: string, reason?: string) => {
-    // Optimistic update
     set({ currentSpark: null });
-    
     try {
       await skipSparkApi(sparkId, reason);
-      
-      // Generate next spark
       const nextSpark = await generateSpark();
       set({ currentSpark: mapApiSparkToSpark(nextSpark) });
-    } catch (error) {
-      console.error('[LESSON_STORE] Skip spark failed:', error);
-      
-      set({
-        error: error instanceof Error ? error.message : 'Failed to skip spark',
-      });
+    } catch (error: any) {
+      set({ error: error.message });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // START LESSON — POST /sword/subskills/:id/start
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   startLesson: async (lessonId: string) => {
     const { lessons } = get();
-    
-    // Optimistic update
-    set({
-      lessons: lessons.map(lesson =>
-        lesson.id === lessonId
-          ? { ...lesson, status: 'in_progress' as LessonStatus }
-          : lesson
-      ),
-    });
-    
-    try {
-      await startSubskill(lessonId);
-    } catch (error) {
-      console.error('[LESSON_STORE] Start lesson failed:', error);
-      
-      // Revert optimistic update
-      set({
-        lessons,
-        error: error instanceof Error ? error.message : 'Failed to start lesson',
-      });
-    }
+    set({ lessons: lessons.map(l => l.id === lessonId ? { ...l, status: 'in_progress' as LessonStatus } : l) });
+    try { await startSubskill(lessonId); }
+    catch (error: any) { set({ lessons, error: error.message }); }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CONTINUE LESSON — UI Navigation action
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  continueLesson: (lessonId: string) => {
-    // This triggers navigation to SwordRunner
-    // The actual navigation is handled by the component using useUIStore
-    console.log(`[LESSON_STORE] Continue lesson: ${lessonId}`);
-  },
+  continueLesson: (lessonId: string) => { console.log(`[LESSON_STORE] Continue lesson: ${lessonId}`); },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // REFRESH SPARK — POST /sword/spark (generate new)
-  // ═══════════════════════════════════════════════════════════════════════════
-  
   refreshSpark: async () => {
     try {
       const newSpark = await generateSpark();
       set({ currentSpark: mapApiSparkToSpark(newSpark) });
-    } catch (error) {
-      console.error('[LESSON_STORE] Refresh spark failed:', error);
-      
-      set({
-        error: error instanceof Error ? error.message : 'Failed to generate spark',
-      });
+    } catch (error: any) {
+      set({ error: error.message });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CLEAR ERROR
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  clearError: () => {
-    set({ error: null });
+  startSessionWithStreaming: async (subskillId: string): Promise<DailyLesson | null> => {
+    get().abortController?.abort();
+    const controller = createStreamController();
+    
+    set({
+      sessionGeneration: { isGenerating: true, isStreaming: true, streamingText: '', progress: 0, statusMessage: 'Preparing your lesson...' },
+      currentDailyLesson: null, abortController: controller, error: null,
+    });
+    
+    try {
+      let accumulatedText = '';
+      let resultLesson: DailyLesson | null = null;
+      
+      await startSessionStream(subskillId, {
+        onToken: (text) => {
+          accumulatedText += text;
+          set((state) => ({ sessionGeneration: { ...state.sessionGeneration, streamingText: accumulatedText, statusMessage: 'Generating lesson content...' } }));
+        },
+        onThinking: (active) => {
+          set((state) => ({ sessionGeneration: { ...state.sessionGeneration, statusMessage: active ? 'Thinking...' : 'Generating...' } }));
+        },
+        onDone: (streamResult: SessionStreamResult) => {
+          resultLesson = streamResult.dailyLesson;
+          set({
+            currentDailyLesson: streamResult.dailyLesson,
+            sessionGeneration: { isGenerating: false, isStreaming: false, streamingText: '', progress: 100, statusMessage: 'Lesson ready!' },
+            abortController: null,
+          });
+        },
+        onError: (error) => { set({ error, sessionGeneration: DEFAULT_SESSION_GENERATION, abortController: null }); },
+      }, controller.signal);
+      
+      return resultLesson;
+    } catch (error: any) {
+      if (error.name !== 'AbortError') set({ error: error.message });
+      set({ sessionGeneration: DEFAULT_SESSION_GENERATION, abortController: null });
+      return null;
+    }
+  },
+
+  abortSessionGeneration: () => {
+    const { abortController } = get();
+    if (abortController) {
+      abortController.abort();
+      set({ sessionGeneration: DEFAULT_SESSION_GENERATION, abortController: null });
+    }
+  },
+
+  clearError: () => { set({ error: null }); },
+
+  reset: () => {
+    get().abortController?.abort();
+    set({
+      currentSpark: null, lessons: [], activePath: null, stats: DEFAULT_STATS, isLoading: false,
+      error: null, isInitialized: false, _rawTodayState: null, _rawPlan: null,
+      sessionGeneration: DEFAULT_SESSION_GENERATION, currentDailyLesson: null, abortController: null,
+    });
   },
 }));
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// SELECTORS
-// ─────────────────────────────────────────────────────────────────────────────────
-
-export const selectHasActivePlan = (state: { activePath: LearningPath | null }) =>
-  state.activePath !== null;
-
-export const selectCurrentLesson = (state: { lessons: Lesson[] }) =>
-  state.lessons.find(l => l.status === 'in_progress') || null;
-
-export const selectAvailableLessons = (state: { lessons: Lesson[] }) =>
-  state.lessons.filter(l => l.status === 'available' || l.status === 'in_progress');
-
-export const selectCompletedLessons = (state: { lessons: Lesson[] }) =>
-  state.lessons.filter(l => l.status === 'completed');
-
-export const selectOverallProgress = (state: { lessons: Lesson[] }) => {
-  if (state.lessons.length === 0) return 0;
-  const total = state.lessons.reduce((sum, l) => sum + l.progress, 0);
-  return total / state.lessons.length;
-};
+export const selectHasActivePlan = (state: { activePath: LearningPath | null }) => state.activePath !== null;
+export const selectCurrentLesson = (state: { lessons: Lesson[] }) => state.lessons.find(l => l.status === 'in_progress') || null;
+export const selectAvailableLessons = (state: { lessons: Lesson[] }) => state.lessons.filter(l => l.status === 'available' || l.status === 'in_progress');
+export const selectCompletedLessons = (state: { lessons: Lesson[] }) => state.lessons.filter(l => l.status === 'completed');
+export const selectOverallProgress = (state: { lessons: Lesson[] }) => state.lessons.length === 0 ? 0 : state.lessons.reduce((sum, l) => sum + l.progress, 0) / state.lessons.length;
+export const selectIsGeneratingSession = (state: { sessionGeneration: SessionGeneration }) => state.sessionGeneration.isGenerating;
